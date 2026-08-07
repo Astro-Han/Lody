@@ -2675,10 +2675,18 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     ) {
       await this.setStatus(SessionStatusFactory.idle());
     }
-    await this.unloadDocRoom(this.roomId);
+    // Release the repo room BEFORE evicting the doc. loro-repo binds the
+    // `LoroDoc` instance into a room's transport attachment once, at attach
+    // time, and `unloadDoc` does not detach rooms — so unloading first leaves
+    // every still-attached transport (the cloud one included) syncing the
+    // orphan. Rooms are ref-counted, so if any other holder keeps this room
+    // open that binding never re-attaches and is stranded permanently.
+    // Nothing is lost by releasing first: `setStatus` above writes through
+    // `repo.upsertDocMeta`, i.e. the meta room, not this doc's room.
     this.docSub?.unsubscribe();
     this.docSub = null;
     this.docBinding = null;
+    await this.unloadDocRoom(this.roomId);
     this.detachDocRoomStatusListener?.();
     this.detachDocRoomStatusListener = null;
     this.docRoomStatusListeners.clear();

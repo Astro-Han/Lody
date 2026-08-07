@@ -44,6 +44,7 @@ import { LoroDoc } from 'loro-crdt';
 import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
 import { LocalLoroDataPlaneServer } from '../src/local-loro-data-plane-server';
 import {
+  base64ToBytes,
   bytesToBase64,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   type LocalLoroDataPlaneClientMessage,
@@ -684,5 +685,104 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       expect(text(reloaded)).toBe('from-peer');
       expect(text(evicted)).toBe('');
     });
+
+    // The generation check inside `ensureRoom` only covers the window BEFORE the
+    // entry is installed. An invalidation landing between `rooms.set` and the
+    // awaiting caller resuming would hand back an already-dead entry, which is
+    // worse than the bug this class fixes: `handleJoin` registers the peer on
+    // it, `buildJoinReplyFrames` then finds no room and emits nothing, and the
+    // client is parked on `connecting` forever — not a terminal status, so the
+    // renderer's reconnect loop never fires either.
+    //
+    // The install and the caller's resumption are one microtask apart, so
+    // rather than guess that distance (scheduler luck, and a test that silently
+    // stops covering anything when the code shifts by a hop), sweep the
+    // invalidation across a fixed range of microtask depths and require the
+    // invariant to hold at every one. Deterministic: same depths every run.
+    for (const depth of [0, 1, 2, 3, 4, 5, 6, 7]) {
+      it(`answers a join whose room is invalidated ${depth} microtask(s) into the build`, async () => {
+        const tasks: Array<() => void | Promise<void>> = [];
+        const currentDocs = new Map<string, LoroDoc>();
+        let armed = true;
+        const engine = new LocalLoroDataPlaneServer({
+          workspaceId: 'ws',
+          resolveDoc: async (docId) => {
+            const doc = currentDocs.get(docId);
+            if (!doc) throw new Error(`no doc ${docId}`);
+            if (armed) {
+              armed = false;
+              let chain = Promise.resolve();
+              for (let hop = 0; hop < depth; hop += 1) {
+                chain = chain.then(() => undefined);
+              }
+              void chain.then(() => {
+                const reloaded = new LoroDoc();
+                reloaded.import(doc.export({ mode: 'snapshot' }));
+                currentDocs.set(docId, reloaded);
+                engine.invalidateDocRoom(docId);
+              });
+            }
+            return doc;
+          },
+          resolveFlockDoc: async () => new MemoryFlock(),
+          scheduler: {
+            scheduleDataWork: (work) => {
+              tasks.push(work);
+              return () => {};
+            },
+          },
+        });
+
+        const seeded = new LoroDoc();
+        insert(seeded, 0, 'seed');
+        currentDocs.set('doc-1', seeded);
+
+        const frames: LocalLoroDataPlaneServerMessage[] = [];
+        const connection = {
+          id: 'dp:1',
+          send: (frame: LocalLoroDataPlaneServerMessage) => {
+            frames.push(frame);
+          },
+        };
+        await engine.handleMessage(connection, {
+          type: 'join',
+          protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+          requestId: 'join:1',
+          workspaceId: 'ws',
+          peerId: 'renderer:1',
+          room: { scope: 'doc', docId: 'doc-1' },
+        });
+        for (const task of tasks.splice(0)) await task();
+
+        // The invariant: the peer is never left silent. Either the join is
+        // answered, or it is told the room is gone so it re-joins. Silence is
+        // the unrecoverable state — the client parks on `connecting`, which is
+        // not terminal, so the renderer's reconnect loop never fires.
+        const joined = frames.filter((f) => f.type === 'joined' && f.requestId === 'join:1');
+        const terminalStatus = frames.filter(
+          (f) => f.type === 'room-status' && (f.status === 'disconnected' || f.status === 'error')
+        );
+        expect(joined.length + terminalStatus.length).toBeGreaterThan(0);
+
+        if (joined.length > 0) {
+          // The room it was registered on must be the live one, so a CLI write
+          // on the repo's CURRENT doc still reaches the peer.
+          const current = currentDocs.get('doc-1');
+          if (!current) throw new Error('missing current doc');
+          insert(current, text(current).length, '|after');
+          for (const task of tasks.splice(0)) await task();
+          const peerDoc = new LoroDoc();
+          for (const frame of frames) {
+            if (
+              (frame.type === 'joined' || frame.type === 'update') &&
+              frame.payload?.kind === 'doc-update'
+            ) {
+              peerDoc.import(base64ToBytes(frame.payload.dataBase64));
+            }
+          }
+          expect(text(peerDoc)).toBe('seed|after');
+        }
+      });
+    }
   });
 });

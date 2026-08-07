@@ -521,31 +521,46 @@ export class LocalLoroDataPlaneServer {
     connection: LocalLoroDataPlaneServerConnection,
     message: LocalLoroJoinMessage
   ): Promise<void> {
-    const entry = await this.ensureRoom(message.room);
-    // Register inbound (serialized with leave/detach on this connection), then
-    // let the writer build the catch-up reply when the connection is writable.
-    // The reply task is FIFO-ordered before any sync task this registration can
-    // produce, so `joined` always precedes the room's `update` frames.
-    if (entry.scope === 'doc') {
-      entry.subscribers.set(message.peerId, {
-        peerId: message.peerId,
-        connection,
-        latestJoinRequestId: message.requestId,
-        lastSentVV: decodeVersion(message.haveVersion),
-      });
-    } else {
-      entry.subscribers.set(message.peerId, {
-        peerId: message.peerId,
-        connection,
-        latestJoinRequestId: message.requestId,
-        lastSentVersion: decodeFlockVersion(message.haveVersion),
-      });
-    }
-    this.enqueueJoinReply(connection, roomKey(message.room), message.peerId, message.requestId);
-    if (message.room.scope === 'doc') {
-      this.notifyDocRoomJoin(message.room.docId);
-    } else if (message.room.scope === 'flock-doc') {
-      this.notifyFlockRoomJoin(message.room.flockDocId);
+    const key = roomKey(message.room);
+    for (;;) {
+      const entry = await this.ensureRoom(message.room);
+      // The liveness check and the registration below MUST stay in one
+      // synchronous block. `ensureRoom`'s generation check only covers the
+      // window before the entry is installed, and every `await` after it —
+      // including returning from a helper — reopens the window. Registering on
+      // an invalidated entry is worse than the bug this class fixes:
+      // `buildJoinReplyFrames` would find no room and emit nothing, parking the
+      // client on `connecting` forever, which is not terminal and so never
+      // wakes the renderer's reconnect loop.
+      if (this.rooms.get(key) !== entry) {
+        continue;
+      }
+      // Register inbound (serialized with leave/detach on this connection), then
+      // let the writer build the catch-up reply when the connection is writable.
+      // The reply task is FIFO-ordered before any sync task this registration can
+      // produce, so `joined` always precedes the room's `update` frames.
+      if (entry.scope === 'doc') {
+        entry.subscribers.set(message.peerId, {
+          peerId: message.peerId,
+          connection,
+          latestJoinRequestId: message.requestId,
+          lastSentVV: decodeVersion(message.haveVersion),
+        });
+      } else {
+        entry.subscribers.set(message.peerId, {
+          peerId: message.peerId,
+          connection,
+          latestJoinRequestId: message.requestId,
+          lastSentVersion: decodeFlockVersion(message.haveVersion),
+        });
+      }
+      this.enqueueJoinReply(connection, key, message.peerId, message.requestId);
+      if (message.room.scope === 'doc') {
+        this.notifyDocRoomJoin(message.room.docId);
+      } else if (message.room.scope === 'flock-doc') {
+        this.notifyFlockRoomJoin(message.room.flockDocId);
+      }
+      return;
     }
   }
 
@@ -580,7 +595,15 @@ export class LocalLoroDataPlaneServer {
     connection: LocalLoroDataPlaneServerConnection,
     message: LocalLoroUpdateMessage
   ): Promise<void> {
-    const entry = await this.ensureRoom(message.room);
+    const key = roomKey(message.room);
+    let entry = await this.ensureRoom(message.room);
+    // Same one-synchronous-block requirement as `handleJoin`: an invalidation
+    // landing after the entry was installed but before this resumes would make
+    // the import below write into the doc the repo already evicted, on an entry
+    // that is no longer subscribed — dead in both directions, silently.
+    while (this.rooms.get(key) !== entry) {
+      entry = await this.ensureRoom(message.room);
+    }
     if (entry.scope === 'doc') {
       if (message.payload.kind === 'flock-json') {
         this.sendError(connection, {
