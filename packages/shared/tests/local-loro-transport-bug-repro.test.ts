@@ -545,18 +545,11 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       harness.engineFor('ws').invalidateDocRoom('doc-1');
       await harness.settle();
 
-      // The engine publishes a terminal room status; production's local
-      // reconnect loop turns that into a rejoin, which rebuilds the room
-      // against the fresh instance. `renderer.reconnect()` stands in for the
-      // loop here — that the published status actually MAKES the loop fire is
-      // the separate thing that must be tested, and it is:
-      // packages/components/tests/local-data-plane-room-invalidation-reconnect.test.ts
-      // drives the real tracker/registry predicate. Do not treat this line as
-      // coverage of the trigger; the first version of this fix published a
-      // status the loop ignored and this suite still passed.
-      expect(subscription.status).not.toBe('joined');
-      await renderer.reconnect();
+      // No manual reconnect: the engine publishes a terminal room status and
+      // the adapter repairs that one room itself, so recovery must happen
+      // without the workspace reconnect loop being involved at all.
       await harness.settle();
+      expect(subscription.status).toBe('joined');
 
       // Up-sync: the write made before the eviction is reconciled at join, and
       // new renderer writes land in the repo's current doc.
@@ -594,8 +587,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
       expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
 
       harness.engineFor('ws').invalidateDocRoom('doc-1');
-      await harness.settle();
-      await renderer.reconnect();
       await harness.settle();
 
       expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload|written-in-window');

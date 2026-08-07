@@ -5,19 +5,22 @@
  * is gone there is no subscriber left to mark dirty, so a renderer that is only
  * READING a session gets nothing more until it re-joins.
  *
- * Outbound recovery therefore rests entirely on one claim: the room status the
- * server publishes makes the renderer's local reconnect loop fire. That loop is
- * gated by `roomSyncRegistry.anyNeedsReconnect(...)` -> `tracker.needsReconnect()`,
- * and `needsReconnect()` only counts TERMINAL statuses (`disconnected` / `error`).
+ * Recovery therefore hinges entirely on the room status the server publishes,
+ * and this file pins both halves of that contract:
  *
- * The first version of this fix published `'reconnecting'`, which reads as
- * "already recovering" and leaves `needsReconnect()` false — the loop never
- * fires and outbound sync stays dead. That defect was invisible to the
- * data-plane regression suite because those tests call `adapter.reconnect()` by
- * hand, standing in for the loop instead of exercising the predicate that
- * decides whether the loop runs at all.
+ *  - the status must be TERMINAL (`disconnected`/`error`). The first version of
+ *    this fix published `reconnecting`, which reads as "already recovering":
+ *    `createRoomSyncTracker.needsReconnect()` stays false, so the workspace
+ *    reconnect loop never fires and outbound sync stays dead. That defect was
+ *    invisible to the data-plane regression suite because those tests called
+ *    `adapter.reconnect()` by hand, standing in for the loop instead of
+ *    exercising what decides whether the loop runs at all.
+ *  - the repair must be ROOM-SCOPED. `LocalLoroTransportAdapter` re-joins that
+ *    one room itself, so a routine session GC does not drag the workspace loop
+ *    in — which would release every idle document store, rejoin every local
+ *    room, and charge a backoff step forgiven only after 30s of health.
  *
- * So this test drives the real chain: server engine -> `room-status` frame ->
+ * The chain under test is the real one: engine -> `room-status` frame ->
  * `LocalLoroTransportAdapter` -> real `createRoomSyncTracker` -> real
  * `createRoomSyncRegistry` -> the exact predicate the loop gates on.
  */
@@ -55,14 +58,22 @@ class Harness {
   private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
   readonly serverDocs = new Map<string, LoroDoc>();
 
+  private readonly pushed: LocalLoroDataPlaneServerMessage[] = [];
+
   private readonly connection = {
     id: 'dp:test:1',
     send: (message: LocalLoroDataPlaneServerMessage) => {
+      this.pushed.push(message);
       this.tasks.push(() => {
         for (const listener of this.rendererListeners) listener(message);
       });
     },
   };
+
+  /** Statuses of every `room-status` frame written, in order. */
+  framesOfType(type: 'room-status'): string[] {
+    return this.pushed.filter((m) => m.type === type).map((m) => m.status);
+  }
 
   readonly engine = new LocalLoroDataPlaneServer({
     workspaceId: WORKSPACE_ID,
@@ -145,8 +156,8 @@ function trackRoom(subscription: ReturnType<LocalLoroTransportAdapter['joinDocRo
   };
 }
 
-describe('invalidateDocRoom must wake the renderer local reconnect loop', () => {
-  it('publishes a status the reconnect loop actually acts on', async () => {
+describe('invalidateDocRoom recovery is room-scoped', () => {
+  it('repairs the invalidated room without leaving work for the workspace loop', async () => {
     const harness = new Harness();
     const renderer = harness.createAdapter('renderer:1');
     const doc = new LoroDoc();
@@ -162,26 +173,59 @@ describe('invalidateDocRoom must wake the renderer local reconnect loop', () => 
     harness.engine.invalidateDocRoom(DOC_ID);
     await harness.settle();
 
-    // The whole outbound recovery path hangs off this being true.
-    expect(tracked.loopWouldFire()).toBe(true);
+    // The adapter repaired this one room itself. Nobody called
+    // `adapter.reconnect()` and no workspace-level reconcile was needed.
+    expect(subscription.status).toBe('joined');
+    expect(tracked.loopWouldFire()).toBe(false);
+
+    // And the repaired room is bound to the repo's CURRENT instance.
+    const current = harness.serverDoc(DOC_ID);
+    current.getText('t').insert(current.getText('t').length, 'cli-write');
+    current.commit();
+    await harness.settle();
+    expect(doc.getText('t').toString()).toBe('cli-write');
 
     tracked.untrack();
     tracked.tracker.dispose();
   });
 
-  it("does not regress to 'reconnecting', which the loop ignores", async () => {
+  it('publishes a status the workspace loop would also act on, as a backstop', async () => {
     const harness = new Harness();
     const renderer = harness.createAdapter('renderer:1');
     const doc = new LoroDoc();
     const subscription = renderer.joinDocRoom(DOC_ID, doc);
     await harness.settle();
-
     const tracked = trackRoom(subscription);
 
-    // Negative control pinning WHY `invalidateDocRoom` may not publish
-    // `'reconnecting'`: it is a non-terminal status, so `needsReconnect()` stays
-    // false and the loop never runs. Kept as a test rather than a comment
-    // because the difference is one string and the failure is silent.
+    // The adapter repairs the room before any assertion could observe the
+    // intermediate status, so assert on the wire instead — every `room-status`
+    // frame ever written is recorded. The published status must be TERMINAL:
+    // that is what keeps the workspace loop a working backstop if self-repair
+    // is ever bypassed, and it is the half the first version of this fix got
+    // wrong (`reconnecting` is not terminal, so neither the adapter nor the
+    // loop would act on it).
+    harness.engine.invalidateDocRoom(DOC_ID);
+    await harness.settle();
+
+    const statuses = harness.framesOfType('room-status');
+    expect(statuses).toHaveLength(1);
+    expect(['disconnected', 'error']).toContain(statuses[0]);
+
+    expect(subscription.status).toBe('joined');
+    tracked.untrack();
+    tracked.tracker.dispose();
+  });
+
+  it("does not act on 'reconnecting', which neither the adapter nor the loop treats as terminal", async () => {
+    const harness = new Harness();
+    const renderer = harness.createAdapter('renderer:1');
+    const doc = new LoroDoc();
+    const subscription = renderer.joinDocRoom(DOC_ID, doc);
+    await harness.settle();
+    const tracked = trackRoom(subscription);
+
+    // Negative control. Kept as a test rather than a comment because the
+    // difference is one string and the failure is silent.
     harness.engine.publishRoomStatus({ scope: 'doc', docId: DOC_ID }, 'reconnecting');
     await harness.settle();
 

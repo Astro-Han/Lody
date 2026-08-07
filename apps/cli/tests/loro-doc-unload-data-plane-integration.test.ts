@@ -285,9 +285,14 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
 
       const sessionId = await manager.createSession('local-machine', 'builtin', 'claude');
       const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-      // The offline room settles immediately (no transport is attached); await
-      // it so the manager's join-triggered background hydrate cannot still be
-      // in flight when the session is garbage-collected below.
+      // The offline room settles immediately (no transport is attached). This
+      // does NOT cover the manager's join-triggered hydrate — that is fired by
+      // the peer's join further down, after this line. The hydrate
+      // (`ensureSessionDocHydratedForLocalJoin`) is a floating promise that
+      // nothing awaits; it settles before the GC below only because `docSub` is
+      // already set here, so `ensureDocRoomJoined` short-circuits on an
+      // already-resolved `remoteSyncReady`. If that hydrate ever does real
+      // work, this test becomes order-dependent and needs an explicit signal.
       await sessionDoc.waitForRemoteSync();
       const cliEntryId = 'cli-authored-turn';
       await sessionDoc.updateHistory((history) => [

@@ -55,22 +55,23 @@ describe('repo.unloadDoc has a single CLI entry point', () => {
       });
     }
 
+    // Only the FILE is asserted, not the line. Comparing the line number
+    // against a value re-derived by the same search would be tautological.
     expect(callSites).toHaveLength(1);
-    expect(callSites[0]).toBe(
-      `${path.relative(CLI_SRC, SANCTIONED_CALL_SITE)}:${await lineOfUnloadCall()}`
+    expect(callSites[0]?.split(':')[0]).toBe(path.relative(CLI_SRC, SANCTIONED_CALL_SITE));
+
+    // The pairing is the point: the call must sit inside `unloadDocRoom` with
+    // the data-plane invalidation right behind it.
+    const sanctioned = await fs.readFile(SANCTIONED_CALL_SITE, 'utf8');
+    const lines = sanctioned.split('\n');
+    const index = lines.findIndex(
+      (line) => /\.unloadDoc\s*\(/.test(line) && !line.trim().startsWith('*')
     );
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(lines.slice(index + 1, index + 3).join('\n')).toContain('invalidateDocRoom');
+
+    // And it must be reached through the injected unloader, never by a caller
+    // holding the repo directly.
+    expect(sanctioned).toContain('async unloadDocRoom(docId: string): Promise<void> {');
   });
 });
-
-async function lineOfUnloadCall(): Promise<number> {
-  const source = await fs.readFile(SANCTIONED_CALL_SITE, 'utf8');
-  const lines = source.split('\n');
-  const index = lines.findIndex(
-    (line) => /\.unloadDoc\s*\(/.test(line) && !line.trim().startsWith('*')
-  );
-  // The call must sit inside `unloadDocRoom`, immediately followed by the
-  // data-plane invalidation — the whole point of the single entry point.
-  const following = lines.slice(index + 1, index + 3).join('\n');
-  expect(following).toContain('invalidateDocRoom');
-  return index + 1;
-}

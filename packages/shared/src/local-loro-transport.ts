@@ -565,6 +565,25 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       this.setRoomStatus(state, message.status);
       if (message.status === 'joined') {
         this.resolveSyncedWaiters(state);
+        return;
+      }
+      // A server-pushed TERMINAL status means this one room is gone and must be
+      // re-established (today the only publisher is the CLI's
+      // `invalidateDocRoom`, after the repo evicted the room's doc). Repair it
+      // here, room-scoped.
+      //
+      // Leaving it to the workspace reconnect loop — the only other thing that
+      // would notice, since a terminal status is what its `needsReconnect()`
+      // keys on — makes one dead room cost a workspace-wide reconcile: it
+      // releases every idle document store and rejoins EVERY local room, and
+      // charges a backoff step that is only forgiven after 30s of health. A
+      // session being GC'd is routine, so that would ratchet local reconnect
+      // latency for the whole workspace.
+      if (
+        (message.status === 'disconnected' || message.status === 'error') &&
+        !state.terminalError
+      ) {
+        this.rejoinRoom(state);
       }
       return;
     }
