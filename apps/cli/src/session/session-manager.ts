@@ -62,7 +62,11 @@ import {
   type ManagedRuntimeProgressEvent,
 } from '@/agent/managed-agent-runtime';
 import { buildGitHubCloneUrl, deriveRepoIdFromGitHubRepo, redactUrlAuth } from '@/utils/github';
-import { GitCredentialBroker, LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '@/lib/git-credential-broker';
+import {
+  GitCredentialBroker,
+  LODY_GIT_CRED_BROKER_STATE_FILE_ENV,
+  LODY_GIT_CRED_CONTEXT_TOKEN_ENV,
+} from '@/lib/git-credential-broker';
 import type { CloudGithubTokenManager, CloudPort } from '@lody/platform';
 import { isDevEnv } from '@/utils/runtime-env';
 import {
@@ -81,9 +85,11 @@ import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/
 import { UsageData, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
+  GitCredentialBrokerAuth,
   WorktreeInfo,
   WorktreeManager,
   WorktreeManagerConfig,
+  WorktreeManagerSource,
 } from './worktree/worktree-manager';
 import { readLocalProjectWorktreeSetup } from './worktree/worktree-setup-config-store';
 import { createWorktreeScriptHistoryRecorder } from './worktree/worktree-script-history';
@@ -1010,6 +1016,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
                 managerConfig: worktreeTarget.managerConfig,
                 baseBranch: config.branch,
                 restoreBranchName: config.restoreBranchName,
+                resolveBrokerAuth: () =>
+                  this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
                 logger: this.logger,
               })
             : Promise.resolve(null);
@@ -1449,10 +1457,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const credentialHelperValue = buildCredentialHelperValueForHost(repoId);
     const brokerUrl = brokerEnv.url;
 
+    const brokerStateFilePath = this.gitCredentialBroker?.getStateFilePath();
+
     config.env = {
       ...sessionEnv,
       LODY_GIT_CRED_BROKER_URL: brokerUrl,
       LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
+      // Keeps the helper's connection-refused fallback inside this workspace instead
+      // of landing on the shared, last-writer-wins broker.json.
+      ...(brokerStateFilePath
+        ? { [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath }
+        : {}),
       LODY_GITHUB_REPO_FULL_NAME: githubRepo,
       GIT_TERMINAL_PROMPT: '0',
       // Use credential helper for all git invocations inside the ACP process tree.
@@ -1565,10 +1580,39 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!this.gitCredentialBroker) {
       this.gitCredentialBroker = new GitCredentialBroker({
         tokenManager,
+        workspaceId: this.workspaceId,
         logger: this.logger,
       });
     }
     return await this.gitCredentialBroker.ensureStarted();
+  }
+
+  /**
+   * Broker coordinates for host-side git run on behalf of THIS workspace.
+   *
+   * Host git must be handed these explicitly. `GitCredentialBroker.ensureStarted()`
+   * publishes `LODY_GIT_CRED_BROKER_*` into the process environment, and a fleet
+   * process runs one broker per workspace, so the ambient value belongs to whichever
+   * workspace started or recovered its broker last — not to this session.
+   *
+   * Only GitHub sources need it; local worktree sources never authenticate to a
+   * remote, and asking for it would start a broker they do not use.
+   */
+  private async resolveHostGitBrokerAuth(
+    source: WorktreeManagerSource | undefined
+  ): Promise<GitCredentialBrokerAuth | undefined> {
+    if (source && source.kind !== 'github') {
+      return undefined;
+    }
+    const brokerEnv = await this.ensureGitCredentialBrokerEnv();
+    if (!brokerEnv) {
+      return undefined;
+    }
+    return {
+      workspaceId: this.workspaceId,
+      url: brokerEnv.url,
+      token: brokerEnv.token,
+    };
   }
 
   private async resolveSharedWorkdir(
@@ -1672,7 +1716,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Shared parent worktree missing for ${config.parentSessionId}; creating it now`
       );
-      await worktreeManager.ensureRepo();
+      await worktreeManager.ensureRepo({
+        brokerAuth: await this.resolveHostGitBrokerAuth({
+          kind: 'github',
+          repoUrl: config.githubRepoUrl,
+        }),
+      });
       const sharedWorktree = await worktreeManager.createWorktree(
         config.parentSessionId,
         parentMeta?.baseBranch?.trim() || config.branch,
@@ -1812,7 +1861,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const worktreeInfo =
         preparedWorktree ??
         (await (async () => {
-          await worktreeManager.ensureRepo();
+          await worktreeManager.ensureRepo({
+            brokerAuth: await this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
+          });
           return await worktreeManager.createWorktree(
             config.sessionId!,
             config.branch,
