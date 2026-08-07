@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireLocalCliHostLease,
+  getLocalCliHostEndpoint,
   requestLocalCliHostShutdown,
   type LocalCliHostEndpoint,
   type LocalCliHostLease,
@@ -33,8 +34,11 @@ describe('local CLI host lease', () => {
     const commonJs =
       require('../src/node/local-cli-host-lease.cjs') as typeof import('../src/node/local-cli-host-lease');
 
+    // Parity is the point: both builds must land on the same endpoint for the
+    // active installation profile, so compare them instead of a fixed port.
+    expect(commonJs.getLocalCliHostEndpoint()).toEqual(getLocalCliHostEndpoint());
     expect(commonJs.getLocalCliHostEndpoint()).toMatchObject(
-      process.platform === 'win32' ? { kind: 'pipe' } : { kind: 'tcp', port: 17_788 }
+      process.platform === 'win32' ? { kind: 'pipe' } : { kind: 'tcp' }
     );
     expect(commonJs.acquireLocalCliHostLease).toBeTypeOf('function');
     expect(commonJs.requestLocalCliHostShutdown).toBeTypeOf('function');

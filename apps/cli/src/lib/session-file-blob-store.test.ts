@@ -18,6 +18,7 @@ import {
   sessionFileBlobExists,
   writeSessionFileBlobBackfillMarker,
 } from './session-file-blob-store';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 describe('session file blob store', () => {
   let homeDir: string;
@@ -55,9 +56,9 @@ describe('session file blob store', () => {
     return p;
   };
 
-  it('lays out blobs under .lody/session-files/<workspace>/<session>/<fileId>', () => {
+  it('lays out blobs under <data dir>/session-files/<workspace>/<session>/<fileId>', () => {
     const dir = getSessionFileBlobDir({ workspaceId: 'ws', sessionId: 'sess', homeDir });
-    expect(dir).toBe(join(homeDir, '.lody', 'session-files', 'ws', 'sess'));
+    expect(dir).toBe(join(getLodyDataDir(undefined, homeDir), 'session-files', 'ws', 'sess'));
     const file = getSessionFileBlobPath({
       workspaceId: 'ws',
       sessionId: 'sess',
@@ -287,8 +288,7 @@ describe('session file blob store', () => {
     // Make the retained copy older than the cleanup window.
     const old = new Date(1_000);
     const backfilledPath = join(
-      homeDir,
-      '.lody',
+      getLodyDataDir(undefined, homeDir),
       'session-files',
       '_backfilled',
       'ws',
@@ -303,7 +303,7 @@ describe('session file blob store', () => {
   });
 
   it('returns no pending blobs for an empty/absent workspace', async () => {
-    await mkdir(join(homeDir, '.lody'), { recursive: true });
+    await mkdir(getLodyDataDir(undefined, homeDir), { recursive: true });
     expect(await listPendingLocalSessionFiles({ workspaceId: 'ws', homeDir })).toEqual([]);
   });
 });

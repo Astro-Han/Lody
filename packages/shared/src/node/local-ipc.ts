@@ -580,24 +580,31 @@ function postSessionControlOverSocket(
                 if (settled) return;
                 try {
                   const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
-                  void Effect.runPromise(
-                    parseSessionControlEnvelope(
-                      { ok: status >= 200 && status < 300, status },
-                      payload
+                  // The envelope parser is pure, so run it as an Either: a bare
+                  // `runPromise` would reject with a FiberFailure wrapper, which
+                  // `mapRequestError` cannot recognize as an IpcProtocolError and
+                  // would misreport a malformed reply as "daemon not running".
+                  const envelope = Effect.runSync(
+                    Effect.either(
+                      parseSessionControlEnvelope(
+                        { ok: status >= 200 && status < 300, status },
+                        payload
+                      )
                     )
-                  ).then(
-                    (legacyResponses) => {
-                      for (const controlResponse of legacyResponses) {
-                        try {
-                          options.onResponse?.(controlResponse);
-                        } catch {
-                          // Observers cannot break the request transport.
-                        }
-                      }
-                      settleWith(() => resolve(legacyResponses));
-                    },
-                    (error) => settleWith(() => reject(error))
                   );
+                  if (envelope._tag === 'Left') {
+                    settleWith(() => reject(envelope.left));
+                    return;
+                  }
+                  const legacyResponses = envelope.right;
+                  for (const controlResponse of legacyResponses) {
+                    try {
+                      options.onResponse?.(controlResponse);
+                    } catch {
+                      // Observers cannot break the request transport.
+                    }
+                  }
+                  settleWith(() => resolve(legacyResponses));
                 } catch (error) {
                   settleWith(() =>
                     reject(

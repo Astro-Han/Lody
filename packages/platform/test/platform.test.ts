@@ -6,6 +6,7 @@ import {
   defineCloudAction,
   defineCloudMutation,
   defineCloudQuery,
+  definePublicCloudQuery,
   createLocalCloudPort,
   createLocalPlatformProvider,
   createStaticStore,
@@ -62,6 +63,7 @@ describe('cloud operation descriptors', () => {
         kind: 'query',
         capability: 'billing',
         name: 'billing:getPlan',
+        access: 'authenticated',
       }
     );
     expect(
@@ -70,10 +72,26 @@ describe('cloud operation descriptors', () => {
       kind: 'mutation',
       capability: 'githubIntegration',
       name: 'github:setEnabled',
+      access: 'authenticated',
     });
     expect(
       defineCloudAction<Record<string, never>, string>('billing', 'billing:createCheckout')
-    ).toEqual({ kind: 'action', capability: 'billing', name: 'billing:createCheckout' });
+    ).toEqual({
+      kind: 'action',
+      capability: 'billing',
+      name: 'billing:createCheckout',
+      access: 'authenticated',
+    });
+    // Pre-sign-in reachability is part of the descriptor identity, not a
+    // caller-side convention.
+    expect(
+      definePublicCloudQuery<Record<string, never>, string>('billing', 'billing:listPublicPlans')
+    ).toEqual({
+      kind: 'query',
+      capability: 'billing',
+      name: 'billing:listPublicPlans',
+      access: 'public',
+    });
   });
 
   it('rejects malformed names at assembly instead of deferring the error to a request', () => {

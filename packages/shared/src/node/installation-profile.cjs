@@ -21,9 +21,12 @@ const LOCAL_PROFILE = Object.freeze({
   localCliHostPort: 17789,
 });
 
+// Must match platform-kind.ts: an absent selector resolves to `local`. A
+// divergence here silently gives Electron main a different data dir and socket
+// namespace than the CLI daemon computes, so they never meet.
 function resolvePlatformKind(raw) {
   const value = raw?.trim();
-  if (!value) return 'cloud';
+  if (!value) return 'local';
   if (value === 'local' || value === 'cloud') return value;
   throw new Error(
     `Unrecognized LODY_PLATFORM value: ${JSON.stringify(raw)} (expected "local" or "cloud")`

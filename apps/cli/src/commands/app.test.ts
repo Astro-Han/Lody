@@ -7,6 +7,7 @@ import type {
 } from '@lody/shared';
 import { resolveLocalProjectForApp } from './app';
 import { buildOpenLocalProjectDeepLink } from '@/lib/desktop-deep-link';
+import { getInstallationProfile } from '@lody/shared/node/installation-profile';
 
 const MACHINE_ID = 'machine-1' as MachineId;
 const ROOT_PATH = '/tmp/lody-app-test-project';
@@ -179,6 +180,10 @@ describe('resolveLocalProjectForApp', () => {
 });
 
 describe('buildOpenLocalProjectDeepLink', () => {
+  // The scheme follows the installation profile (`lody` on cloud, `lody-oss`
+  // on local); the path and query shape is what the desktop resolver parses.
+  const scheme = getInstallationProfile().desktopProtocol;
+
   it('pins the URL shape the desktop resolver parses', () => {
     expect(
       buildOpenLocalProjectDeepLink({
@@ -186,7 +191,9 @@ describe('buildOpenLocalProjectDeepLink', () => {
         localProjectId: LOCAL_PROJECT_ID,
         workspaceSlug: 'acme',
       })
-    ).toBe(`lody://chat/new?machine=${MACHINE_ID}&project=${LOCAL_PROJECT_ID}&workspaceSlug=acme`);
+    ).toBe(
+      `${scheme}://chat/new?machine=${MACHINE_ID}&project=${LOCAL_PROJECT_ID}&workspaceSlug=acme`
+    );
   });
 
   it('omits an unknown workspace slug so the app keeps its current workspace', () => {
@@ -196,6 +203,6 @@ describe('buildOpenLocalProjectDeepLink', () => {
         localProjectId: LOCAL_PROJECT_ID,
         workspaceSlug: null,
       })
-    ).toBe(`lody://chat/new?machine=${MACHINE_ID}&project=${LOCAL_PROJECT_ID}`);
+    ).toBe(`${scheme}://chat/new?machine=${MACHINE_ID}&project=${LOCAL_PROJECT_ID}`);
   });
 });

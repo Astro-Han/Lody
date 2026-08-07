@@ -29,7 +29,10 @@ import {
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared';
-import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc';
+import {
+  getLocalDaemonRunDir,
+  getLocalLoroDataPlaneSocketPath,
+} from '@lody/shared/node/local-ipc';
 import {
   startLocalLoroDataPlaneServer,
   stopLocalLoroDataPlaneServer,
@@ -139,7 +142,9 @@ describe('local Loro data-plane socket server — F6 regression', () => {
     originalHome = process.env.HOME;
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-dp-f6-'));
     process.env.HOME = tempHome;
-    fs.mkdirSync(path.join(tempHome, '.lody', 'run'), { recursive: true });
+    // The run dir name follows the installation profile (`.lody` on cloud,
+    // `.lody-oss` on local), so derive it instead of hardcoding one namespace.
+    fs.mkdirSync(getLocalDaemonRunDir(), { recursive: true });
 
     const docs = new Map<string, LoroDoc>();
     const engine = new LocalLoroDataPlaneServer({

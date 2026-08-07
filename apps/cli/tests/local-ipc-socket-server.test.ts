@@ -100,7 +100,17 @@ function makeServerConfig(paths: ReturnType<typeof makePaths>) {
     control: {
       machineId: 'machine-1',
       logger,
-      dispatchSession: vi.fn(async () => [dispatchResponse]),
+      // Mirrors MachineRuntime: every response is forwarded to the streaming
+      // observer as it is produced, and also returned for legacy clients.
+      dispatchSession: vi.fn(
+        async (
+          _message: LocalSessionControlRequest,
+          options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}
+        ) => {
+          options.onResponse?.(dispatchResponse);
+          return [dispatchResponse];
+        }
+      ),
       dispatchProject: vi.fn(),
     },
     version: '0.0.0-test',

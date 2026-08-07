@@ -80,7 +80,7 @@ describe('loro streams helpers', () => {
 
   it('spreads presence traffic across sibling shard subdomains for the default proxy', () => {
     for (const shardId of LORO_STREAMS_PRESENCE_SHARD_IDS) {
-      expect(getLoroStreamsPresenceBaseUrl(undefined, shardId)).toBe(
+      expect(getLoroStreamsPresenceBaseUrl(DEFAULT_LORO_STREAMS_BASE_URL, shardId)).toBe(
         `https://presence-${shardId}.${DEFAULT_LORO_STREAMS_PROXY_HOST_SUFFIX}`
       );
     }
@@ -89,10 +89,10 @@ describe('loro streams helpers', () => {
   });
 
   it('ignores unknown presence shard ids and falls back to the canonical host', () => {
-    expect(getLoroStreamsPresenceBaseUrl(undefined, 'zz')).toBe(
+    expect(getLoroStreamsPresenceBaseUrl(DEFAULT_LORO_STREAMS_BASE_URL, 'zz')).toBe(
       DEFAULT_LORO_STREAMS_PRESENCE_BASE_URL
     );
-    expect(getLoroStreamsPresenceBaseUrl(undefined, '')).toBe(
+    expect(getLoroStreamsPresenceBaseUrl(DEFAULT_LORO_STREAMS_BASE_URL, '')).toBe(
       DEFAULT_LORO_STREAMS_PRESENCE_BASE_URL
     );
   });

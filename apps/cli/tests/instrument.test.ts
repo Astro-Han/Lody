@@ -27,6 +27,9 @@ describe('CLI PostHog error reporting', () => {
     vi.clearAllMocks();
     setEnv({
       ...originalEnv,
+      // Error reporting only exists on the cloud platform; an absent selector
+      // resolves to `local`, where telemetry is hard-disabled.
+      LODY_PLATFORM: 'cloud',
       LODY_ENV: 'production',
       LODY_POSTHOG_KEY: 'phc_test_key',
       POSTHOG_HOST: 'https://us.i.posthog.com',

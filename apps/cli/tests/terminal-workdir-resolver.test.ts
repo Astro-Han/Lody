@@ -11,8 +11,9 @@ import {
 import {
   deriveRepoIdFromGitHubRepo,
   deriveRepoIdFromLocalProjectPath,
-  getWorktreeHostPath,
+  getWorktreeHostPathFromDotlodyPath,
 } from '@lody/shared/node/worktree-paths';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   resolveTerminalWorkdirFromMetadata,
   type TerminalSessionMetaLookup,
@@ -34,6 +35,15 @@ function makeTempDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-terminal-workdir-'));
   tempDirs.push(dir);
   return dir;
+}
+
+/**
+ * The resolver roots every derived workdir at the installation profile's data
+ * directory (`.lody` on cloud, `.lody-oss` on local), so the expectations must
+ * follow the profile instead of hardcoding one namespace.
+ */
+function dotlodyPath(homeDir: string): string {
+  return getLodyDataDir(undefined, homeDir);
 }
 
 function createSessionMeta(
@@ -93,10 +103,10 @@ describe('terminal workdir resolver', () => {
     const homeDir = makeTempDir();
     const sessionId = 'session-github' as SessionId;
     const repoFullName = 'loro-dev/lody';
-    const expected = getWorktreeHostPath(
+    const expected = getWorktreeHostPathFromDotlodyPath(
       deriveRepoIdFromGitHubRepo(repoFullName),
       sessionId,
-      homeDir
+      dotlodyPath(homeDir)
     );
     fs.mkdirSync(expected, { recursive: true });
 
@@ -138,10 +148,10 @@ describe('terminal workdir resolver', () => {
     const homeDir = makeTempDir();
     const rootPath = makeTempDir();
     const sessionId = 'session-local-worktree' as SessionId;
-    const expected = getWorktreeHostPath(
+    const expected = getWorktreeHostPathFromDotlodyPath(
       deriveRepoIdFromLocalProjectPath(rootPath),
       sessionId,
-      homeDir
+      dotlodyPath(homeDir)
     );
     fs.mkdirSync(expected, { recursive: true });
 
@@ -169,7 +179,7 @@ describe('terminal workdir resolver', () => {
   it('resolves chat-only sessions to the default chat workdir', async () => {
     const homeDir = makeTempDir();
     const sessionId = 'session-chat-only' as SessionId;
-    const expected = path.join(homeDir, '.lody', 'chats', sessionId);
+    const expected = path.join(dotlodyPath(homeDir), 'chats', sessionId);
 
     await expect(
       createResolver({
@@ -216,7 +226,7 @@ describe('terminal workdir resolver', () => {
     const homeDir = makeTempDir();
     const parentSessionId = 'session-parent-chat' as SessionId;
     const childSessionId = 'session-child-chat' as SessionId;
-    const expected = path.join(homeDir, '.lody', 'chats', parentSessionId);
+    const expected = path.join(dotlodyPath(homeDir), 'chats', parentSessionId);
 
     await expect(
       createResolver({

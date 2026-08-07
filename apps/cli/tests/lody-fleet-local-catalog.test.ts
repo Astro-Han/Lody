@@ -317,24 +317,21 @@ describe('LodyFleet remote authentication boundary', () => {
       machineId: 'machine-1' as MachineId,
       machineName: 'host',
       runtimeStateReporter: runtimeStateReporter as never,
+      cloudPort: createTestCloudPort((onValue) => {
+        onValue({ status: 'unauthorized', reason: 'invalid_token' });
+        return () => {};
+      }),
       localWorkspaceCatalog: createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
       localFirstBootstrap: true,
       onFatalAuthFailure,
-    }) as unknown as {
-      convex: {
-        onUpdate: (
-          query: unknown,
-          args: unknown,
-          onValue: (value: { valid: false; userId: null; workspaces: [] }) => void
-        ) => () => void;
-      };
-      startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
-    };
-    fleet.convex = {
-      onUpdate: (_query, _args, onValue) => {
-        onValue({ valid: false, userId: null, workspaces: [] });
-        return () => {};
+      machineLifecycleCapability: {
+        launchMode: 'foreground',
+        canRemoteRestart: false,
+        canRemoteUpgrade: false,
+        reason: 'not_daemon',
       },
+    }) as unknown as {
+      startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
     };
 
     await fleet.startWorkspaceSubscription({ waitForInitial: false });

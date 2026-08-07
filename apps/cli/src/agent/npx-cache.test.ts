@@ -660,8 +660,10 @@ describe('npm cache isolation helpers', () => {
   });
 
   it('recognizes only the Lody npm cache path', () => {
-    expect(isLodyNpmCacheDir('/Users/u/.lody/npm-cache', '/Users/u')).toBe(true);
-    expect(isLodyNpmCacheDir('/Users/u/.lody/npm-cache/', '/Users/u')).toBe(true);
+    // The cache lives under the installation profile's data dir (`.lody` on
+    // cloud, `.lody-oss` on local), so derive it rather than hardcoding one.
+    expect(isLodyNpmCacheDir(getLodyNpmCacheDir('/Users/u'), '/Users/u')).toBe(true);
+    expect(isLodyNpmCacheDir(`${getLodyNpmCacheDir('/Users/u')}/`, '/Users/u')).toBe(true);
     expect(isLodyNpmCacheDir('/Users/u/.npm', '/Users/u')).toBe(false);
     expect(isLodyNpmCacheDir(undefined, '/Users/u')).toBe(false);
   });
@@ -858,7 +860,7 @@ describe('purgeBrokenNpxCache', () => {
 
 describe('purgeLodyNpmCache', () => {
   it('purges only Lody-owned _npx and _cacache dirs', () => {
-    const cache = '/Users/u/.lody/npm-cache';
+    const cache = getLodyNpmCacheDir('/Users/u');
     const npx = join(cache, '_npx');
     const cacache = join(cache, '_cacache');
     const userNpm = '/Users/u/.npm';
@@ -893,7 +895,7 @@ describe('purgeLodyNpmCache', () => {
   });
 
   it('is best-effort when cleanup fails', () => {
-    const cache = '/Users/u/.lody/npm-cache';
+    const cache = getLodyNpmCacheDir('/Users/u');
     const npx = join(cache, '_npx');
     const cacache = join(cache, '_cacache');
     const io = makeIo({
