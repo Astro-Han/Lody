@@ -32,6 +32,7 @@ import {
   type LocalLoroDataPlaneClientMessage,
   type LocalLoroDataPlaneServerMessage,
 } from '@lody/shared';
+import type { RepoTransportRoomStatus } from 'loro-repo';
 import { createRoomSyncTracker } from '../src/providers/room-sync-tracker';
 import { createRoomSyncRegistry } from '../src/providers/room-sync-registry';
 
@@ -57,6 +58,11 @@ class Harness {
   };
   private readonly rendererListeners = new Set<(m: LocalLoroDataPlaneServerMessage) => void>();
   readonly serverDocs = new Map<string, LoroDoc>();
+  /**
+   * The Electron relay swallows client frames when its socket is down while the
+   * renderer still reports connected (`loro-data-plane-relay.ts`).
+   */
+  dropClientFrames = false;
 
   private readonly pushed: LocalLoroDataPlaneServerMessage[] = [];
 
@@ -107,6 +113,7 @@ class Harness {
       peerId,
       connection: {
         send: (message: LocalLoroDataPlaneClientMessage) => {
+          if (this.dropClientFrames) return;
           this.tasks.push(async () => {
             if (message.type === 'ping') return;
             await this.engine.handleMessage(this.connection, message);
@@ -189,31 +196,49 @@ describe('invalidateDocRoom recovery is room-scoped', () => {
     tracked.tracker.dispose();
   });
 
-  it('publishes a status the workspace loop would also act on, as a backstop', async () => {
+  it('publishes a status that really does drive the workspace-loop predicate', async () => {
     const harness = new Harness();
     const renderer = harness.createAdapter('renderer:1');
     const doc = new LoroDoc();
-    const subscription = renderer.joinDocRoom(DOC_ID, doc);
+    renderer.joinDocRoom(DOC_ID, doc);
     await harness.settle();
-    const tracked = trackRoom(subscription);
 
     // The adapter repairs the room before any assertion could observe the
-    // intermediate status, so assert on the wire instead — every `room-status`
-    // frame ever written is recorded. The published status must be TERMINAL:
-    // that is what keeps the workspace loop a working backstop if self-repair
-    // is ever bypassed, and it is the half the first version of this fix got
-    // wrong (`reconnecting` is not terminal, so neither the adapter nor the
-    // loop would act on it).
+    // intermediate status, so capture it at the wire — every `room-status`
+    // frame written is recorded.
     harness.engine.invalidateDocRoom(DOC_ID);
     await harness.settle();
-
     const statuses = harness.framesOfType('room-status');
     expect(statuses).toHaveLength(1);
-    expect(['disconnected', 'error']).toContain(statuses[0]);
+    const published = statuses[0];
+    if (!published) throw new Error('no room-status frame');
 
-    expect(subscription.status).toBe('joined');
-    tracked.untrack();
-    tracked.tracker.dispose();
+    // Then feed exactly that status through a REAL tracker. Asserting the
+    // string against a hardcoded list would not catch someone changing
+    // `isTerminalRoomStatus`, which is what silently kills the backstop — and
+    // room-sync-tracker.test.ts never mentions `disconnected` at all.
+    const registry = createRoomSyncRegistry({ clock: { now: () => 0 } });
+    const tracker = createRoomSyncTracker(DOC_ID);
+    const untrack = registry.track(tracker);
+    let emit: ((status: RepoTransportRoomStatus) => void) | null = null;
+    tracker.attach({
+      status: 'joined',
+      onStatusChange: (listener) => {
+        emit = listener;
+        return () => {
+          emit = null;
+        };
+      },
+      firstSyncedWithRemote: Promise.resolve(),
+    });
+    tracker.markFirstSynced();
+    expect(registry.anyNeedsReconnect(() => true)).toBe(false);
+
+    emit?.(published as RepoTransportRoomStatus);
+    expect(registry.anyNeedsReconnect(() => true)).toBe(true);
+
+    untrack();
+    tracker.dispose();
   });
 
   it("does not act on 'reconnecting', which neither the adapter nor the loop treats as terminal", async () => {

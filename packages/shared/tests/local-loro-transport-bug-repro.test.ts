@@ -543,8 +543,6 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
 
       harness.unloadServerDoc('ws', 'doc-1');
       harness.engineFor('ws').invalidateDocRoom('doc-1');
-      await harness.settle();
-
       // No manual reconnect: the engine publishes a terminal room status and
       // the adapter repairs that one room itself, so recovery must happen
       // without the workspace reconnect loop being involved at all.

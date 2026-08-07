@@ -64,9 +64,12 @@ describe('repo.unloadDoc has a single CLI entry point', () => {
     // the data-plane invalidation right behind it.
     const sanctioned = await fs.readFile(SANCTIONED_CALL_SITE, 'utf8');
     const lines = sanctioned.split('\n');
-    const index = lines.findIndex(
-      (line) => /\.unloadDoc\s*\(/.test(line) && !line.trim().startsWith('*')
-    );
+    // Skip the same comment shapes the scan above skips, or a `//` comment
+    // mentioning `.unloadDoc(` would anchor this at the wrong line.
+    const index = lines.findIndex((line) => {
+      const trimmed = line.trim();
+      return /\.unloadDoc\s*\(/.test(line) && !trimmed.startsWith('*') && !trimmed.startsWith('//');
+    });
     expect(index).toBeGreaterThanOrEqual(0);
     expect(lines.slice(index + 1, index + 3).join('\n')).toContain('invalidateDocRoom');
 

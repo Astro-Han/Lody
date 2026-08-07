@@ -320,15 +320,15 @@ export class LocalLoroDataPlaneServer {
     // lets that build discard itself instead of installing a room bound to the
     // instance the repo just dropped.
     this.roomGenerations.set(key, (this.roomGenerations.get(key) ?? 0) + 1);
+    const entry = this.rooms.get(key);
+    if (!entry || entry.scope !== 'doc') {
+      return;
+    }
     // Queued sync work names (room, peer) and is materialized at write time, so
     // a task left over from the old room would export against the REBUILT one
     // and could emit an `update` ahead of its `joined` reply, breaking the FIFO
     // ordering `enqueueJoinReply` relies on.
     this.dropQueuedRoomWork(key);
-    const entry = this.rooms.get(key);
-    if (!entry || entry.scope !== 'doc') {
-      return;
-    }
     // Publish before dropping the entry: `publishRoomStatus` reads the room's
     // subscribers, and outbound recovery depends entirely on the peer rejoining
     // — once the entry is gone there is no subscriber left to mark dirty, so a
@@ -472,6 +472,7 @@ export class LocalLoroDataPlaneServer {
       entry.subscribers.clear();
     }
     this.rooms.clear();
+    this.roomGenerations.clear();
     for (const writer of this.writers.values()) {
       this.cancelScheduledDataPump(writer);
       writer.unsubscribeDrain?.();
