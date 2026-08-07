@@ -120,6 +120,22 @@ class RelayHarness {
     return doc;
   }
 
+  /**
+   * Models `repo.unloadDoc(docId)`: the doc is persisted and evicted from the
+   * repo's instance cache, so the NEXT `resolveDoc` hands out a different
+   * `LoroDoc` object loaded from storage. This is what CLI session GC does to an
+   * idle session while a renderer is still subscribed to its room.
+   */
+  unloadServerDoc(workspaceId: string, docId: string): void {
+    const key = `${workspaceId}:${docId}`;
+    const previous = this.serverDocs.get(key);
+    if (!previous) return;
+    const snapshot = previous.export({ mode: 'snapshot' });
+    const reloaded = new LoroDoc();
+    reloaded.import(snapshot);
+    this.serverDocs.set(key, reloaded);
+  }
+
   serverMetaFlock(workspaceId: string): MemoryFlock {
     const existing = this.serverMetaFlocks.get(workspaceId);
     if (existing) return existing;
@@ -481,5 +497,69 @@ describe('local Loro data plane — review regression suite (F1/F2/F3/F5/F8)', (
     // R5.1: the room was released at zero subscribers; nothing is pushed to a
     // renderer that no longer exists.
     expect(docUpdatesPushed() - baseline).toBe(0);
+  });
+
+  // F9: a doc room resolves its LoroDoc once and keeps it while a renderer
+  // stays subscribed, but the repo may evict that instance (session GC ->
+  // `repo.unloadDoc`) and hand out a different object next time. Without
+  // `invalidateDocRoom` the room keeps importing/exporting the orphan, which
+  // silently severs sync in BOTH directions while the room still reports
+  // `joined`. Observed in production as a user turn that never reached the CLI,
+  // so `TurnHistoryGate` held the whole agent reply for its full 20s timeout.
+  describe('F9: repo doc eviction must invalidate the cached data-plane room', () => {
+    it('drops renderer uploads into the orphaned instance when the room is not invalidated', async () => {
+      const harness = new RelayHarness();
+      const renderer = harness.createAdapter('ws', 'renderer:1');
+      const doc = new LoroDoc();
+      renderer.joinDocRoom('doc-1', doc);
+      await harness.settle();
+
+      insert(doc, 0, 'before-unload');
+      await harness.settle();
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
+
+      harness.unloadServerDoc('ws', 'doc-1');
+
+      insert(doc, text(doc).length, '|after-unload');
+      await harness.settle();
+
+      // The upload was applied to the evicted instance, so the repo's current
+      // doc — the one the CLI reads and persists — never sees it.
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload');
+    });
+
+    it('recovers both directions once the evicted room is invalidated', async () => {
+      const harness = new RelayHarness();
+      const renderer = harness.createAdapter('ws', 'renderer:1');
+      const doc = new LoroDoc();
+      const subscription = renderer.joinDocRoom('doc-1', doc);
+      await harness.settle();
+
+      insert(doc, 0, 'before-unload');
+      await harness.settle();
+
+      harness.unloadServerDoc('ws', 'doc-1');
+      harness.engineFor('ws').invalidateDocRoom('doc-1');
+      await harness.settle();
+
+      // The engine publishes a non-joined room status; production's local
+      // reconnect loop (`isLocalHealthRoom` -> repo.reconnect({local})) turns
+      // that into a rejoin, which rebuilds the room against the fresh instance.
+      expect(subscription.status).not.toBe('joined');
+      await renderer.reconnect();
+      await harness.settle();
+
+      // Up-sync: the write made before the eviction is reconciled at join, and
+      // new renderer writes land in the repo's current doc.
+      insert(doc, text(doc).length, '|after-invalidate');
+      await harness.settle();
+      expect(text(harness.serverDoc('ws', 'doc-1'))).toBe('before-unload|after-invalidate');
+
+      // Down-sync: CLI writes on the current instance reach the renderer again.
+      const current = harness.serverDoc('ws', 'doc-1');
+      insert(current, text(current).length, '|cli-write');
+      await harness.settle();
+      expect(text(doc)).toBe('before-unload|after-invalidate|cli-write');
+    });
   });
 });

@@ -727,6 +727,33 @@ export class LoroDocumentManager {
     return this.localLoroDataPlaneServer;
   }
 
+  /**
+   * THE ONLY PLACE THE CLI MAY CALL `repo.unloadDoc`.
+   *
+   * `unloadDoc` evicts the doc from the repo's instance cache, so the next
+   * `openPersistedDoc` returns a DIFFERENT `LoroDoc`. Anything still holding the
+   * old instance keeps reading and writing an orphan. The local data plane is
+   * exactly such a holder: a doc room resolves its `LoroDoc` once and keeps it
+   * for as long as a renderer stays subscribed, so an unaccompanied unload
+   * silently severs renderer↔CLI sync in both directions (observed: a
+   * GC-evicted session whose next user turn never reached the CLI, so
+   * `TurnHistoryGate` held the whole reply for its full 20s timeout).
+   *
+   * Invalidating AFTER the unload is deliberate: doing it before leaves a window
+   * where a racing join re-opens the doc into the repo cache just in time for
+   * the eviction to strand it again — and that failure is silent, whereas
+   * updates lost in the window here are re-uploaded by the peer's next join
+   * reconciliation.
+   *
+   * Route every new unload through here. `tests/loro-doc-unload-invalidates-data-plane.test.ts`
+   * fails the build if another `repo.unloadDoc` call site appears.
+   */
+  async unloadDocRoom(docId: string): Promise<void> {
+    await this.repo.unloadDoc(docId);
+    this.localLoroDataPlaneServer?.invalidateDocRoom(docId);
+    this.logger.debug(`[${this.workspaceId}] Unloaded doc ${docId} and invalidated its local room`);
+  }
+
   isTransportConnected(): boolean {
     return this.connectionRecovery.isTransportConnected();
   }
@@ -1037,7 +1064,12 @@ export class LoroDocumentManager {
     }
 
     const initPromise = (async () => {
-      const sessionDoc = new SessionDocument(this.repo, sessionId, this.logger);
+      const sessionDoc = new SessionDocument(
+        this.repo,
+        sessionId,
+        (docId) => this.unloadDocRoom(docId),
+        this.logger
+      );
       await sessionDoc.init();
       // If cleanup ran while we were initializing, destroy the orphaned doc
       // instead of registering it (cleanUp/cleanSessionDoc only sees this.sessions).
@@ -1057,7 +1089,12 @@ export class LoroDocumentManager {
   }
 
   async getSessionHistorySnapshot(sessionId: SessionId): Promise<SessionHistoryInput[]> {
-    const sessionDoc = new SessionDocument(this.repo, sessionId, this.logger);
+    const sessionDoc = new SessionDocument(
+      this.repo,
+      sessionId,
+      (docId) => this.unloadDocRoom(docId),
+      this.logger
+    );
     await sessionDoc.init({ skipAutoRead: true });
     try {
       return await sessionDoc.getHistory();
@@ -1446,6 +1483,13 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   constructor(
     private repo: LoroRepo,
     public sessionId: SessionId,
+    /**
+     * Evicts the doc from the repo cache AND invalidates the local data-plane
+     * room bound to the old instance. Injected rather than calling
+     * `repo.unloadDoc` directly so the two can never be separated — see
+     * `LoroDocumentManager.unloadDocRoom`.
+     */
+    private unloadDocRoom: (docId: string) => Promise<void>,
     private logger: Logger = getLogger('loro')
   ) {
     this.roomId = getSessionRoomId(this.sessionId);
@@ -2631,7 +2675,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     ) {
       await this.setStatus(SessionStatusFactory.idle());
     }
-    await this.repo.unloadDoc(this.roomId);
+    await this.unloadDocRoom(this.roomId);
     this.docSub?.unsubscribe();
     this.docSub = null;
     this.docBinding = null;

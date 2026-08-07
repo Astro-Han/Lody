@@ -289,6 +289,41 @@ export class LocalLoroDataPlaneServer {
     }
   }
 
+  /**
+   * Drop the cached room for `docId` because its underlying LoroDoc instance is
+   * no longer the repo's.
+   *
+   * A doc room resolves its `LoroDoc` ONCE (`buildDocRoom`) and holds it for as
+   * long as the room has subscribers. `repo.unloadDoc(docId)` evicts that
+   * instance from the repo's cache, so the next `openPersistedDoc` returns a
+   * DIFFERENT object — and the room keeps importing/exporting against the
+   * orphan: renderer uploads vanish, CLI writes stop being pushed, and nothing
+   * errors (the room stays `joined`, and relay pings never touch this path).
+   * Re-joining does not repair it either, because `ensureRoom` returns the
+   * cached entry.
+   *
+   * The caller must invoke this AFTER the unload completes, so a racing join
+   * cannot re-open the doc into the repo cache just before it is evicted.
+   * Updates that land in the window are not lost: peers reconcile against the
+   * server version on (re)join and re-upload whatever the server is missing.
+   */
+  invalidateDocRoom(docId: string): void {
+    const room: LocalLoroDataPlaneRoom = { scope: 'doc', docId };
+    const key = roomKey(room);
+    const entry = this.rooms.get(key);
+    if (!entry || entry.scope !== 'doc') {
+      return;
+    }
+    // Publish before dropping the entry: `publishRoomStatus` reads the room's
+    // subscribers, and the peers need a non-joined status for the renderer's
+    // recovery loop to rejoin (which rebuilds the room against the fresh doc).
+    this.publishRoomStatus(room, 'reconnecting');
+    entry.unsubscribe();
+    entry.subscribers.clear();
+    entry.uploadAssemblers.clear();
+    this.rooms.delete(key);
+  }
+
   private get maxPayloadBytes(): number {
     return this.options.maxPayloadBytes ?? LOCAL_LORO_DATA_PLANE_MAX_PAYLOAD_BYTES;
   }
