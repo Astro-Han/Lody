@@ -2983,6 +2983,7 @@
   "billing.perkUnlimitedMembers": "Unlimited team members",
   "billing.switchBillingInterval": "Switch billing interval",
   "billing.viewPricingPage": "View plans and pricing",
+  "billing.bookFounderCall": "Book a call with our founder",
   "workspace.deletePaidBlockedTitle": "Cancel the subscription first",
   "workspace.deletePaidBlockedDescription": "This workspace has an active Plus subscription. Cancel it in billing settings before deleting the workspace.",
   "workspace.deletePaidBlockedGoToBilling": "Go to billing",

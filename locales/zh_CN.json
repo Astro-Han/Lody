@@ -2981,6 +2981,7 @@
   "billing.perkUnlimitedMembers": "团队成员数量不限",
   "billing.switchBillingInterval": "切换计费周期",
   "billing.viewPricingPage": "查看套餐与价格详情",
+  "billing.bookFounderCall": "和创始人聊聊",
   "workspace.deletePaidBlockedTitle": "请先取消订阅",
   "workspace.deletePaidBlockedDescription": "该工作空间有生效中的 Plus 订阅。请先在账单设置中取消订阅，再删除工作空间。",
   "workspace.deletePaidBlockedGoToBilling": "前往账单设置",
