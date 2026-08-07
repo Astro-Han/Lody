@@ -92,7 +92,7 @@ import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-pat
 import {
   normalizeLocalProjectRootPath,
   parseLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectBranchAtRootPath,
+  resolveLocalProjectLegacyBaseBranchAtRootPath,
 } from '@lody/shared/node/local-project';
 import { ensureDefaultSessionWorkdir, getDefaultSessionWorkdir, Session } from './session';
 import {
@@ -1733,10 +1733,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     storedBaseBranch: string | undefined;
     fallbackBranch: string | undefined;
   }): Promise<string> {
-    // Older session metadata stored the local selector directly in
-    // baseBranch. Worktree mode never checks out a remote tracking branch in
-    // the project root, so ordinary selector resolution preserves an existing
-    // local base while still resolving a remote-only selector exactly.
+    // Older session metadata stored a bare branch name directly in baseBranch,
+    // which was handed to `git worktree add` and therefore meant the local
+    // branch whenever one existed. Worktree mode never checks out a remote
+    // tracking branch in the project root, so the legacy resolver keeps that
+    // local-first precedence here instead of recovering an upstream.
     const selector = options.project.branch?.trim();
     const storedBaseBranch = options.storedBaseBranch?.trim();
     const fallbackBranch = options.fallbackBranch?.trim();
@@ -1747,7 +1748,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       return (
         await (existingRef.startsWith('refs/')
           ? parseLocalProjectBranchRefAtRootPath(options.originalRootPath, existingRef)
-          : resolveLocalProjectBranchAtRootPath(options.originalRootPath, existingRef))
+          : resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, existingRef, {
+              useWorktree: true,
+            }))
       ).refName;
     }
     if (storedBaseBranch && storedBaseBranch !== selector) {
@@ -1756,7 +1759,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       ).refName;
     }
 
-    return (await resolveLocalProjectBranchAtRootPath(options.originalRootPath, selector)).refName;
+    return (
+      await resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, selector, {
+        useWorktree: true,
+      })
+    ).refName;
   }
 
   private async resolveWorktreeSetupConfig(config: SessionConfig) {

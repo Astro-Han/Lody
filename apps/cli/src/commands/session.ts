@@ -13,6 +13,7 @@ import {
   getLocalProjectGitStateAtRootPath,
   normalizeLocalProjectRootPath,
   resolveLocalProjectBranchAtRootPath,
+  selectLocalProjectBranchSelector,
 } from '@lody/shared/node/local-project';
 import {
   type ACPSessionConfig,
@@ -1056,7 +1057,12 @@ export async function resolveLocalProjectBranchForCreate(
     baseBranch: gitState.currentBranch,
     fallbackBranch: gitState.defaultBranch ?? gitState.branches[0],
   });
-  await resolveLocalProjectBranchAtRootPath(project.rootPath, branch);
+  // `branch` is either a selector this project reported or a name a human typed
+  // as `--branch`. A typed `main` may match both refs/heads/main and
+  // refs/remotes/origin/main, so validate it the way git resolves it.
+  await resolveLocalProjectBranchAtRootPath(project.rootPath, branch, {
+    preferLocalOnCollision: true,
+  });
   return branch;
 }
 
@@ -2311,10 +2317,13 @@ async function resolveLocalProjectBranchOnMachine(args: {
     baseBranch: response.state.currentBranch,
     fallbackBranch: response.state.defaultBranch ?? response.state.branches[0],
   });
-  if (!response.state.branches.includes(branch)) {
+  // Only the remote machine can resolve refs, so map a typed `--branch main`
+  // onto one of the selectors it reported instead of demanding an exact match.
+  const selected = selectLocalProjectBranchSelector(response.state.branches, branch);
+  if (!selected) {
     throw new Error(`Local project branch not found: ${branch}`);
   }
-  return branch;
+  return selected;
 }
 
 async function resolveLocalProjectRefOnMachineOrThrow(

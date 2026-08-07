@@ -1988,9 +1988,13 @@ export class SessionExecutionService {
       resolvedBranch =
         storedBaseBranch && storedBaseBranch !== branch
           ? await resolveLocalProjectBranchRefAtRootPath(workdir, storedBaseBranch)
-          : (storedBaseBranch === branch || options.restoring) && project.useWorktree !== true
-            ? await resolveLocalProjectLegacyBaseBranchAtRootPath(workdir, branch)
-            : await resolveLocalProjectBranchAtRootPath(workdir, branch);
+          : storedBaseBranch === branch || options.restoring
+            ? await resolveLocalProjectLegacyBaseBranchAtRootPath(workdir, branch, {
+                useWorktree: project.useWorktree === true,
+              })
+            : await resolveLocalProjectBranchAtRootPath(workdir, branch, {
+                preferLocalOnCollision: true,
+              });
     } catch (error) {
       if (
         project.useWorktree === true &&
@@ -2002,7 +2006,7 @@ export class SessionExecutionService {
         // Legacy worktree metadata has no namespace information. If its base
         // disappeared, let WorktreeManager restore the recorded session branch;
         // it checks that branch before it ever needs to resolve this raw base.
-        // Ambiguous selectors still fail closed above.
+        // A name that still matches several remotes fails closed above.
         return { executionBranch: branch, baseRef: branch };
       }
       throw error;

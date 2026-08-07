@@ -961,8 +961,13 @@ export class WorktreeManager {
           if (await this.hasCommitish(preferred)) return preferred;
           throw new Error(`Local project branch not found: ${preferred}`);
         }
-        return (await resolveLocalProjectBranchAtRootPath(this.source.originalRootPath, preferred))
-          .refName;
+        // `preferred` can still be a pre-selector bare name, which git itself
+        // would resolve local-first rather than reject.
+        return (
+          await resolveLocalProjectBranchAtRootPath(this.source.originalRootPath, preferred, {
+            preferLocalOnCollision: true,
+          })
+        ).refName;
       }
       if (await this.hasCommitish('HEAD')) return 'HEAD';
       throw new Error(`[${this.repoId}] Local repository has no commit to use as a worktree base`);
