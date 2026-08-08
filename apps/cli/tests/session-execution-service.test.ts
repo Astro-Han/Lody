@@ -867,6 +867,65 @@ describe('SessionExecutionService', () => {
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
+  it('keeps a later dispatch pointer when an earlier turn takes ownership', async () => {
+    // Two refused steers requeue as `user-2` then `user-3`, so the pointer names
+    // `user-3` while dispatch starts the older `user-2`. Demoting it here would
+    // make `user-2`'s completion write `latestUserMsgId === lastHandledUserMsgId`
+    // and hide `user-3` from `sessionNeedsActiveWatch` — meta-only — for good.
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({ meta: { latestUserMsgId: 'user-3' } })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionDoc = { updateHistory: vi.fn(async () => {}) };
+    const setDispatchProcessing = (
+      service as unknown as {
+        setDispatchProcessing: (
+          sessionId: SessionId,
+          doc: unknown,
+          userTurnId: string
+        ) => Promise<void>;
+      }
+    ).setDispatchProcessing.bind(service);
+
+    await setDispatchProcessing('session-pointer' as SessionId, sessionDoc, 'user-2');
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-3', processingUserMsgId: 'user-2' })
+    );
+
+    // The ordinary case is unchanged: with nothing newer outstanding the turn
+    // taking ownership owns the pointer too.
+    const plainDeps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
+    upsertDocMeta.mockClear();
+    await (
+      new SessionExecutionService(plainDeps) as unknown as {
+        setDispatchProcessing: (
+          sessionId: SessionId,
+          doc: unknown,
+          userTurnId: string
+        ) => Promise<void>;
+      }
+    ).setDispatchProcessing('session-pointer' as SessionId, sessionDoc, 'user-2');
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-2', processingUserMsgId: 'user-2' })
+    );
+  });
+
   it('keeps a steer that failed after submission out of the dispatch queue', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({

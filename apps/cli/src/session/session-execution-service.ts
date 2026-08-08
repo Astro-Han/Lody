@@ -3049,9 +3049,17 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument,
     userTurnId: string
   ): Promise<void> {
+    const existingMeta = await this.getSessionMeta(sessionId);
     await this.setUserTurnStatus(sessionDoc, userTurnId, 'processing');
     await this.upsertSessionMeta(sessionId, {
-      latestUserMsgId: userTurnId,
+      // Taking ownership must not demote a pointer that already names a LATER
+      // turn (a send that landed while this one was starting, or a second
+      // refused steer). `sessionNeedsActiveWatch` reads meta only, so demoting
+      // it here means this turn's own completion writes
+      // `latestUserMsgId === lastHandledUserMsgId` and every turn queued behind
+      // it becomes invisible to the watcher — including after a restart. The
+      // terminal writes preserve the pointer for exactly the same reason.
+      latestUserMsgId: this.resolveLatestUserMsgIdForTerminalTurn(existingMeta, userTurnId),
       processingUserMsgId: userTurnId,
       lastMissingHistoryUserMsgId: undefined,
     });
@@ -3169,6 +3177,13 @@ export class SessionExecutionService {
     await this.clearDispatchProcessing(sessionId);
   }
 
+  /**
+   * The dispatch pointer for a turn this machine owns: keep a pointer that names
+   * a DIFFERENT turn (one that arrived while this one held the session and is
+   * still outstanding), otherwise name this turn. Applies both when a turn takes
+   * ownership and when it releases it — collapsing the pointer in either place
+   * hides the turns queued behind it from `sessionNeedsActiveWatch`.
+   */
   private resolveLatestUserMsgIdForTerminalTurn(
     meta: SessionMeta | undefined,
     terminalUserTurnId: string
