@@ -86,14 +86,21 @@ function OptionItem({
       // from getting tall enough to overflow.
       className="items-start gap-2 py-1"
     >
-      {icon}
+      {/* Center the icon/check on the label's first line box (text-[0.8rem] +
+          leading-tight = 16px): vertically centered on single-line rows, and
+          hugging the first line when a description wraps below. */}
+      {icon ? <span className="flex h-4 shrink-0 items-center">{icon}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
         {description ? (
           <span className="text-xs leading-snug text-muted-foreground">{description}</span>
         ) : null}
       </span>
-      {selected ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+      {selected ? (
+        <span className="flex h-4 shrink-0 items-center">
+          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      ) : null}
     </DropdownMenuItem>
   );
 }
@@ -504,7 +511,7 @@ export function DesktopRunConfigMenu({
                         agentType={config.agentType}
                         brandId={config.brandId}
                         env={config.env}
-                        className="mt-0.5 h-4 w-4 shrink-0"
+                        className="h-4 w-4 shrink-0"
                       />
                     }
                     label={config.name}
