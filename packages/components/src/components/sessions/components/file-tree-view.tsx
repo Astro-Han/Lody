@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronRight, CloudOff, FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
+import { CloudOff, FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import { getMachineFlockLocalProjects, type FileTreeItem, type SessionMeta } from '@lody/shared';
 import { TreeDataItem, TreeView } from '@/components/tree-view';
 import { FileTreeSkeleton, FileTreeStatePanel } from './file-tree-states';
@@ -16,14 +15,8 @@ import {
 } from '@/hooks/use-local-project-file-paths';
 import { buildFileTreeFromPaths, markFileTreeModified } from '@/lib/file-tree';
 import { getBasename } from '@/lib';
-import { cn } from '@/lib/utils';
-import {
-  flattenVisibleFileTreeRows,
-  pruneExpandedFileTreeIds,
-  shouldVirtualizeFileTreeData,
-  shouldVirtualizeVisibleFileTreeRows,
-  type VirtualFileTreeRow as VirtualFileTreeRowModel,
-} from '@/lib/file-tree-virtualization';
+import { shouldVirtualizeFileTreeData } from '@/lib/file-tree-virtualization';
+import { VirtualFileTree } from './virtual-file-tree';
 import {
   resolveSessionLocalFileSource,
   resolveSessionLocalProjectRootPath,
@@ -61,9 +54,6 @@ interface FileTreeViewProps {
 type ControlledFileTreeViewProps = Omit<FileTreeViewProps, 'session' | 'autoCodeCollab'>;
 
 const LOCAL_FILE_REFRESH_HEARTBEAT_BUCKET_MS = 5_000;
-const VIRTUAL_FILE_TREE_ROW_HEIGHT_PX = 22;
-const VIRTUAL_FILE_TREE_OVERSCAN = 12;
-const TREE_INDENT_PX = 8;
 const EMPTY_FILE_TREE: FileTreeItem[] = [];
 
 // All loading phases map to the same skeleton surface for the user; the distinct
@@ -154,191 +144,6 @@ const useChangedFilePathSet = (
 ): ReadonlySet<string> | undefined =>
   useMemo(() => (changedFilePaths ? new Set(changedFilePaths) : undefined), [changedFilePaths]);
 
-function VirtualFileTree({
-  data,
-  viewportRef,
-}: {
-  readonly data: readonly TreeDataItem[];
-  readonly viewportRef: RefObject<HTMLDivElement | null>;
-}) {
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
-  const [selectedId, setSelectedId] = useState<string | undefined>();
-
-  useEffect(() => {
-    setExpandedIds((current) => pruneExpandedFileTreeIds(current, data));
-  }, [data]);
-
-  const rows = useMemo(() => flattenVisibleFileTreeRows(data, expandedIds), [data, expandedIds]);
-  const getVirtualItemKey = useCallback((index: number) => rows[index]?.item.id ?? index, [rows]);
-  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
-    count: rows.length,
-    getScrollElement: () => viewportRef.current,
-    estimateSize: () => VIRTUAL_FILE_TREE_ROW_HEIGHT_PX,
-    getItemKey: getVirtualItemKey,
-    overscan: VIRTUAL_FILE_TREE_OVERSCAN,
-    useAnimationFrameWithResizeObserver: true,
-  });
-  const virtualItems = rowVirtualizer.getVirtualItems();
-  const shouldVirtualizeRows = shouldVirtualizeVisibleFileTreeRows(rows.length);
-  const renderMode =
-    shouldVirtualizeRows && virtualItems.length > 0 ? 'virtualized' : 'static-visible';
-
-  useEffect(() => {
-    logCodeCollabDebug('file tree virtual rows state', {
-      visibleRowCount: rows.length,
-      shouldVirtualizeRows,
-      virtualItemCount: virtualItems.length,
-      renderMode,
-    });
-  }, [renderMode, rows.length, shouldVirtualizeRows, virtualItems.length]);
-
-  const toggleDirectory = useCallback((itemId: string) => {
-    setExpandedIds((current) => {
-      const next = new Set(current);
-      if (next.has(itemId)) {
-        next.delete(itemId);
-      } else {
-        next.add(itemId);
-      }
-      return next;
-    });
-  }, []);
-
-  if (!shouldVirtualizeRows || virtualItems.length === 0) {
-    return (
-      <div role="tree" className="min-w-0">
-        {rows.map((row) => (
-          <VirtualFileTreeRow
-            key={row.item.id}
-            row={row}
-            selected={selectedId === row.item.id}
-            onSelect={setSelectedId}
-            onToggleDirectory={toggleDirectory}
-          />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      role="tree"
-      className="relative min-w-0"
-      style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-    >
-      {virtualItems.map((virtualItem) => {
-        const row = rows[virtualItem.index];
-        if (!row) return null;
-        return (
-          <VirtualFileTreeRow
-            key={virtualItem.key}
-            row={row}
-            selected={selectedId === row.item.id}
-            virtualStart={virtualItem.start}
-            virtualSize={virtualItem.size}
-            onSelect={setSelectedId}
-            onToggleDirectory={toggleDirectory}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function VirtualFileTreeRow({
-  row,
-  selected,
-  virtualStart,
-  virtualSize,
-  onSelect,
-  onToggleDirectory,
-}: {
-  readonly row: VirtualFileTreeRowModel;
-  readonly selected: boolean;
-  readonly virtualStart?: number;
-  readonly virtualSize?: number;
-  readonly onSelect: (itemId: string) => void;
-  readonly onToggleDirectory: (itemId: string) => void;
-}) {
-  const item = row.item;
-  const disabled = item.disabled === true;
-  const isLeaf = !row.hasChildren;
-  const Icon =
-    selected && item.selectedIcon
-      ? item.selectedIcon
-      : row.isOpen && item.openIcon
-        ? item.openIcon
-        : (item.icon ?? (isLeaf ? DefaultFileIcon : DefaultFolderIcon));
-  const paddingLeft = row.level * TREE_INDENT_PX + 8 + (isLeaf ? 18 : 0);
-
-  const activate = () => {
-    if (disabled) return;
-    onSelect(item.id);
-    if (row.hasChildren) {
-      onToggleDirectory(item.id);
-      item.onClick?.();
-      return;
-    }
-    item.onClick?.();
-  };
-
-  return (
-    <button
-      type="button"
-      role="treeitem"
-      aria-expanded={row.hasChildren ? row.isOpen : undefined}
-      aria-level={row.level + 1}
-      aria-selected={selected}
-      disabled={disabled}
-      className={cn(
-        'group flex w-full items-center pr-2 text-left text-sm outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
-        virtualStart !== undefined && 'absolute left-0 top-0',
-        selected &&
-          'bg-selection text-selection-foreground hover:bg-selection hover:text-selection-foreground',
-        disabled && 'cursor-not-allowed opacity-50',
-        item.className
-      )}
-      style={{
-        height: `${virtualSize ?? VIRTUAL_FILE_TREE_ROW_HEIGHT_PX}px`,
-        paddingLeft,
-        ...(virtualStart === undefined ? {} : { transform: `translateY(${virtualStart}px)` }),
-      }}
-      onClick={activate}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          activate();
-          return;
-        }
-        if (!row.hasChildren) return;
-        if (event.key === 'ArrowRight' && !row.isOpen) {
-          event.preventDefault();
-          onSelect(item.id);
-          onToggleDirectory(item.id);
-          item.onClick?.();
-        } else if (event.key === 'ArrowLeft' && row.isOpen) {
-          event.preventDefault();
-          onSelect(item.id);
-          onToggleDirectory(item.id);
-        }
-      }}
-    >
-      {row.hasChildren ? (
-        <ChevronRight
-          className={cn(
-            'mr-0.5 h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform duration-200',
-            row.isOpen && 'rotate-90'
-          )}
-        />
-      ) : null}
-      <Icon className="mr-1 h-4 w-4 shrink-0" />
-      <span className="min-w-0 truncate" title={item.id}>
-        {item.name}
-      </span>
-    </button>
-  );
-}
-
 function ControlledFileTreeView({
   handleOpenFile,
   fileProvider,
@@ -370,7 +175,12 @@ function ControlledFileTreeView({
       : providerFileTree.state;
     return fileTreeToTreeData(tree, handleOpenFile, handleLazyDirectoryOpen);
   }, [changedFilePathSet, providerFileTree.state, handleOpenFile, handleLazyDirectoryOpen]);
-  const shouldVirtualizeTree = shouldVirtualizeFileTreeData(fileTreeData);
+  // Walks the whole tree, so keep it tied to the tree data instead of re-running
+  // on every unrelated re-render of this component.
+  const shouldVirtualizeTree = useMemo(
+    () => shouldVirtualizeFileTreeData(fileTreeData),
+    [fileTreeData]
+  );
   const message = providerFileTree.message ?? fileProviderMessage;
 
   // Collapse the connecting/ready phases into a single "loading" surface: the
@@ -619,7 +429,10 @@ const AutoFileTreeView = ({
     () => fileTreeToTreeData(activeFileTree, handleOpenFile, handleLazyDirectoryOpen),
     [activeFileTree, handleLazyDirectoryOpen, handleOpenFile]
   );
-  const shouldVirtualizeTree = shouldVirtualizeFileTreeData(fileTreeData);
+  const shouldVirtualizeTree = useMemo(
+    () => shouldVirtualizeFileTreeData(fileTreeData),
+    [fileTreeData]
+  );
   const localStatus = localProjectFileData.status;
   const localError = localProjectFileData.error;
   const localHasEntry = Boolean(localProjectFileData.entry);

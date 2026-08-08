@@ -56,10 +56,18 @@ export function flattenVisibleFileTreeRows(
   return rows;
 }
 
+// Returns the SAME set reference when nothing was pruned. The caller feeds this
+// straight into `setExpandedIds` on every tree-data change, so handing back a
+// fresh Set for a no-op would re-render, re-flatten, and re-measure the virtual
+// list every time the file index churns.
 export function pruneExpandedFileTreeIds(
   expandedIds: ReadonlySet<string>,
   items: readonly TreeDataItem[]
-): Set<string> {
+): ReadonlySet<string> {
+  if (expandedIds.size === 0) {
+    return expandedIds;
+  }
+
   const validIds = new Set<string>();
   const walk = (nodes: readonly TreeDataItem[]) => {
     for (const node of nodes) {
@@ -70,5 +78,12 @@ export function pruneExpandedFileTreeIds(
     }
   };
   walk(items);
-  return new Set([...expandedIds].filter((id) => validIds.has(id)));
+
+  const kept = new Set<string>();
+  for (const id of expandedIds) {
+    if (validIds.has(id)) {
+      kept.add(id);
+    }
+  }
+  return kept.size === expandedIds.size ? expandedIds : kept;
 }

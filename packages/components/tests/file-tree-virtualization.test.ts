@@ -62,4 +62,15 @@ describe('file tree virtualization helpers', () => {
       ...pruneExpandedFileTreeIds(new Set(['src', 'missing', 'src/index.ts']), tree),
     ]).toEqual(['src']);
   });
+
+  it('keeps the set reference when nothing is pruned', () => {
+    const expanded = new Set(['src', 'src/components']);
+    expect(pruneExpandedFileTreeIds(expanded, tree)).toBe(expanded);
+
+    const empty = new Set<string>();
+    expect(pruneExpandedFileTreeIds(empty, tree)).toBe(empty);
+
+    const stale = new Set(['src', 'missing']);
+    expect(pruneExpandedFileTreeIds(stale, tree)).not.toBe(stale);
+  });
 });
