@@ -43,7 +43,10 @@ delegation proofs or a shared-machine gate without a new product and security de
   Do not restore a per-trigger scan: `onMetaRoomSynced` fires on Streams recovery, so a
   misread transport edge turns into an O(rooms) scan every few seconds. Coalescing bounds
   the work per trigger, not the trigger rate — keeping that rate sane is the connection
-  recovery boundary's job
+  recovery boundary's job, and it now does: `onMetaRoomSynced` is rate-limited in
+  `../lib/loro/connection-recovery.ts`, while the cheap "back online" edge moved to
+  `onStreamsOnline`. Do not add a competing throttle here — that would move the cost
+  model and hide the one that matters
   (context/code-collab-flow.md).
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns: the agent
   starts immediately, but turn-scoped history LIST writes (assistant entry, ACP

@@ -79,6 +79,7 @@ import {
 import {
   LoroConnectionRecoveryController,
   type MetaRoomSyncedListener,
+  type StreamsOnlineListener,
 } from './connection-recovery';
 import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
 import type { ModelInfo } from '@lody/shared';
@@ -501,9 +502,12 @@ export class LoroDocumentManager {
       workspaceId: this.workspaceId,
       logger: this.logger,
     });
-    this.detachMachineFlockMetaRoomSyncedListener = this.connectionRecovery.onMetaRoomSynced(
+    // Parked-work release, not a rescan: a dirty Machine Flock doc arms no
+    // retry timer of its own when there is no transport, so this signal is its
+    // ONLY wake-up. It must stay on the unthrottled online edge.
+    this.detachMachineFlockMetaRoomSyncedListener = this.connectionRecovery.onStreamsOnline(
       (reason) => {
-        this.machineFlockSync.retryDirtyNow(`meta-room-synced:${reason}`);
+        this.machineFlockSync.retryDirtyNow(`streams-online:${reason}`);
       }
     );
   }
@@ -799,8 +803,18 @@ export class LoroDocumentManager {
     await this.connectionRecovery.reconnect('manual');
   }
 
+  /**
+   * Expensive recovery signal ("rescan the workspace index"). Rate-limited by
+   * the recovery controller. For "release work parked while offline", use
+   * {@link onStreamsOnline} instead.
+   */
   onMetaRoomSynced(listener: MetaRoomSyncedListener): () => void {
     return this.connectionRecovery.onMetaRoomSynced(listener);
+  }
+
+  /** Cheap, unthrottled "the Streams plane is usable again" signal. */
+  onStreamsOnline(listener: StreamsOnlineListener): () => void {
+    return this.connectionRecovery.onStreamsOnline(listener);
   }
 
   async waitUntilMetaSynced(

@@ -447,6 +447,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly cloudPort: CloudPort;
   private detachPreparationRecovery: (() => void) | null = null;
   private preparationRecoveryChain: Promise<void> = Promise.resolve();
+  /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
+  private preparationRecoveryQueued = false;
   private preparationRecoveryGeneration = 0;
   // Rebalance requests are serialized because the per-session limit is derived from a
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
@@ -747,26 +749,37 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private enqueueSpeculativeWorktreeRecovery(reason: string): void {
+    // Bound a burst to one running + one queued pass. This is an O(sessions)
+    // filesystem sweep on a recovery signal, and without a latch every
+    // transport edge appended another full pass to the chain — the dispatch
+    // bootstrap scan has had this latch all along, this one was missing it.
+    if (this.preparationRecoveryQueued) {
+      return;
+    }
+    this.preparationRecoveryQueued = true;
     this.preparationRecoveryChain = this.preparationRecoveryChain
-      .then(
-        async () =>
-          await recoverStaleSpeculativeWorktrees({
-            workspaceId: this.workspaceId,
-            machineId: this.machineId,
-            logger: this.logger,
-            isActiveSession: (sessionId) =>
-              this.preparationService.getState(sessionId) !== null ||
-              this.pendingSessionCreates.has(sessionId) ||
-              this.sessions.has(sessionId),
-            isDurableSession: async (sessionId) => {
-              const record = await this.workspaceDocument.repo.getDocMeta(
-                getSessionRoomId(sessionId)
-              );
-              return !!record?.meta && !isLoroRepoDocDeleted(record);
-            },
-          })
-      )
+      .then(async () => {
+        // Released before the sweep runs, so a signal arriving DURING it still
+        // gets its own follow-up pass and nothing is silently skipped.
+        this.preparationRecoveryQueued = false;
+        await recoverStaleSpeculativeWorktrees({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          logger: this.logger,
+          isActiveSession: (sessionId) =>
+            this.preparationService.getState(sessionId) !== null ||
+            this.pendingSessionCreates.has(sessionId) ||
+            this.sessions.has(sessionId),
+          isDurableSession: async (sessionId) => {
+            const record = await this.workspaceDocument.repo.getDocMeta(
+              getSessionRoomId(sessionId)
+            );
+            return !!record?.meta && !isLoroRepoDocDeleted(record);
+          },
+        });
+      })
       .catch((error: unknown) => {
+        this.preparationRecoveryQueued = false;
         this.logger.debug(
           `Failed speculative worktree recovery (${reason}): ${formatErrorMessage(error)}`
         );
