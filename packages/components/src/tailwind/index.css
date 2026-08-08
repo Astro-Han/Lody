@@ -1795,6 +1795,56 @@ pre,
  ---break---
  */
 
+/* Spinners must rotate about their OWN center, not orbit a point.
+   `animate-spin` is `rotate(360deg)` with the default
+   `transform-origin: 50% 50%`, and `transform-box`'s initial value is
+   `view-box` — for an SVG that percentage resolves against the nearest
+   SVG viewport rather than the element's CSS box. A root `<svg>` has a
+   CSS layout box, so `view-box` is specified to act as `border-box`
+   there and modern engines land on the box center. But nothing in the
+   markup states that intent, so any element that loses its CSS layout
+   box, is sized asymmetrically, or is rotated by an engine resolving
+   the percentage against the 24-unit `viewBox` pivots off-center — the
+   glyph then sweeps a circle around a point beside it (measured: a
+   14px icon pivoting on the viewBox center orbits with a ~14px
+   diameter, i.e. wider than the icon itself) instead of turning in
+   place. Pinning both properties states the intent once, globally.
+
+   `flex-shrink: 0` belongs here for the same reason: in a tight flex
+   row (the mobile home status pill, whose label truncates) a spinner
+   without it is compressed to a non-square box, so the rotation
+   sweeps an ellipse and the glyph visibly wobbles. Measured 14×14 →
+   13.55×15.43 in the reconnecting pill before this rule.
+
+   `@layer base` keeps this below utilities, so an explicit
+   `origin-*` / `shrink` utility at a call site still wins. */
+@layer base {
+  svg.animate-spin {
+    transform-box: border-box;
+    transform-origin: 50% 50%;
+    flex-shrink: 0;
+  }
+
+  /* Two sites animate an HTML wrapper instead of the glyph, to keep an
+     always-on spinner on the compositor (see `sidebar-row-shared.tsx`
+     and `session-syncing-indicator.tsx`). A wrapper is only equivalent
+     while its box matches the glyph's: the moment anything else lands
+     inside it (a label, a gap) its box grows, its center moves off the
+     glyph, and the glyph orbits — measured 64px of travel for a
+     wrapper that also contained its "Syncing" label. These wrappers
+     must therefore stay icon-only and explicitly sized; centering the
+     origin here makes that failure mode a wobble-free no-op rather
+     than an orbit. */
+  span.animate-spin {
+    transform-box: border-box;
+    transform-origin: 50% 50%;
+  }
+}
+
+/*
+ ---break---
+ */
+
 /* Mobile drill-in transition for `MobileDrillPageLayout` (and any
    future "push" routes). Pure CSS keyframes so the slide runs on the
    compositor thread independent of main-thread work — framer-motion's
