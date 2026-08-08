@@ -95,7 +95,7 @@ import {
   type ManagedRuntimeName,
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
-import { AcpAuthenticationRequiredError } from '@/agent/agent-client';
+import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
 import {
   AcpAuthenticationManager,
   type AcpAuthenticationProgressEvent,
@@ -1081,6 +1081,12 @@ export class SessionExecutionService {
     return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
       const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
       if (!releaseConflict) {
+        // Nothing was submitted, so this guide is still ours to run. Only the
+        // dispatch pointer is written: the history flip needs the lease we just
+        // failed to take, and dispatch honors the pointer on its own.
+        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+          canWriteHistory: false,
+        });
         return {
           type: 'session/steer_response',
           sessionId: options.sessionId,
@@ -1117,15 +1123,30 @@ export class SessionExecutionService {
       disposition,
       ...(error ? { error } : {}),
     });
+    /**
+     * The agent never took this prompt, so the user turn is still ours to run.
+     * Only for rejections that provably happened before (or instead of) provider
+     * submission — after submission the provider may already have committed the
+     * steer, and re-sending would duplicate it.
+     */
+    const rejectUndelivered = async (
+      disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
+      error?: string
+    ): Promise<SessionSteerResponse> => {
+      await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+        canWriteHistory: true,
+      });
+      return reject(disposition, error);
+    };
     const runtime = this.turnRuntimeBySession.get(options.sessionId);
     if (!runtime || !runtime.session) {
-      return reject('no-active-turn');
+      return await rejectUndelivered('no-active-turn');
     }
     if (runtime.turnId !== options.expectedTurnId) {
-      return reject('stale-turn');
+      return await rejectUndelivered('stale-turn');
     }
     if (!runtime.promptInFlight) {
-      return reject('no-active-turn');
+      return await rejectUndelivered('no-active-turn');
     }
     if (runtime.userTurnId === options.userTurnId) {
       return {
@@ -1139,29 +1160,35 @@ export class SessionExecutionService {
     const { agentClient, acpSessionId } = runtime.session;
     const steerCapability = agentClient?.getAcknowledgedSteerCapability();
     if (!agentClient || !acpSessionId || !steerCapability) {
-      return reject('unsupported');
+      return await rejectUndelivered('unsupported');
     }
     if (steerCapability.configPolicy === 'active') {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
       if (mismatch) {
-        return reject('unsupported', `Active turn configuration differs: ${mismatch}`);
+        return await rejectUndelivered(
+          'unsupported',
+          `Active turn configuration differs: ${mismatch}`
+        );
       }
     }
-    const rejectBeforeProviderSubmission = (): SessionSteerResponse | null => {
+    const rejectBeforeProviderSubmission = async (): Promise<SessionSteerResponse | null> => {
       if (
         this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
         runtime.turnId !== options.expectedTurnId
       ) {
-        return reject('stale-turn');
+        return await rejectUndelivered('stale-turn');
       }
-      // No provider request has been submitted yet, so the Web client can
-      // safely promote this guide to an ordinary follow-up turn.
+      // No provider request has been submitted yet, so this guide is still
+      // ours to run as an ordinary follow-up turn.
       if (!runtime.promptInFlight) {
-        return reject('no-active-turn');
+        return await rejectUndelivered('no-active-turn');
       }
       return null;
     };
 
+    // Everything up to `steerPrompt` returning is provably undelivered; after
+    // that only the agent's own inject-or-refuse verdict can say so.
+    let submittedToAgent = false;
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
       const inputBlocks = normalizeSessionInputBlocks(
@@ -1174,7 +1201,7 @@ export class SessionExecutionService {
         inputBlocks,
         issuePRMentions: options.inputConfig.issuePRMentions,
       });
-      const preConfigRejection = rejectBeforeProviderSubmission();
+      const preConfigRejection = await rejectBeforeProviderSubmission();
       if (preConfigRejection) {
         return preConfigRejection;
       }
@@ -1182,18 +1209,22 @@ export class SessionExecutionService {
         await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig);
       }
 
-      const preSubmitRejection = rejectBeforeProviderSubmission();
+      const preSubmitRejection = await rejectBeforeProviderSubmission();
       if (preSubmitRejection) {
         return preSubmitRejection;
       }
       const ownedPromptRun = runtime.activePromptRun;
       if (!ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
-        return reject('busy', 'Prompt owner was transitioning between logical turns');
+        return await rejectUndelivered(
+          'busy',
+          'Prompt owner was transitioning between logical turns'
+        );
       }
 
       const previousTurnId = runtime.turnId;
       const previousUserTurnId = runtime.userTurnId;
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
+      submittedToAgent = true;
       const application = await steerRun.applied;
       try {
         if (
@@ -1271,8 +1302,105 @@ export class SessionExecutionService {
         application.release();
       }
     } catch (error) {
-      return reject('error', formatErrorMessage(error));
+      const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
+      if (!notDelivered) {
+        return reject('error', formatErrorMessage(error));
+      }
+      // `no-active-turn` for the agent's own refusal: it is the disposition
+      // steer-aware clients already treat as "re-send this turn normally", so
+      // an older client recovers the message too.
+      return await rejectUndelivered(
+        error instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
+        formatErrorMessage(error)
+      );
     }
+  }
+
+  /**
+   * Re-route a steer the agent never accepted into ordinary dispatch, so it runs
+   * as the next message once the active turn ends — the same treatment a queued
+   * message gets. Without this it would sit in `pending_apply`, which dispatch
+   * skips, and never run at all.
+   *
+   * The `latestUserMsgId` pointer is the load-bearing half, not the entry status:
+   * `SessionDispatchWatcher.sessionNeedsActiveWatch` reads META only, so a turn
+   * visible solely in history is dropped the moment the session goes idle (the
+   * watcher unsubscribes) and is never reconsidered, including after a daemon
+   * restart. The pointer is also what survives a cancel. It is the same pointer a
+   * Web send writes, so this is the ordinary dispatch signal, not a second path.
+   */
+  private async requeueUndeliveredSteer(
+    sessionId: SessionId,
+    userTurnId: string,
+    { canWriteHistory }: { canWriteHistory: boolean }
+  ): Promise<void> {
+    try {
+      // Guards against a late duplicate steer request resurrecting a turn that
+      // already ran: it is running now, it finished here, or it finished before
+      // its history entry ever synced.
+      if (
+        this.getActiveUserTurnId(sessionId) === userTurnId ||
+        this.getTerminalUserTurnStatusWithoutEntry(sessionId, userTurnId) !== undefined
+      ) {
+        return;
+      }
+      const meta = await this.getSessionMeta(sessionId);
+      if (meta?.lastHandledUserMsgId === userTurnId) {
+        return;
+      }
+      if (canWriteHistory) {
+        const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+        if (!(await this.markSteerTurnPending(sessionDoc, userTurnId))) {
+          return;
+        }
+      }
+      await this.upsertSessionMeta(sessionId, {
+        latestUserMsgId: userTurnId,
+        lastMissingHistoryUserMsgId: undefined,
+      });
+      this.deps.logger.info(
+        `[${sessionId}] Undelivered steer ${userTurnId} requeued as a follow-up turn`
+      );
+    } catch (error) {
+      this.deps.logger.error(
+        `[${sessionId}] Failed to requeue undelivered steer ${userTurnId}: ${formatErrorMessage(
+          error
+        )}`
+      );
+    }
+  }
+
+  /**
+   * Flip a guide's history entry from `pending_apply` (steer intent, which
+   * dispatch deliberately skips) to `pending` (dispatchable).
+   *
+   * Returns false when the entry has already started, finished, or been
+   * canceled, so a late duplicate steer request cannot resurrect it. A missing
+   * entry returns true: it has not synced here yet and the RPC offer carries the
+   * payload.
+   */
+  private async markSteerTurnPending(
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<boolean> {
+    let queueable = true;
+    await sessionDoc.updateHistory((history) =>
+      history.map((entry) => {
+        if (entry.id !== userTurnId || entry.role !== 'user') {
+          return entry;
+        }
+        queueable =
+          entry.status === 'pending_apply' || entry.status === 'pending' || entry.status === 'seen';
+        return entry.status === 'pending_apply'
+          ? {
+              ...entry,
+              status: 'pending' as const,
+              read: getLegacyReadForSessionHistoryStatus('pending'),
+            }
+          : entry;
+      })
+    );
+    return queueable;
   }
 
   async dispatchPreparedSessionTurn(options: PreparedSessionDispatchOptions): Promise<void> {

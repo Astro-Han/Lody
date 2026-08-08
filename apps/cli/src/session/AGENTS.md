@@ -59,7 +59,21 @@ delegation proofs or a shared-machine gate without a new product and security de
   It is the per-session execution mutex: never mint a second visible turn while a
   `TurnRuntimeState` is registered. User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
-  the same history entry. Because teardown/cancel finalize (`message-handler.ts`
+  the same history entry.
+  INVARIANT: a steer (guide) the agent never accepted must not stay parked in
+  `pending_apply` — dispatch skips that status, so nothing else would ever run it.
+  `requeueUndeliveredSteer` hands it back to ordinary dispatch, and the load-bearing
+  write is the `latestUserMsgId` POINTER, not the entry status: `sessionNeedsActiveWatch`
+  reads meta only, so a turn visible solely in history is dropped the moment the
+  session goes idle (the watcher unsubscribes) and never reconsidered, restart
+  included. That is also why `findNextDispatchableUserTurn` dispatches a
+  `pending_apply` entry the pointer explicitly names — the flip to `pending` is a UI
+  and durability nicety that a not-yet-synced entry never receives. Only
+  pre-submission rejections plus the agent's own `AgentSteerNotDeliveredError` refusal
+  qualify: after submission the provider may already have committed the steer, and
+  re-sending would duplicate it. An entry that is already active, terminal, or past
+  `lastHandledUserMsgId` is left alone so a late duplicate cannot resurrect a turn.
+  Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
   in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s
   existing-entry branch clears `finished`/`endedAt`/`permissionWaitMs` when re-adopting

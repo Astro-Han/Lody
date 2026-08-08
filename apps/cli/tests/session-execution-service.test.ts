@@ -24,7 +24,10 @@ import {
 } from '@lody/shared';
 import type { SessionManager } from '../src/session/session-manager';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
-import { AcpAuthenticationRequiredError } from '../src/agent/agent-client';
+import {
+  AcpAuthenticationRequiredError,
+  AgentSteerNotDeliveredError,
+} from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
 
@@ -661,7 +664,13 @@ describe('SessionExecutionService', () => {
   });
 
   it('rejects a Codex steer whose requested configuration differs from the active turn', async () => {
-    const deps = createBaseDeps({});
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
     const service = new SessionExecutionService(deps);
     const sessionId = 'session-codex-steer-config' as SessionId;
     const findSteerConfigMismatch = vi.fn(() => 'model requested gpt-next, active gpt-current');
@@ -718,6 +727,198 @@ describe('SessionExecutionService', () => {
       })
     ).resolves.toMatchObject({ applied: false, disposition: 'busy' });
     expect(deps.applyAcpModeAndModel).not.toHaveBeenCalled();
+    // Neither guide reached Codex, so both are handed back to dispatch instead
+    // of being stranded in `pending_apply`.
+    const dispatchPointerWrites = upsertDocMeta.mock.calls.filter(
+      (call) => (call[1] as { latestUserMsgId?: string }).latestUserMsgId !== undefined
+    );
+    expect(
+      dispatchPointerWrites.map((call) => (call[1] as { latestUserMsgId?: string }).latestUserMsgId)
+    ).toEqual(['user-2', 'user-3']);
+  });
+
+  it('queues a steer the agent refused as the next ordinary turn', async () => {
+    let history: SessionHistoryInput[] = [
+      { id: 'user-1', role: 'user', status: 'handled', read: true } as SessionHistoryInput,
+      {
+        id: 'user-2',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
+        inputConfig: { prompt: 'do it differently' },
+      } as SessionHistoryInput,
+    ];
+    const sessionDoc = {
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+    };
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-refused' as SessionId;
+    // The agent answered the acknowledged steer request with a refusal, which
+    // is proof the prompt never joined the live turn.
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: Promise.reject(
+        new AgentSteerNotDeliveredError(
+          'Agent refused the acknowledged steer request _session/steering: No active Codex turn to steer'
+        )
+      ),
+    }));
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: {
+        agentClient: {
+          getAcknowledgedSteerCapability: vi.fn(() => ({
+            provider: 'codex',
+            appliedNotificationMethod: 'codex/steerApplied',
+            upstreamTurn: 'same',
+            configPolicy: 'active',
+          })),
+          findSteerConfigMismatch: vi.fn(() => null),
+          steerPrompt,
+        },
+        acpSessionId: 'acp-steer-refused' as ACPSessionId,
+      },
+      promptInFlight: true,
+      activePromptRun: { turnId: 'assistant:user-1' },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    await expect(
+      service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-07-19T00:00:00.000Z',
+        inputConfig: { prompt: 'do it differently' },
+      })
+    ).resolves.toMatchObject({ applied: false, disposition: 'no-active-turn' });
+
+    expect(steerPrompt).toHaveBeenCalledOnce();
+    // Durable source: the entry becomes dispatchable, so the watcher runs it
+    // once the active turn ends (and again after a daemon restart).
+    expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
+      status: 'pending',
+      read: false,
+    });
+    expect(history.find((entry) => entry.id === 'user-1')).toMatchObject({ status: 'handled' });
+    // The load-bearing half: `sessionNeedsActiveWatch` reads meta only, so a
+    // history-only entry would be dropped the moment the session goes idle.
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ latestUserMsgId: 'user-2' })
+    );
+    // Ownership never moved: the refused steer must not seal the running turn.
+    expect(deps.turnFinalization.finalizeACPState).not.toHaveBeenCalled();
+    expect(deps.beginConversationTurn).not.toHaveBeenCalled();
+  });
+
+  it('does not requeue an undelivered steer whose turn already left the pending state', async () => {
+    let history: SessionHistoryInput[] = [
+      { id: 'user-2', role: 'user', status: 'processing', read: true } as SessionHistoryInput,
+    ];
+    const sessionDoc = {
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+    };
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-duplicate' as SessionId;
+
+    // No runtime at all: a duplicate steer request landing after the turn it
+    // targeted already ran.
+    await expect(
+      service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-07-19T00:00:00.000Z',
+        inputConfig: { prompt: 'do it differently' },
+      })
+    ).resolves.toMatchObject({ applied: false, disposition: 'no-active-turn' });
+    expect(history[0]).toMatchObject({ status: 'processing' });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it('keeps a steer that failed after submission out of the dispatch queue', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-ambiguous' as SessionId;
+    // A plain failure after submission is ambiguous — the provider may already
+    // have committed the steer, so re-sending it would duplicate the message.
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      applied: Promise.reject(new Error('Steer steer-1 completed before application')),
+    }));
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: {
+        agentClient: {
+          getAcknowledgedSteerCapability: vi.fn(() => ({
+            provider: 'claudeCode',
+            appliedNotificationMethod: 'claude/steerApplied',
+            upstreamTurn: 'handoff',
+            configPolicy: 'apply',
+          })),
+          steerPrompt,
+        },
+        acpSessionId: 'acp-steer-ambiguous' as ACPSessionId,
+      },
+      promptInFlight: true,
+      activePromptRun: { turnId: 'assistant:user-1' },
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    await expect(
+      service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-07-19T00:00:00.000Z',
+        inputConfig: { prompt: 'do it differently' },
+      })
+    ).resolves.toMatchObject({ applied: false, disposition: 'error' });
+    expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
   it('skips completion notifications while a Codex goal remains active', async () => {

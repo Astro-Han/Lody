@@ -13,7 +13,7 @@ import type {
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
 
-import { AgentClient } from '../src/agent/agent-client';
+import { AgentClient, AgentSteerNotDeliveredError } from '../src/agent/agent-client';
 import { loadEnv } from '../src/utils/const';
 import type { Logger } from '../src/utils/logger';
 
@@ -408,6 +408,103 @@ describe('AgentClient plan mode permission restoration', () => {
       await postApplicationUpdate;
       expect(notificationCompleted).toBe(true);
       expect(onUpdateMessage).toHaveBeenCalledOnce();
+    });
+
+    /** Wire an acknowledged-steer-capable Codex client around one steer request. */
+    const createSteerClient = (
+      request: () => Promise<unknown>,
+      completion: Promise<never> = new Promise(() => {})
+    ) => {
+      const { client } = createTestClient({ agentType: 'codex' });
+      const requestSpy = vi.fn(request);
+      // @ts-expect-error - focused protocol-boundary setup
+      client.connection = { request: requestSpy };
+      // @ts-expect-error - focused session-identity setup
+      client.acpSessionId = 'acp-test' as ACPSessionId;
+      // @ts-expect-error - focused capability-negotiation setup
+      client.acknowledgedSteerCapability = {
+        provider: 'codex',
+        requestMethod: '_session/steering',
+        appliedNotificationMethod: 'codex/steerApplied',
+        upstreamTurn: 'same',
+        configPolicy: 'active',
+      };
+      // @ts-expect-error - the steer rides the turn's own prompt completion
+      client.activePromptCompletion = {
+        sessionId: 'acp-test' as ACPSessionId,
+        promise: completion,
+      };
+      return { client, request: requestSpy };
+    };
+
+    it('reports an acknowledged steer the agent refused as not delivered', async () => {
+      // Codex answers `No active Codex turn to steer` once the turn the guide
+      // was aimed at has ended — inject-or-refuse, so nothing was taken.
+      const { client, request } = createSteerClient(async () => {
+        throw Object.assign(new Error('Invalid request: No active Codex turn to steer'), {
+          code: -32600,
+        });
+      });
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+
+      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+      expect(request).toHaveBeenCalledWith(
+        '_session/steering',
+        expect.objectContaining({ sessionId: 'acp-test', steerId: expect.any(String) })
+      );
+    });
+
+    it('keeps a steer whose request died in transport ambiguous', async () => {
+      // The frame may already have reached the agent, so re-sending this user
+      // turn could deliver the same message twice. Only the agent's own
+      // `invalid request` answer proves it declined.
+      const { client } = createSteerClient(async () => {
+        throw new Error('ACP connection closed');
+      });
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+
+      const error = await steerRun.applied.then(
+        () => null,
+        (reason: unknown) => reason
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(AgentSteerNotDeliveredError);
+    });
+
+    it('lets the refusal win when the steered turn ends before the agent answers', async () => {
+      // The Codex adapter drains session notifications before it refuses, so the
+      // upstream turn's own response routinely lands first. Rejecting on that
+      // response alone would downgrade a provable refusal to an ambiguous
+      // failure and strand the user's message.
+      let refuse!: (error: unknown) => void;
+      let completeTurn!: () => void;
+      const completion = new Promise<never>((resolve) => {
+        completeTurn = () => resolve(undefined as never);
+      });
+      const { client } = createSteerClient(
+        () =>
+          new Promise((_, reject) => {
+            refuse = reject;
+          }),
+        completion
+      );
+
+      const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
+        { type: 'text', text: 'guide' },
+      ]);
+      completeTurn();
+      await Promise.resolve();
+      refuse(
+        Object.assign(new Error('Invalid request: No active Codex turn to steer'), { code: -32600 })
+      );
+
+      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
     });
 
     it('handles rate limit extension notifications', async () => {
