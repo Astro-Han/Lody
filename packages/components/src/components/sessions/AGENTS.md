@@ -514,6 +514,18 @@ Code Collab file surfaces (data chain: [packages/components/AGENTS.md](../../../
   `session-file-content-view.tsx`.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `specs/code-collab-v2.md`.
+- **File tree: ONE row renderer** (`VirtualFileTree` in `components/file-tree-view.tsx`)
+  and ONE virtualization gate, counting VISIBLE rows. A second tree-wide count
+  used to swap in Radix `TreeView`, so a lazily growing tree thrashed between two
+  row implementations — do not reintroduce either. An empty virtual range renders
+  NO rows (never `rows.map`) and keeps the total-size spacer: the ScrollArea
+  viewport is an ANCESTOR ref, so it is still null when TanStack reads
+  `getScrollElement()`, making the first range always empty — a full-render
+  fallback there mounted the whole tree. Re-`measure()` on viewport attach/resize
+  (as `shared/option-selector.tsx` does). Rows are `memo`'d against per-frame
+  scroll re-renders, which needs `pruneExpandedFileTreeIds` to return its input
+  Set on a no-op prune (watcher ticks churn `data`) and icon factories to cache by
+  resolved icon name. Coverage: `tests/file-tree-virtual-rows.test.tsx`.
 - **Viewers are intentionally NOT code-split** (file viewer, diff viewer, diff
   panel, inner Monaco/Markdown are static imports). Code-splitting only pays off
   over a network; in the local Electron bundle a lazy `import()` adds no benefit
