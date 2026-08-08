@@ -525,7 +525,12 @@ Code Collab file surfaces (data chain: [packages/components/AGENTS.md](../../../
   (as `shared/option-selector.tsx` does). Rows are `memo`'d against per-frame
   scroll re-renders, which needs `pruneExpandedFileTreeIds` to return its input
   Set on a no-op prune (watcher ticks churn `data`) and icon factories to cache by
-  resolved icon name. Coverage: `tests/file-tree-virtual-rows.test.tsx`.
+  resolved icon name. Row labels keep the `TreeView` contract — a Radix tooltip
+  with the bare NAME, only when the label is clipped — but measure truncation on
+  hover, never in a mount effect, since a per-row measurement forces layout for
+  every row scrolled into view. Do not swap in a native `title`: it shows the full
+  path in browser chrome and fires for names that fit.
+  Coverage: `tests/file-tree-virtual-rows.test.tsx`.
 - **Viewers are intentionally NOT code-split** (file viewer, diff viewer, diff
   panel, inner Monaco/Markdown are static imports). Code-splitting only pays off
   over a network; in the local Electron bundle a lazy `import()` adds no benefit

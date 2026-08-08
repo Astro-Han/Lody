@@ -185,6 +185,56 @@ describe('VirtualFileTree row mounting', () => {
     const tree = host.querySelector('[role="tree"]') as HTMLElement | null;
     expect(tree?.style.height).toBe('');
   });
+
+  // Row labels must not fall back to a native `title` tooltip. The shared
+  // TreeView this renderer replaced showed the FILE NAME in a styled Radix
+  // tooltip and only when the label was actually clipped; a `title` would
+  // instead show a browser-native box, carry the full path, and fire even for
+  // names that fit.
+  it('does not put a native title tooltip on row labels', async () => {
+    const paths = ['a/very/deeply/nested/directory/with-a-long-file-name.ts', 'short.ts'];
+    const host = await render(
+      createElement(FileTreeProviderView, {
+        fileProvider: createReadyProvider(paths),
+        fileProviderPending: false,
+        handleOpenFile: () => undefined,
+      })
+    );
+
+    expect(host.querySelectorAll('[title]')).toHaveLength(0);
+  });
+
+  // Truncation is measured on hover, not in a mount effect: in a virtual list a
+  // per-row mount measurement forces layout for every row scrolled into view.
+  it('shows a name-only tooltip once a hovered label proves to be clipped', async () => {
+    const paths = ['a-very-long-file-name-that-clips.ts'];
+    const host = await render(
+      createElement(FileTreeProviderView, {
+        fileProvider: createReadyProvider(paths),
+        fileProviderPending: false,
+        handleOpenFile: () => undefined,
+      })
+    );
+
+    const label = host.querySelector('[role="treeitem"] span') as HTMLElement;
+    // No tooltip trigger before hover — nothing has been measured yet.
+    expect(host.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
+
+    // jsdom reports 0 for both, so force the clipped case the way a real
+    // narrow panel would.
+    Object.defineProperty(label, 'scrollWidth', { configurable: true, get: () => 400 });
+    Object.defineProperty(label, 'clientWidth', { configurable: true, get: () => 120 });
+
+    // React maps onPointerEnter onto delegated `pointerover`, so dispatch that.
+    await act(async () => {
+      label.dispatchEvent(new Event('pointerover', { bubbles: true }));
+    });
+
+    const trigger = host.querySelector('[role="treeitem"] span');
+    expect(trigger?.getAttribute('data-state')).toBe('closed');
+    // The tooltip carries the bare name, not the full path.
+    expect(trigger?.textContent).toBe('a-very-long-file-name-that-clips.ts');
+  });
 });
 
 describe('file icon component identity', () => {

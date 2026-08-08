@@ -36,6 +36,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { runtimeAtom } from '@/atoms/runtime';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
 import { Button, ScrollArea } from '@/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
   createFileIconComponent,
   createFolderIconComponent,
@@ -228,17 +229,21 @@ function VirtualFileTree({
 
   if (!shouldVirtualizeRows) {
     return (
-      <div role="tree" className="min-w-0">
-        {rows.map((row) => (
-          <VirtualFileTreeRow
-            key={row.item.id}
-            row={row}
-            selected={selectedId === row.item.id}
-            onSelect={setSelectedId}
-            onToggleDirectory={toggleDirectory}
-          />
-        ))}
-      </div>
+      // Rows show a truncated-name tooltip, so they need a provider ancestor.
+      // Matches the 500ms delay the shared TreeView used for the same label.
+      <TooltipProvider delayDuration={500}>
+        <div role="tree" className="min-w-0">
+          {rows.map((row) => (
+            <VirtualFileTreeRow
+              key={row.item.id}
+              row={row}
+              selected={selectedId === row.item.id}
+              onSelect={setSelectedId}
+              onToggleDirectory={toggleDirectory}
+            />
+          ))}
+        </div>
+      </TooltipProvider>
     );
   }
 
@@ -246,27 +251,29 @@ function VirtualFileTree({
   // scrollport the scrollable height that lets a measure pass resolve a real
   // range, instead of collapsing to zero height and never recovering.
   return (
-    <div
-      role="tree"
-      className="relative min-w-0"
-      style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-    >
-      {virtualItems.map((virtualItem) => {
-        const row = rows[virtualItem.index];
-        if (!row) return null;
-        return (
-          <VirtualFileTreeRow
-            key={virtualItem.key}
-            row={row}
-            selected={selectedId === row.item.id}
-            virtualStart={virtualItem.start}
-            virtualSize={virtualItem.size}
-            onSelect={setSelectedId}
-            onToggleDirectory={toggleDirectory}
-          />
-        );
-      })}
-    </div>
+    <TooltipProvider delayDuration={500}>
+      <div
+        role="tree"
+        className="relative min-w-0"
+        style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+      >
+        {virtualItems.map((virtualItem) => {
+          const row = rows[virtualItem.index];
+          if (!row) return null;
+          return (
+            <VirtualFileTreeRow
+              key={virtualItem.key}
+              row={row}
+              selected={selectedId === row.item.id}
+              virtualStart={virtualItem.start}
+              virtualSize={virtualItem.size}
+              onSelect={setSelectedId}
+              onToggleDirectory={toggleDirectory}
+            />
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -364,12 +371,47 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
         />
       ) : null}
       <Icon className="mr-1 h-4 w-4 shrink-0" />
-      <span className="min-w-0 truncate" title={item.id}>
-        {item.name}
-      </span>
+      <VirtualFileTreeRowLabel name={item.name} />
     </button>
   );
 });
+
+// Shows the full name in a tooltip only when the label is actually clipped,
+// matching the shared `TreeView` row this renderer replaced.
+//
+// Truncation is measured on hover rather than in a per-row effect: this row
+// renders inside a virtual list, so measuring on mount would force a layout for
+// every row scrolled into view and give back part of the win this file exists
+// for. Hover is also the only moment the answer is needed.
+function VirtualFileTreeRowLabel({ name }: { readonly name: string }) {
+  const labelRef = useRef<HTMLSpanElement | null>(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  const measure = useCallback(() => {
+    const element = labelRef.current;
+    if (!element) return;
+    setIsTruncated(element.scrollWidth > element.clientWidth);
+  }, []);
+
+  const label = (
+    <span ref={labelRef} className="min-w-0 truncate" onPointerEnter={measure} onFocus={measure}>
+      {name}
+    </span>
+  );
+
+  if (!isTruncated) {
+    return label;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{label}</TooltipTrigger>
+      <TooltipContent side="top" align="start">
+        {name}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 function ControlledFileTreeView({
   handleOpenFile,
