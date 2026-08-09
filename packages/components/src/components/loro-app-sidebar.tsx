@@ -2585,7 +2585,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="text-sm text-foreground/80">
+          <div className="min-w-0 text-sm text-foreground/80 [overflow-wrap:anywhere]">
             {(pendingLocalProjectRemoval?.pathLabel ?? pendingLocalProjectRemoval?.name) || ''}
           </div>
           {pendingLocalProjectRemoval && pendingLocalProjectRemoval.runningSessionCount > 0 ? (
