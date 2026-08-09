@@ -1447,6 +1447,7 @@
   "sessions.goal.status.budgetLimited": "Goal 未完成",
   "sessions.goal.status.cleared": "Goal 已清除",
   "sessions.goal.status.complete": "Goal 已达成",
+  "sessions.goal.status.limited": "Goal 受限",
   "sessions.goal.status.paused": "Goal 已暂停",
   "sessions.history": "历史记录",
   "sessions.historyLoadFailed": "加载 {{provider}} 对话失败",

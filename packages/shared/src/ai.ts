@@ -1061,6 +1061,7 @@ export type SessionGoalStatus =
   | 'active'
   | 'paused'
   | 'blocked'
+  | 'limited'
   | 'usageLimited'
   | 'budgetLimited'
   | 'complete'
@@ -1074,13 +1075,11 @@ export type SessionGoalContent = {
   objective: string;
   status: SessionGoalStatus;
   tokenBudget?: number | null;
-  /** Legacy Codex goal telemetry. Current ACP goal snapshots do not report it. */
+  iterations?: number;
+  lastReason?: string | null;
   tokensUsed?: number;
-  /** Legacy Codex goal telemetry. Current ACP goal snapshots do not report it. */
   timeUsedSeconds?: number;
-  /** Legacy goal timestamp retained for previously persisted history. */
   createdAt?: number;
-  /** Legacy goal timestamp retained for previously persisted history. */
   updatedAt?: number;
 };
 

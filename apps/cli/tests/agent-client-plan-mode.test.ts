@@ -1278,7 +1278,49 @@ describe('AgentClient Codex goal session info', () => {
     ]);
   });
 
-  it('normalizes Codex goal metadata into sparse goal message content', async () => {
+  it('normalizes provider-neutral goal metadata for non-Codex agents', async () => {
+    const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient({
+      agentType: 'claude',
+    });
+
+    await client.sessionUpdate({
+      sessionId: 'acp-test',
+      update: {
+        sessionUpdate: 'session_info_update',
+        _meta: {
+          goal: {
+            objective: 'ship the release',
+            status: 'limited',
+            tokenBudget: 42_000,
+            iterations: 7,
+            lastReason: 'waiting for review',
+            tokensUsed: 12_000,
+            timeUsedSeconds: 90,
+            createdAt: 100,
+            updatedAt: 200,
+            controlMethod: '_session/goal',
+          },
+        },
+      },
+    } as unknown as SessionNotification);
+
+    expect(onThreadGoalUpdated).toHaveBeenCalledWith({
+      type: 'goal',
+      threadId: 'acp-test',
+      objective: 'ship the release',
+      status: 'limited',
+      tokenBudget: 42_000,
+      iterations: 7,
+      lastReason: 'waiting for review',
+      tokensUsed: 12_000,
+      timeUsedSeconds: 90,
+      createdAt: 100,
+      updatedAt: 200,
+    });
+    expect(onUpdateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps parsing legacy Codex goal metadata', async () => {
     const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient();
 
     await client.sessionUpdate({
@@ -1307,28 +1349,30 @@ describe('AgentClient Codex goal session info', () => {
     expect(onUpdateMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('handles a null Codex goal as cleared', async () => {
-    const { client, onThreadGoalCleared } = createTestClient();
+  it('handles a null provider-neutral goal as cleared', async () => {
+    const { client, onThreadGoalCleared } = createTestClient({ agentType: 'claude' });
 
     await client.sessionUpdate({
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: { codex: { goal: null } },
+        _meta: { goal: null },
       },
     });
 
     expect(onThreadGoalCleared).toHaveBeenCalledWith('acp-test');
   });
 
-  it('ignores invalid Codex goal metadata without breaking the session stream', async () => {
-    const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient();
+  it('ignores invalid provider-neutral goal metadata without breaking the session stream', async () => {
+    const { client, onThreadGoalUpdated, onUpdateMessage } = createTestClient({
+      agentType: 'claude',
+    });
 
     await client.sessionUpdate({
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: { codex: { goal: { objective: 42, status: 'active' } } },
+        _meta: { goal: { objective: 42, status: 'active' } },
       },
     } as unknown as SessionNotification);
 

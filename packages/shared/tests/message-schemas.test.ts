@@ -127,13 +127,15 @@ describe('message-schemas system_notice', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts current sparse Codex goal content', () => {
+  it('accepts provider-neutral goal content', () => {
     const result = MessageContentSchema.safeParse({
       type: 'goal',
       threadId: 'thread-1',
       objective: 'ship the release',
-      status: 'active',
-      tokenBudget: null,
+      status: 'limited',
+      tokenBudget: 42_000,
+      iterations: 7,
+      lastReason: 'waiting for review',
     });
 
     expect(result.success).toBe(true);

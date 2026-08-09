@@ -334,15 +334,22 @@ const ThreadGoalStatusSchema = z.enum([
   'active',
   'paused',
   'blocked',
+  'limited',
   'usageLimited',
   'budgetLimited',
   'complete',
   'cleared',
 ]);
-const CodexGoalSnapshotSchema = z.object({
+const GoalSnapshotSchema = z.object({
   objective: z.string(),
   status: ThreadGoalStatusSchema,
   tokenBudget: z.number().nullable().optional(),
+  iterations: z.number().optional(),
+  lastReason: z.string().nullable().optional(),
+  tokensUsed: z.number().optional(),
+  timeUsedSeconds: z.number().optional(),
+  createdAt: z.number().optional(),
+  updatedAt: z.number().optional(),
 });
 
 const CodexRetryErrorSchema = z.object({
@@ -760,7 +767,7 @@ export class AgentClient implements acp.Client {
 
     const notification = parseSessionNotification(params);
 
-    this.handleCodexGoalSessionInfoUpdate(notification);
+    this.handleGoalSessionInfoUpdate(notification);
     this.handleCodexWarningSessionInfoUpdate(notification);
     this.handleAgentSessionTitleUpdate(notification);
 
@@ -783,20 +790,39 @@ export class AgentClient implements acp.Client {
     return;
   }
 
-  private handleCodexGoalSessionInfoUpdate(notification: AcpSessionNotification): void {
-    if (!this.isCodexAgent() || notification.update.sessionUpdate !== 'session_info_update') {
+  private handleGoalSessionInfoUpdate(notification: AcpSessionNotification): void {
+    if (notification.update.sessionUpdate !== 'session_info_update') {
       return;
     }
 
-    const codexMeta = notification.update._meta?.codex;
-    if (typeof codexMeta !== 'object' || codexMeta === null || !('goal' in codexMeta)) {
+    const meta = notification.update._meta;
+    if (typeof meta !== 'object' || meta === null) {
       return;
     }
 
-    const parsed = z.object({ goal: CodexGoalSnapshotSchema.nullable() }).safeParse(codexMeta);
+    let goalContainer: unknown;
+    let source: 'ACP' | 'legacy Codex';
+    if ('goal' in meta) {
+      goalContainer = meta;
+      source = 'ACP';
+    } else {
+      const codexMeta = meta.codex;
+      if (
+        !this.isCodexAgent() ||
+        typeof codexMeta !== 'object' ||
+        codexMeta === null ||
+        !('goal' in codexMeta)
+      ) {
+        return;
+      }
+      goalContainer = codexMeta;
+      source = 'legacy Codex';
+    }
+
+    const parsed = z.object({ goal: GoalSnapshotSchema.nullable() }).safeParse(goalContainer);
     if (!parsed.success) {
       this.logger.debug(
-        `[${this.options.sessionId}] Dropping invalid Codex goal session info: ${parsed.error.message}`
+        `[${this.options.sessionId}] Dropping invalid ${source} goal session info: ${parsed.error.message}`
       );
       return;
     }
@@ -807,12 +833,19 @@ export class AgentClient implements acp.Client {
       return;
     }
 
+    const goal = parsed.data.goal;
     this.options.onThreadGoalUpdated?.({
       type: 'goal',
       threadId,
-      objective: sanitizeGoalObjective(parsed.data.goal.objective),
-      status: parsed.data.goal.status,
-      tokenBudget: parsed.data.goal.tokenBudget ?? null,
+      objective: sanitizeGoalObjective(goal.objective),
+      status: goal.status,
+      tokenBudget: goal.tokenBudget ?? null,
+      ...(goal.iterations !== undefined ? { iterations: goal.iterations } : {}),
+      ...(goal.lastReason !== undefined ? { lastReason: goal.lastReason } : {}),
+      ...(goal.tokensUsed !== undefined ? { tokensUsed: goal.tokensUsed } : {}),
+      ...(goal.timeUsedSeconds !== undefined ? { timeUsedSeconds: goal.timeUsedSeconds } : {}),
+      ...(goal.createdAt !== undefined ? { createdAt: goal.createdAt } : {}),
+      ...(goal.updatedAt !== undefined ? { updatedAt: goal.updatedAt } : {}),
     });
   }
 

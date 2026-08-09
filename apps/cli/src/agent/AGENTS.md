@@ -10,6 +10,10 @@ arrive: context/message-flow.md "Upstream".
 
 - `agent-client.ts` — the ACP connection: initialize/session lifecycle, client
   capabilities (fs, elicitation), permission/fs request handling, update callbacks.
+  Goal session-info updates use provider-neutral `_meta.goal`; keep the
+  `_meta.codex.goal` reader only as a compatibility fallback for older Codex adapters.
+  A present neutral field wins, including `null`, so malformed new metadata is not
+  silently hidden by a legacy duplicate.
   Its built-in `lody` stdio MCP config is an explicit environment allowlist, not
   ordinary child-process inheritance. Keep the public CLI deployment endpoints
   (`LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, `LODY_SERVER_URL`) in that config so
