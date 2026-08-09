@@ -12,6 +12,9 @@ mobile surfaces.
 - Add Storybook coverage for new presentational components and meaningful states.
 - All user-visible copy must go through i18n.
 - Prefer shared primitives from `src/components/ui` over private replacements.
+- `AgentActivityIndicator` animations stay CSS-only and compositor-friendly
+  (`transform`/`opacity`). Do not restore canvas frame loops, React animation
+  state, or timers; keep the Storybook Playwright render budgets passing.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.
