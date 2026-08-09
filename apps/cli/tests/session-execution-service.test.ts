@@ -2406,7 +2406,7 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('restores a legacy worktree branch after its remote base was deleted', async () => {
+  it('resumes a worktree without resolving its deleted recorded base branch', async () => {
     const rootPath = createGitLocalProject();
     runGit(rootPath, ['remote', 'add', 'origin', 'https://github.com/example/project.git']);
     const remoteCommit = runGit(rootPath, ['rev-parse', 'main']);
@@ -2428,7 +2428,7 @@ describe('SessionExecutionService', () => {
     };
     const meta = {
       project,
-      baseBranch: 'remote-base',
+      baseBranch: 'refs/remotes/origin/remote-base',
       branchName: 'lody-session-restore',
       acpSessionId: 'acp-local-restore' as ACPSessionId,
       isWorktree: true,
@@ -2468,6 +2468,7 @@ describe('SessionExecutionService', () => {
       expect(config.workdir).toBe(rootPath);
       expect(config.branch).toBe('remote-base');
       expect(config.resume).toBe(true);
+      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('other');
       return restoredSession as unknown;
     });
     const upsertDocMeta = vi.fn(async () => {});
@@ -2525,22 +2526,18 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-restore',
       restoredSession,
-      expect.objectContaining({ preferredBaseBranch: 'remote-base' })
+      expect.objectContaining({ preferredBaseBranch: 'refs/remotes/origin/remote-base' })
     );
   });
 
-  it('upgrades a legacy selector and restores its tracking branch after the remote ref is deleted', async () => {
+  it('resumes a non-worktree local project on its current dirty branch without checkout', async () => {
     const rootPath = createGitLocalProject();
     runGit(rootPath, ['remote', 'add', 'origin', 'https://github.com/example/project.git']);
     const remoteCommit = runGit(rootPath, ['rev-parse', 'main']);
     runGit(rootPath, ['update-ref', 'refs/remotes/origin/foo', remoteCommit]);
-    runGit(rootPath, ['checkout', '--track', '-b', 'origin/foo', 'refs/remotes/origin/foo']);
-    fs.writeFileSync(path.join(rootPath, 'session-change.txt'), 'session change\n', 'utf8');
-    runGit(rootPath, ['add', 'session-change.txt']);
-    runGit(rootPath, ['commit', '-m', 'session change']);
+    runGit(rootPath, ['checkout', '--track', '-b', 'session-branch', 'refs/remotes/origin/foo']);
     runGit(rootPath, ['checkout', 'main']);
-    runGit(rootPath, ['checkout', '--track', '-b', 'other', 'refs/remotes/origin/foo']);
-    runGit(rootPath, ['update-ref', '-d', 'refs/remotes/origin/foo']);
+    fs.writeFileSync(path.join(rootPath, 'README.md'), 'dirty local change\n', 'utf8');
 
     const localProjectId = 'local-project-tracking-restore' as LocalProjectId;
     const project = {
@@ -2553,7 +2550,7 @@ describe('SessionExecutionService', () => {
     let meta = {
       project,
       baseBranch: 'foo',
-      branchName: 'origin/foo',
+      branchName: 'session-branch',
       acpSessionId: 'acp-local-tracking-restore' as ACPSessionId,
       isWorktree: false,
       isArchived: false,
@@ -2590,9 +2587,12 @@ describe('SessionExecutionService', () => {
     };
     const createSession = vi.fn(async (config) => {
       expect(config.workdir).toBe(rootPath);
-      expect(config.branch).toBe('origin/foo');
-      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('origin/foo');
-      expect(fs.existsSync(path.join(rootPath, 'session-change.txt'))).toBe(true);
+      expect(config.branch).toBe('foo');
+      expect(config.resume).toBe(true);
+      expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
+      expect(fs.readFileSync(path.join(rootPath, 'README.md'), 'utf8')).toBe(
+        'dirty local change\n'
+      );
       return restoredSession as unknown;
     });
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
@@ -2647,65 +2647,16 @@ describe('SessionExecutionService', () => {
 
     expect(createSession).toHaveBeenCalledOnce();
     expect(sessionDoc.setBaseBranch).not.toHaveBeenCalled();
-    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-local-tracking-restore', {
-      baseBranch: 'refs/remotes/origin/foo',
-    });
-    expect(persistPendingChanges).toHaveBeenCalledWith('session-local-base-ref');
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(
+      'session-session-local-tracking-restore',
+      expect.objectContaining({ baseBranch: expect.anything() })
+    );
+    expect(persistPendingChanges).not.toHaveBeenCalledWith('session-local-base-ref');
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-tracking-restore',
       restoredSession,
-      expect.objectContaining({ preferredBaseBranch: 'refs/remotes/origin/foo' })
+      expect.objectContaining({ preferredBaseBranch: 'foo' })
     );
-  });
-
-  it('does not restore onto another session branch when the recorded branch is missing', async () => {
-    const rootPath = createGitLocalProject();
-    runGit(rootPath, ['remote', 'add', 'origin', 'https://github.com/example/project.git']);
-    const remoteCommit = runGit(rootPath, ['rev-parse', 'main']);
-    runGit(rootPath, ['update-ref', 'refs/remotes/origin/foo', remoteCommit]);
-    runGit(rootPath, ['checkout', '--track', '-b', 'session-a', 'refs/remotes/origin/foo']);
-    runGit(rootPath, ['checkout', 'main']);
-    runGit(rootPath, ['checkout', '--track', '-b', 'session-b', 'refs/remotes/origin/foo']);
-    runGit(rootPath, ['branch', '-D', 'session-a']);
-
-    const service = new SessionExecutionService(createBaseDeps());
-    const prepareLocalProjectBranch = (
-      service as unknown as {
-        prepareLocalProjectBranch(options: {
-          project: {
-            kind: 'local';
-            localProjectId: LocalProjectId;
-            branch: string;
-            useWorktree: boolean;
-          };
-          workdir: string;
-          branch: string;
-          storedBaseBranch: string;
-          restoring: boolean;
-          restoreBranchName: string;
-        }): Promise<{ executionBranch: string; baseRef: string }>;
-      }
-    ).prepareLocalProjectBranch.bind(service);
-
-    await expect(
-      prepareLocalProjectBranch({
-        project: {
-          kind: 'local',
-          localProjectId: 'local-project-recorded-branch' as LocalProjectId,
-          branch: 'lody:branch:remote:origin:foo',
-          useWorktree: false,
-        },
-        workdir: rootPath,
-        branch: 'lody:branch:remote:origin:foo',
-        storedBaseBranch: 'refs/remotes/origin/foo',
-        restoring: true,
-        restoreBranchName: 'session-a',
-      })
-    ).rejects.toThrow(
-      'Cannot restore local project session branch session-a: ' +
-        'the branch is missing or no longer tracks refs/remotes/origin/foo'
-    );
-    expect(runGit(rootPath, ['symbolic-ref', '--short', 'HEAD'])).toBe('session-b');
   });
 
   it('releases ACP replay suppression when a restore turn is interrupted before prompt', async () => {

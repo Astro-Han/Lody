@@ -464,7 +464,7 @@ describe('SessionManager worktree setup', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
-  it('does not rerun setup when restoring a session with an existing local worktree', async () => {
+  it('does not rerun setup or switch branches when restoring an existing local worktree', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'setup-resume-session' as SessionId;
     const localProjectId = 'local-project-1' as LocalProjectId;
@@ -493,15 +493,21 @@ describe('SessionManager worktree setup', () => {
       },
     });
 
-    await createSessionInner(manager, config);
+    const createdSession = await createSessionInner(manager, config);
     expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
+    const workdir = createdSession.getWorkdir();
+    runGit(workdir, ['switch', '-c', 'user/switched-worktree']);
+    writeFileSync(path.join(workdir, 'dirty.txt'), 'keep me\n', 'utf8');
 
-    await createSessionInner(manager, {
+    const resumedSession = await createSessionInner(manager, {
       ...config,
       resume: true,
     });
 
     expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
+    expect(resumedSession.getWorkdir()).toBe(workdir);
+    expect(runGit(workdir, ['symbolic-ref', '--short', 'HEAD'])).toBe('user/switched-worktree');
+    expect(runGit(workdir, ['status', '--porcelain'])).toContain('?? dirty.txt');
   });
 
   it('runs setup only after a speculative worktree is adopted by durable creation', async () => {

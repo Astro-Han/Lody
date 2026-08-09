@@ -75,13 +75,8 @@ import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
   checkoutLocalProjectBranchAtRootPath,
   createLocalProjectBranchSelector,
-  getLocalProjectBranchUpstreamRefAtRootPath,
-  getLocalProjectCurrentBranchNameAtRootPath,
   getLocalProjectGitStateAtRootPath,
-  parseLocalProjectBranchRefAtRootPath,
   resolveLocalProjectBranchAtRootPath,
-  resolveLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectLegacyBaseBranchAtRootPath,
 } from '@lody/shared/node/local-project';
 import { getAcpCapabilitySourceVersion, resolveACPProcessLaunch } from '@/agent/setting';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
@@ -2012,9 +2007,6 @@ export class SessionExecutionService {
     project: Extract<ProjectRef, { kind: 'local' }>;
     workdir: string;
     branch: string;
-    storedBaseBranch?: string;
-    restoring?: boolean;
-    restoreBranchName?: string;
     onBaseRefResolved?: (baseRef: string) => Promise<void>;
   }): Promise<{ executionBranch: string; baseRef: string }> {
     const { project, workdir, branch } = options;
@@ -2024,126 +2016,14 @@ export class SessionExecutionService {
       throw new Error(`Local project is not a git repository: ${project.localProjectId}`);
     }
 
-    const currentBranchName = await getLocalProjectCurrentBranchNameAtRootPath(workdir);
-    const restoreBranchName = options.restoreBranchName?.trim();
-    const resolveExistingExecutionBranch = async (
-      resolvedBranch:
-        | Awaited<ReturnType<typeof parseLocalProjectBranchRefAtRootPath>>
-        | Awaited<ReturnType<typeof resolveLocalProjectBranchAtRootPath>>
-    ): Promise<string | null> => {
-      if (resolvedBranch.kind === 'local') {
-        return currentBranchName === resolvedBranch.branchName ? currentBranchName : null;
-      }
-      if (
-        restoreBranchName &&
-        (await getLocalProjectBranchUpstreamRefAtRootPath(workdir, restoreBranchName)) ===
-          resolvedBranch.refName
-      ) {
-        if (currentBranchName === restoreBranchName) return restoreBranchName;
-        return (
-          await checkoutLocalProjectBranchAtRootPath(
-            workdir,
-            createLocalProjectBranchSelector({ kind: 'local', branchName: restoreBranchName })
-          )
-        ).currentBranch;
-      }
-      if (options.restoring && restoreBranchName) {
-        throw new Error(
-          `Cannot restore local project session branch ${restoreBranchName}: ` +
-            `the branch is missing or no longer tracks ${resolvedBranch.refName}`
-        );
-      }
-      if (
-        options.restoring &&
-        !restoreBranchName &&
-        currentBranchName &&
-        (await getLocalProjectBranchUpstreamRefAtRootPath(workdir, currentBranchName)) ===
-          resolvedBranch.refName
-      ) {
-        return currentBranchName;
-      }
-      return null;
-    };
-    let persistedBaseRef: string | undefined;
-    const persistBaseRef = async (baseRef: string): Promise<void> => {
-      if (persistedBaseRef === baseRef) return;
-      await options.onBaseRefResolved?.(baseRef);
-      persistedBaseRef = baseRef;
-    };
-
-    const storedBaseBranch = options.storedBaseBranch?.trim();
-    if (storedBaseBranch && storedBaseBranch !== branch) {
-      const parsedBaseRef = await parseLocalProjectBranchRefAtRootPath(workdir, storedBaseBranch);
-      await persistBaseRef(parsedBaseRef.refName);
-      if (project.useWorktree === true) {
-        return {
-          executionBranch: parsedBaseRef.refName,
-          baseRef: parsedBaseRef.refName,
-        };
-      }
-      const existingExecutionBranch = await resolveExistingExecutionBranch(parsedBaseRef);
-      if (existingExecutionBranch) {
-        return { executionBranch: existingExecutionBranch, baseRef: parsedBaseRef.refName };
-      }
-    }
-
-    if (
-      storedBaseBranch === branch &&
-      project.useWorktree !== true &&
-      !branch.startsWith('refs/')
-    ) {
-      const trackingBranchNames = [restoreBranchName, currentBranchName].filter(
-        (candidate, index, candidates): candidate is string =>
-          Boolean(candidate) && candidates.indexOf(candidate) === index
-      );
-      for (const trackingBranchName of trackingBranchNames) {
-        const upstreamRef = await getLocalProjectBranchUpstreamRefAtRootPath(
-          workdir,
-          trackingBranchName
-        );
-        if (!upstreamRef) continue;
-        const parsedBaseRef = await parseLocalProjectBranchRefAtRootPath(workdir, upstreamRef);
-        await persistBaseRef(parsedBaseRef.refName);
-        const existingExecutionBranch = await resolveExistingExecutionBranch(parsedBaseRef);
-        if (existingExecutionBranch) {
-          return { executionBranch: existingExecutionBranch, baseRef: parsedBaseRef.refName };
-        }
-      }
-    }
-
-    let resolvedBranch;
-    try {
-      resolvedBranch =
-        storedBaseBranch && storedBaseBranch !== branch
-          ? await resolveLocalProjectBranchRefAtRootPath(workdir, storedBaseBranch)
-          : storedBaseBranch === branch || options.restoring
-            ? await resolveLocalProjectLegacyBaseBranchAtRootPath(workdir, branch, {
-                useWorktree: project.useWorktree === true,
-              })
-            : await resolveLocalProjectBranchAtRootPath(workdir, branch, {
-                preferLocalOnCollision: true,
-              });
-    } catch (error) {
-      if (
-        project.useWorktree === true &&
-        options.restoring &&
-        storedBaseBranch === branch &&
-        restoreBranchName &&
-        formatErrorMessage(error).includes('Local project branch not found:')
-      ) {
-        // Legacy worktree metadata has no namespace information. If its base
-        // disappeared, let WorktreeManager restore the recorded session branch;
-        // it checks that branch before it ever needs to resolve this raw base.
-        // A name that still matches several remotes fails closed above.
-        return { executionBranch: branch, baseRef: branch };
-      }
-      throw error;
-    }
+    const resolvedBranch = await resolveLocalProjectBranchAtRootPath(workdir, branch, {
+      preferLocalOnCollision: true,
+    });
 
     // Persist the namespace decision before checkout can create a same-named
     // local tracking branch. A process exit after checkout must not make the
-    // next restore reinterpret the selector against a different ref set.
-    await persistBaseRef(resolvedBranch.refName);
+    // durable metadata reinterpret the selector against a different ref set.
+    await options.onBaseRefResolved?.(resolvedBranch.refName);
 
     if (project.useWorktree === true) {
       return {
@@ -2151,9 +2031,8 @@ export class SessionExecutionService {
         baseRef: resolvedBranch.refName,
       };
     }
-    const existingExecutionBranch = await resolveExistingExecutionBranch(resolvedBranch);
-    if (existingExecutionBranch) {
-      return { executionBranch: existingExecutionBranch, baseRef: resolvedBranch.refName };
+    if (resolvedBranch.kind === 'local' && gitState.currentBranch === resolvedBranch.branchName) {
+      return { executionBranch: resolvedBranch.branchName, baseRef: resolvedBranch.refName };
     }
 
     return {
@@ -3463,28 +3342,11 @@ export class SessionExecutionService {
         self.deps.logger.debug(
           `[${sessionId}] Resuming status published; preparing session restore (resumeSource=${resumeSource} resumeSessionId=${resumeSessionId ?? 'none'})`
         );
-        let restoreBranch = project?.branch?.trim() || undefined;
-        if (project?.kind === 'local' && restoreWorkdir && restoreBranch) {
-          const localProject = project;
-          const requestedRestoreBranch = restoreBranch;
-          const preparedBranch = yield* self.tryPromise(() =>
-            self.prepareLocalProjectBranch({
-              project: localProject,
-              workdir: restoreWorkdir,
-              branch: requestedRestoreBranch,
-              storedBaseBranch: meta?.baseBranch,
-              restoring: true,
-              restoreBranchName: meta?.branchName,
-              onBaseRefResolved: async (baseRef) => {
-                if (meta?.baseBranch !== baseRef) {
-                  await self.upsertSessionMeta(sessionId, { baseBranch: baseRef });
-                  await self.deps.workspaceDocument.persistPendingChanges('session-local-base-ref');
-                }
-              },
-            })
-          );
-          restoreBranch = preparedBranch.executionBranch;
-        }
+        // Resuming an ACP process must not resolve or switch branches in a
+        // local project. That is true both for the registered project directory
+        // and for an existing session worktree: the user's current branch is
+        // part of the workspace state being resumed.
+        const restoreBranch = project?.branch?.trim() || undefined;
         const restoreConfig: SessionConfig = {
           sessionId,
           workspaceId: message.workspaceId,
