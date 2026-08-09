@@ -50,6 +50,11 @@
   --z-popover: 80;
   --z-command-palette: 85;
   --z-tooltip: 90;
+  /* The full-screen image viewer covers every other surface, but must stay
+     under toasts — its own confirmations ("Image copied") render there.
+     react-photo-view ships z-index 2000; `zoomable-image-viewer.css` pulls it
+     back onto this scale. */
+  --z-image-viewer: 95;
   --z-toast: 100;
 }
 
@@ -692,9 +697,11 @@ pre,
       0 18px 40px -16px rgba(0, 0, 0, 0.16) !important;
   }
 
-  .dark .mobile-home-tabbar
+  .dark
+    .mobile-home-tabbar
     :where(.k-toolbar-pane, [class*='bg-ios-light-glass'], [class*='bg-ios-dark-glass']),
-  .mobile-home-app.dark .mobile-home-tabbar
+  .mobile-home-app.dark
+    .mobile-home-tabbar
     :where(.k-toolbar-pane, [class*='bg-ios-light-glass'], [class*='bg-ios-dark-glass']) {
     background: hsl(var(--card)) !important;
     border-color: hsl(0 0% 100% / 0.16) !important;
@@ -1483,8 +1490,7 @@ pre,
   :root {
     --tasks-menu-bg: 0 0% 100%;
     --tasks-menu-border: 220 12% 88%;
-    --tasks-menu-shadow:
-      0 1px 2px rgb(15 23 42 / 0.04), 0 10px 28px -12px rgb(15 23 42 / 0.14);
+    --tasks-menu-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 10px 28px -12px rgb(15 23 42 / 0.14);
     --tasks-menu-item-hover: 220 14% 96%;
   }
 

@@ -3656,6 +3656,7 @@ const ImagePreviewDialog = ({
       entries.map((entry) => ({
         key: entry.key,
         src: blobUrls.get(entry.key),
+        fileName: entry.fileName,
       })),
     [entries, blobUrls]
   );
