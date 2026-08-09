@@ -270,6 +270,7 @@
   "chat.localGitStateTimeout": "Timed out loading branches.",
   "chat.machineSelector.emptyText": "No machines online",
   "chat.machineSelector.loading": "Loading machine...",
+  "chat.machineSelector.local": "Local",
   "chat.machineSelector.placeholder": "Machine",
   "chat.machineSelector.searchPlaceholder": "Search machines",
   "chat.machineSelector.selectFirst": "Select a machine first",

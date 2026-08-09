@@ -27,6 +27,7 @@ import type { AgentSelection } from '@/components/shared/agent-selector';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
+import { Badge } from '@/ui/badge';
 import { Switch } from '@/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -175,6 +176,7 @@ export type DesktopMachineMenuOption = {
 
 export function DesktopMachineMenu({
   value,
+  visibleLocalMachineId = null,
   selectedLabel,
   options,
   onChange,
@@ -183,6 +185,7 @@ export function DesktopMachineMenu({
   onAddMachine,
 }: {
   value: MachineId | null;
+  visibleLocalMachineId?: MachineId | null;
   selectedLabel?: string | null;
   options: ReadonlyArray<DesktopMachineMenuOption>;
   onChange: (machineId: MachineId) => void;
@@ -192,6 +195,7 @@ export function DesktopMachineMenu({
 }) {
   const { t } = useTranslation();
   const selectedOption = options.find((option) => option.value === value);
+  const selectedIsLocal = selectedOption?.value === visibleLocalMachineId;
   const label =
     selectedOption?.label ?? selectedLabel ?? t('chat.machineSelector.placeholder', 'Machine');
   const isDisabled = disabled || (options.length === 0 && !onAddMachine);
@@ -213,6 +217,11 @@ export function DesktopMachineMenu({
         >
           <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="max-w-32 truncate">{label}</span>
+          {selectedIsLocal ? (
+            <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+              {t('chat.machineSelector.local', 'Local')}
+            </Badge>
+          ) : null}
           {selectedOption?.isPrivate ? (
             <LockKeyhole
               className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
@@ -242,6 +251,11 @@ export function DesktopMachineMenu({
             >
               {option.label}
             </span>
+            {option.value === visibleLocalMachineId ? (
+              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+                {t('chat.machineSelector.local', 'Local')}
+              </Badge>
+            ) : null}
             {option.isPrivate ? (
               <Tooltip delayDuration={250}>
                 <TooltipTrigger asChild>

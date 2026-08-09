@@ -3157,6 +3157,7 @@ function WorkspaceChatLanding({
       <div className="flex w-full min-w-0 items-center gap-2">
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
+          visibleLocalMachineId={visibleLocalMachineId}
           selectedLabel={desktopSelectedMachineLabel}
           options={desktopMachineOptions}
           onChange={handleMachineChange}

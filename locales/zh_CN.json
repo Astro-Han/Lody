@@ -270,6 +270,7 @@
   "chat.localGitStateTimeout": "加载分支超时。",
   "chat.machineSelector.emptyText": "没有在线的机器",
   "chat.machineSelector.loading": "正在加载机器…",
+  "chat.machineSelector.local": "本机",
   "chat.machineSelector.placeholder": "机器",
   "chat.machineSelector.searchPlaceholder": "搜索机器",
   "chat.machineSelector.selectFirst": "请先选择一台机器",
