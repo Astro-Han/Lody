@@ -15,9 +15,10 @@
  *     sweeps an ellipse (measured 14×14 → 13.55×15.43).
  *
  * jsdom has no layout, so these assert the *structural* invariants that make
- * the geometry correct rather than re-measuring pixels: an animated wrapper
- * is icon-only and explicitly sized, and a spinner in a flex row cannot be
- * squished. The `transform-box`/`transform-origin` half of the fix lives in
+ * the geometry correct rather than re-measuring pixels: an animated element
+ * is explicitly square and cannot be squished, an animated wrapper is
+ * icon-only, and the sidebar status slot has no positional nudge. The
+ * `transform-box`/`transform-origin` half of the fix lives in
  * `src/tailwind/index.css` and is not observable here.
  */
 
@@ -59,14 +60,31 @@ function render(node: React.ReactElement) {
 }
 
 describe('spinners rotate in place', () => {
+  it('session row working indicator: square SVG is centered without a vertical nudge', () => {
+    render(
+      React.createElement(SessionRowLeadingSlot, {
+        isWorking: true,
+        menuLabel: 'More actions',
+      })
+    );
+
+    const spinner = container.querySelector('[data-session-working-spinner]');
+    expect(spinner).not.toBeNull();
+    expect(spinner!.tagName).toBe('svg');
+    expect(spinner!.classList.contains('animate-spin')).toBe(true);
+    expect(spinner!.classList.contains('shrink-0')).toBe(true);
+    expect(hasExplicitSquareSize(spinner!)).toBe(true);
+
+    const indicator = spinner!.closest('[data-session-row-indicator]');
+    expect(indicator).not.toBeNull();
+    expect(indicator!.classList.contains('-top-px')).toBe(false);
+    expect(indicator!.classList.contains('items-center')).toBe(true);
+    expect(indicator!.classList.contains('justify-center')).toBe(true);
+  });
+
   /* The compositor-friendly pattern: animate an HTML wrapper, not the SVG.
      Only equivalent while the wrapper's box IS the glyph's box. */
   const wrapperCases: ReadonlyArray<readonly [string, () => React.ReactElement]> = [
-    [
-      'session row working indicator',
-      () =>
-        React.createElement(SessionRowLeadingSlot, { isWorking: true, menuLabel: 'More actions' }),
-    ],
     ['session syncing indicator', () => React.createElement(SessionSyncingIndicator, {})],
   ];
 

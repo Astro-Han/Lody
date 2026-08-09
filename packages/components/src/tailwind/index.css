@@ -1825,16 +1825,13 @@ pre,
     flex-shrink: 0;
   }
 
-  /* Two sites animate an HTML wrapper instead of the glyph, to keep an
-     always-on spinner on the compositor (see `sidebar-row-shared.tsx`
-     and `session-syncing-indicator.tsx`). A wrapper is only equivalent
-     while its box matches the glyph's: the moment anything else lands
-     inside it (a label, a gap) its box grows, its center moves off the
-     glyph, and the glyph orbits — measured 64px of travel for a
-     wrapper that also contained its "Syncing" label. These wrappers
-     must therefore stay icon-only and explicitly sized; centering the
-     origin here makes that failure mode a wobble-free no-op rather
-     than an orbit. */
+  /* `SessionSyncingIndicator` animates an HTML wrapper instead of the
+     glyph. A wrapper is only equivalent while its box matches the
+     glyph's: the moment anything else lands inside it (a label, a gap)
+     its box grows, its center moves off the glyph, and the glyph
+     orbits. It must therefore stay icon-only and explicitly sized;
+     centering the origin here makes that failure mode a wobble-free
+     no-op rather than an orbit. */
   span.animate-spin {
     transform-box: border-box;
     transform-origin: 50% 50%;
