@@ -1448,7 +1448,6 @@
   "sessions.goal.status.budgetLimited": "Goal unmet",
   "sessions.goal.status.cleared": "Goal cleared",
   "sessions.goal.status.complete": "Goal achieved",
-  "sessions.goal.status.limited": "Goal limited",
   "sessions.goal.status.paused": "Goal paused",
   "sessions.history": "History",
   "sessions.historyLoadFailed": "Failed to load {{provider}} conversation",

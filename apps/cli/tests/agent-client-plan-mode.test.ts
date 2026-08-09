@@ -1240,7 +1240,7 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
   });
 });
 
-describe('AgentClient Codex goal session info', () => {
+describe('AgentClient goal session info', () => {
   it('shows a retry activity until Codex resumes streaming', async () => {
     const { client, onUpdateMessage } = createTestClient();
 
@@ -1308,16 +1308,46 @@ describe('AgentClient Codex goal session info', () => {
       type: 'goal',
       threadId: 'acp-test',
       objective: 'ship the release',
-      status: 'limited',
+      status: 'usageLimited',
       tokenBudget: 42_000,
-      iterations: 7,
-      lastReason: 'waiting for review',
       tokensUsed: 12_000,
       timeUsedSeconds: 90,
       createdAt: 100,
       updatedAt: 200,
     });
     expect(onUpdateMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers valid provider-neutral metadata over a legacy Codex duplicate', async () => {
+    const { client, onThreadGoalUpdated } = createTestClient();
+
+    await client.sessionUpdate({
+      sessionId: 'acp-test',
+      update: {
+        sessionUpdate: 'session_info_update',
+        _meta: {
+          goal: {
+            objective: 'neutral objective',
+            status: 'active',
+            controlMethod: '_session/goal',
+          },
+          codex: {
+            goal: {
+              objective: 'legacy objective',
+              status: 'paused',
+            },
+          },
+        },
+      },
+    } as unknown as SessionNotification);
+
+    expect(onThreadGoalUpdated).toHaveBeenCalledWith({
+      type: 'goal',
+      threadId: 'acp-test',
+      objective: 'neutral objective',
+      status: 'active',
+      tokenBudget: null,
+    });
   });
 
   it('keeps parsing legacy Codex goal metadata', async () => {
@@ -1356,9 +1386,17 @@ describe('AgentClient Codex goal session info', () => {
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: { goal: null },
+        _meta: {
+          goal: null,
+          codex: {
+            goal: {
+              objective: 'legacy objective',
+              status: 'active',
+            },
+          },
+        },
       },
-    });
+    } as unknown as SessionNotification);
 
     expect(onThreadGoalCleared).toHaveBeenCalledWith('acp-test');
   });
@@ -1372,7 +1410,19 @@ describe('AgentClient Codex goal session info', () => {
       sessionId: 'acp-test',
       update: {
         sessionUpdate: 'session_info_update',
-        _meta: { goal: { objective: 42, status: 'active' } },
+        _meta: {
+          goal: {
+            objective: 'neutral objective',
+            status: 'active',
+            controlMethod: '_wrong/goal',
+          },
+          codex: {
+            goal: {
+              objective: 'legacy objective',
+              status: 'active',
+            },
+          },
+        },
       },
     } as unknown as SessionNotification);
 

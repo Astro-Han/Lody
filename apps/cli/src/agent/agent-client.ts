@@ -330,22 +330,29 @@ export type AcpSessionStartTarget = {
   resumeSessionId?: ACPSessionId;
 };
 
-const ThreadGoalStatusSchema = z.enum([
+const LegacyCodexGoalStatusSchema = z.enum([
   'active',
   'paused',
   'blocked',
-  'limited',
   'usageLimited',
   'budgetLimited',
   'complete',
   'cleared',
 ]);
-const GoalSnapshotSchema = z.object({
+const LegacyCodexGoalSnapshotSchema = z.object({
   objective: z.string(),
-  status: ThreadGoalStatusSchema,
+  status: LegacyCodexGoalStatusSchema,
   tokenBudget: z.number().nullable().optional(),
-  iterations: z.number().optional(),
-  lastReason: z.string().nullable().optional(),
+  tokensUsed: z.number().optional(),
+  timeUsedSeconds: z.number().optional(),
+  createdAt: z.number().optional(),
+  updatedAt: z.number().optional(),
+});
+const NeutralGoalSnapshotSchema = z.object({
+  objective: z.string(),
+  status: z.enum(['active', 'paused', 'blocked', 'limited', 'complete']),
+  controlMethod: z.literal('_session/goal'),
+  tokenBudget: z.number().nullable().optional(),
   tokensUsed: z.number().optional(),
   timeUsedSeconds: z.number().optional(),
   createdAt: z.number().optional(),
@@ -819,7 +826,8 @@ export class AgentClient implements acp.Client {
       source = 'legacy Codex';
     }
 
-    const parsed = z.object({ goal: GoalSnapshotSchema.nullable() }).safeParse(goalContainer);
+    const goalSchema = source === 'ACP' ? NeutralGoalSnapshotSchema : LegacyCodexGoalSnapshotSchema;
+    const parsed = z.object({ goal: goalSchema.nullable() }).safeParse(goalContainer);
     if (!parsed.success) {
       this.logger.debug(
         `[${this.options.sessionId}] Dropping invalid ${source} goal session info: ${parsed.error.message}`
@@ -838,10 +846,12 @@ export class AgentClient implements acp.Client {
       type: 'goal',
       threadId,
       objective: sanitizeGoalObjective(goal.objective),
-      status: goal.status,
+      // Older Lody readers already understand usageLimited, while the neutral
+      // extension collapses provider-specific limit reasons into `limited`.
+      // Normalize at the durable-history boundary so mixed-version clients do
+      // not reject or mis-present a newly persisted status.
+      status: goal.status === 'limited' ? 'usageLimited' : goal.status,
       tokenBudget: goal.tokenBudget ?? null,
-      ...(goal.iterations !== undefined ? { iterations: goal.iterations } : {}),
-      ...(goal.lastReason !== undefined ? { lastReason: goal.lastReason } : {}),
       ...(goal.tokensUsed !== undefined ? { tokensUsed: goal.tokensUsed } : {}),
       ...(goal.timeUsedSeconds !== undefined ? { timeUsedSeconds: goal.timeUsedSeconds } : {}),
       ...(goal.createdAt !== undefined ? { createdAt: goal.createdAt } : {}),

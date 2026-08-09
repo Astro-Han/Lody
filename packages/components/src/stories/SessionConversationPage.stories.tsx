@@ -36,6 +36,7 @@ import {
   getMachineRoomId,
   getServerNow,
   getSessionRoomId,
+  SESSION_GOAL_COMMANDS,
   type AgentConfigId,
   type AgentConfigMeta,
   type LodyPresenceInstanceId,
@@ -656,6 +657,7 @@ function StoryInfoBar({ session }: { session: SessionMeta }) {
         objective: 'Ship the session info bar and wire it into production.',
         status: 'active',
       }}
+      goalCommands={SESSION_GOAL_COMMANDS}
       onGoalCommand={fn()}
       scheduledTasks={[
         {

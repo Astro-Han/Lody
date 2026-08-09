@@ -75,11 +75,7 @@ export type ManagedRuntimeStatus =
   | { kind: 'installed'; platformArch: string; version: string; command: string };
 
 export type ManagedRuntimeProgressPhase =
-  | 'downloading'
-  | 'verifying'
-  | 'extracting'
-  | 'publishing'
-  | 'complete';
+  'downloading' | 'verifying' | 'extracting' | 'publishing' | 'complete';
 
 export type ManagedRuntimeProgressEvent = {
   runtimeName: ManagedRuntimeName;

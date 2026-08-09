@@ -127,15 +127,14 @@ describe('message-schemas system_notice', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts provider-neutral goal content', () => {
+  it('accepts normalized provider-neutral goal content', () => {
     const result = MessageContentSchema.safeParse({
       type: 'goal',
       threadId: 'thread-1',
       objective: 'ship the release',
-      status: 'limited',
+      status: 'usageLimited',
       tokenBudget: 42_000,
-      iterations: 7,
-      lastReason: 'waiting for review',
+      tokensUsed: 12_000,
     });
 
     expect(result.success).toBe(true);

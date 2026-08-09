@@ -406,7 +406,11 @@ labelClassName`) so the stage diffstat never clips. Wired from
   content appears instantly. Radix gotcha: popover anchors use PopoverAnchor (not Trigger) and
   must preventDefault onPointerDownOutside when the target is the anchor,
   or dismiss + click-toggle cancel out. GoalChip's popover reuses
-  `GoalActionButton`/`formatTokensCompact` from `session-goal-banner.tsx`;
+  `GoalActionButton`/`formatTokensCompact` from `session-goal-banner.tsx`.
+  Goal controls are transport-gated: the current `/goal …` prompt bridge is
+  Codex-only, so provider-neutral snapshots remain read-only until their advertised
+  `_session/goal` method is routed through the session control plane; Stop must never
+  synthesize `pause` for those providers.
   ScheduleChip reuses `useResolvedScheduledTasks`/`ScheduledTaskList` from
   `scheduled-tasks-panel.tsx` (same adaptive countdown clock, cannot drift).
   The message queue intentionally stays OUT of the bar. The bar renders on

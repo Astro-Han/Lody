@@ -13,7 +13,9 @@ arrive: context/message-flow.md "Upstream".
   Goal session-info updates use provider-neutral `_meta.goal`; keep the
   `_meta.codex.goal` reader only as a compatibility fallback for older Codex adapters.
   A present neutral field wins, including `null`, so malformed new metadata is not
-  silently hidden by a legacy duplicate.
+  silently hidden by a legacy duplicate. Validate neutral snapshots against
+  `controlMethod: _session/goal`; normalize neutral `limited` to the legacy durable
+  `usageLimited` status so older readers can consume mixed-version history.
   Its built-in `lody` stdio MCP config is an explicit environment allowlist, not
   ordinary child-process inheritance. Keep the public CLI deployment endpoints
   (`LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, `LODY_SERVER_URL`) in that config so

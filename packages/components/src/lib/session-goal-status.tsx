@@ -56,14 +56,6 @@ export const GOAL_STATUS_PRESENTATION: Record<SessionGoalStatus, GoalStatusPrese
     surfaceClassName: 'bg-status-warning/10',
     borderClassName: 'border-status-warning/30',
   },
-  limited: {
-    labelKey: 'sessions.goal.status.limited',
-    fallbackLabel: 'Goal limited',
-    Icon: AlertTriangle,
-    textClassName: 'text-status-warning',
-    surfaceClassName: 'bg-status-warning/10',
-    borderClassName: 'border-status-warning/30',
-  },
   usageLimited: {
     labelKey: 'sessions.goal.status.usageLimited',
     fallbackLabel: 'Usage limit reached',
