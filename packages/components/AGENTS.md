@@ -26,6 +26,25 @@ mobile surfaces.
 - Renderer and worker builds that cannot use native top-level await must use
   `vite-top-level-await-fixed.ts`. Do not bypass its audited-version assertion.
 
+## Crash surfaces
+
+- The `ErrorBoundary` fallback (`error-boundary-fallback.tsx`) shows the real error
+  text and a one-click copy of the full report on every build, not only in dev. A
+  crash the user cannot read or copy is a crash we never hear about. Details default
+  to visible; `showErrorDetails` is an opt-out, and the copy payload comes from the
+  pure builder in `lib/error-boundary-report.ts`.
+- Nothing on a crash screen reloads, restarts, or resets by itself. `resetKeys`
+  recovery is bounded by `MAX_AUTOMATIC_RESETS` per repeating error, after which the
+  fallback stays put, says it stopped retrying, and waits for a button press.
+- `lib/clear-local-cache.ts` owns both recovery levels: `markCacheClearPending`
+  (recoverable `lody*` caches, user stays signed in) and `startHardReset` (full local
+  wipe plus sign-out, gated behind its own confirmation dialog). Both defer the
+  asynchronous deletes to the next boot, because `deleteDatabase()` blocks while the
+  runtime holds a connection. Clear synchronous storage BEFORE writing the boot flag.
+- `maybeClearLodyCacheOnBoot` runs at most once per page load and is shared by
+  `AppInitializer` (so a user wedged before any workspace still gets the wipe) and
+  `RuntimeProvider` (which must await it before opening the repo IndexedDB).
+
 ## Workspace runtime
 
 - `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
