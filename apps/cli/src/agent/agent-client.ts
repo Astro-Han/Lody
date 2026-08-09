@@ -846,11 +846,11 @@ export class AgentClient implements acp.Client {
       type: 'goal',
       threadId,
       objective: sanitizeGoalObjective(goal.objective),
-      // Older Lody readers already understand usageLimited, while the neutral
-      // extension collapses provider-specific limit reasons into `limited`.
-      // Normalize at the durable-history boundary so mixed-version clients do
-      // not reject or mis-present a newly persisted status.
-      status: goal.status === 'limited' ? 'usageLimited' : goal.status,
+      // The neutral extension collapses provider-specific limit reasons into
+      // `limited`. Normalize to the older generic blocked state at the durable
+      // boundary: mixed-version readers can consume it without falsely claiming
+      // that a usage or token budget was the specific limiting resource.
+      status: goal.status === 'limited' ? 'blocked' : goal.status,
       tokenBudget: goal.tokenBudget ?? null,
       ...(goal.tokensUsed !== undefined ? { tokensUsed: goal.tokensUsed } : {}),
       ...(goal.timeUsedSeconds !== undefined ? { timeUsedSeconds: goal.timeUsedSeconds } : {}),

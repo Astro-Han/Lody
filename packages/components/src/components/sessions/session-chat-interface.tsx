@@ -91,7 +91,7 @@ import {
   historyItemsToInputBlocks,
   hasReportedPreviewTarget,
   isSessionGoalCleared,
-  isSessionGoalWorking,
+  isSessionGoalActive,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   resolveSessionConversationConfig,
@@ -99,7 +99,6 @@ import {
   resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
-  SESSION_GOAL_COMMANDS,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
@@ -179,6 +178,11 @@ import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import { resolveSessionInfoBarGitHubActionIds } from './session-info-action-state';
+import {
+  canPauseGoalThroughPromptBridge,
+  getPromptBridgeGoalCommands,
+  isSessionPromptBusy,
+} from './session-goal-control';
 import { buildFixCiErrorsPrompt, buildResolvePrConflictsPrompt } from './session-pr-prompts';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
 import { setPreferredPrMergeMethod, usePreferredPrMergeMethod } from './pr-merge-method';
@@ -368,8 +372,6 @@ interface ActionOption {
 const ACTION_OPTIONS: ActionOption[] = [{ id: 'copy-path', label: 'Copy Path', Icon: Copy }];
 
 const EMPTY_ASSISTANT_QUICK_ACTIONS: AssistantMessageAction[] = [];
-const EMPTY_GOAL_COMMANDS: readonly GoalCommand[] = [];
-
 const DISPATCHING_TIMEOUT_MS = 15_000;
 /** Grace before the header "Syncing" spinner appears (kills session-switch flicker). */
 const TITLE_SYNCING_INDICATOR_DELAY_MS = 400;
@@ -2413,13 +2415,12 @@ export const SessionChatInterface = memo(
         ),
       [legacySession.latestGoal, session.dismissedGoalThreadId, sessionHistory]
     );
-    const isGoalWorking = isSessionGoalWorking(latestGoal);
+    const isGoalActive = isSessionGoalActive(latestGoal);
     // The existing prompt bridge is Codex-specific. Other providers may publish
     // neutral goal snapshots, but their advertised `_session/goal` extension is
     // not yet routed through Lody's session control plane, so keep them read-only.
-    const goalCommands =
-      session.agentType === 'codex' ? SESSION_GOAL_COMMANDS : EMPTY_GOAL_COMMANDS;
-    const canPauseGoal = goalCommands.includes('pause');
+    const goalCommands = getPromptBridgeGoalCommands(session.agentType);
+    const canPauseGoal = canPauseGoalThroughPromptBridge(session.agentType);
 
     useEffect(() => {
       if (!pendingGoalCommand) {
@@ -2611,7 +2612,7 @@ export const SessionChatInterface = memo(
       if (
         session.isArchived ||
         session.autoReview ||
-        isGoalWorking ||
+        isGoalActive ||
         session.cliType !== 'builtin' ||
         (session.agentType !== 'codex' && session.agentType !== 'claude')
       ) {
@@ -2651,7 +2652,7 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
-      isGoalWorking,
+      isGoalActive,
       session.agentConfigId,
       session.agentType,
       session.autoReview,
@@ -3133,9 +3134,13 @@ export const SessionChatInterface = memo(
     }, [markSessionRead, session.id, session.lastMessageAt, shouldMarkRead]);
 
     const isDispatching = inputActionState === 'dispatching';
-    const isAgentBusy = isDispatching || isSessionWorking || isGoalWorking;
+    const isAgentBusy = isSessionPromptBusy({
+      isDispatching,
+      isSessionWorking,
+      isGoalActive,
+    });
     const canStopAgent =
-      (isSessionActive && activeAssistantTurnId != null) || (isGoalWorking && canPauseGoal);
+      (isSessionActive && activeAssistantTurnId != null) || (isGoalActive && canPauseGoal);
     const latestCompletedProposedPlan = useMemo(
       () => findLatestCompletedCodexProposedPlan(sessionDoc?.history),
       [sessionDoc?.history]
@@ -3262,9 +3267,7 @@ export const SessionChatInterface = memo(
               // connection/machine problem (browser offline, machine removed or
               // offline) hands the story to the status chip instead.
               t('sessions.statusIndicator.pendingDispatch')
-            : isGoalWorking
-              ? t('sessions.statusIndicator.goal', 'Pursuing goal')
-              : null;
+            : null;
     const agentActivityTone =
       isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
 
@@ -4363,7 +4366,7 @@ export const SessionChatInterface = memo(
         return undefined;
       }
 
-      if (isSessionWorking || isGoalWorking) {
+      if (isSessionWorking) {
         setInputActionState('ready');
         return undefined;
       }
@@ -4377,7 +4380,7 @@ export const SessionChatInterface = memo(
       }, DISPATCHING_TIMEOUT_MS);
 
       return () => window.clearTimeout(timeoutId);
-    }, [captureSessionEvent, inputActionState, isGoalWorking, isSessionWorking, liveSessionStatus]);
+    }, [captureSessionEvent, inputActionState, isSessionWorking, liveSessionStatus]);
 
     useEffect(() => {
       if (hideMessageArea) return undefined;
@@ -4461,7 +4464,7 @@ export const SessionChatInterface = memo(
         return;
       }
 
-      const goalToPause = isGoalWorking && canPauseGoal ? latestGoal : null;
+      const goalToPause = isGoalActive && canPauseGoal ? latestGoal : null;
       const goalTurnId = goalToPause?.turnId?.trim() || null;
       const turnIdToCancel = activeAssistantTurnId ?? goalTurnId;
 
@@ -4516,7 +4519,7 @@ export const SessionChatInterface = memo(
       canPauseGoal,
       captureSessionEvent,
       handleGoalCommand,
-      isGoalWorking,
+      isGoalActive,
       latestGoal,
       requestSessionCancel,
       session.id,
@@ -5355,9 +5358,7 @@ export const SessionChatInterface = memo(
                       and the actual grant/deny resolves on the settings page, so these must be emitted from
                       that component via onShown/onEnableClicked/onDismissed callbacks (see crossFileNeeds). */}
                   <NotificationPermissionPrompt
-                    sessionCompleted={
-                      session.status?.type === 'idle' && !isSessionWorking && !isGoalWorking
-                    }
+                    sessionCompleted={session.status?.type === 'idle' && !isSessionWorking}
                   />
 
                   {/* An active auto-review run states itself here rather than

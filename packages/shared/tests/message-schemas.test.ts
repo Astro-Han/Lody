@@ -132,7 +132,7 @@ describe('message-schemas system_notice', () => {
       type: 'goal',
       threadId: 'thread-1',
       objective: 'ship the release',
-      status: 'usageLimited',
+      status: 'blocked',
       tokenBudget: 42_000,
       tokensUsed: 12_000,
     });

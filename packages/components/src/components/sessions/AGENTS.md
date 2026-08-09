@@ -410,7 +410,10 @@ labelClassName`) so the stage diffstat never clips. Wired from
   Goal controls are transport-gated: the current `/goal …` prompt bridge is
   Codex-only, so provider-neutral snapshots remain read-only until their advertised
   `_session/goal` method is routed through the session control plane; Stop must never
-  synthesize `pause` for those providers.
+  synthesize `pause` for those providers. An `active` goal is persistent session state,
+  not proof that an ACP prompt is running: current busy/running UI, message queue routing,
+  and completion prompts must use live turn presence only. Active goal state may still
+  gate destructive history rewrites and expose an explicit Codex Pause control.
   ScheduleChip reuses `useResolvedScheduledTasks`/`ScheduledTaskList` from
   `scheduled-tasks-panel.tsx` (same adaptive countdown clock, cannot drift).
   The message queue intentionally stays OUT of the bar. The bar renders on

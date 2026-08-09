@@ -1308,7 +1308,7 @@ describe('AgentClient goal session info', () => {
       type: 'goal',
       threadId: 'acp-test',
       objective: 'ship the release',
-      status: 'usageLimited',
+      status: 'blocked',
       tokenBudget: 42_000,
       tokensUsed: 12_000,
       timeUsedSeconds: 90,

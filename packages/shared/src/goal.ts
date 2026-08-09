@@ -92,7 +92,8 @@ export const resolveVisibleSessionGoal = (
   return resolved;
 };
 
-export const isSessionGoalWorking = (goal: SessionGoalMessage | null | undefined): boolean =>
+/** A persistent objective can be active while the ACP session has no running prompt. */
+export const isSessionGoalActive = (goal: SessionGoalMessage | null | undefined): boolean =>
   goal?.status === 'active';
 
 export const isSessionGoalPaused = (goal: SessionGoalMessage | null | undefined): boolean =>

@@ -15,7 +15,8 @@ arrive: context/message-flow.md "Upstream".
   A present neutral field wins, including `null`, so malformed new metadata is not
   silently hidden by a legacy duplicate. Validate neutral snapshots against
   `controlMethod: _session/goal`; normalize neutral `limited` to the legacy durable
-  `usageLimited` status so older readers can consume mixed-version history.
+  `blocked` status so older readers can consume mixed-version history without
+  inventing a provider-specific limit reason.
   Its built-in `lody` stdio MCP config is an explicit environment allowlist, not
   ordinary child-process inheritance. Keep the public CLI deployment endpoints
   (`LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, `LODY_SERVER_URL`) in that config so

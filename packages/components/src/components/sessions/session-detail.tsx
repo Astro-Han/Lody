@@ -33,7 +33,6 @@ import {
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
   getAcpCapabilityCacheEntryAuthority,
-  isSessionGoalWorking,
   resolveProjectGitHubRepo,
   type AcpConfigOptionValue,
   type CommentReferencePayload,
@@ -44,7 +43,6 @@ import {
   type ProjectRef,
   type SessionId,
   type SessionInputBlock,
-  type SessionLegacyMetaFields,
   type SessionMeta,
   type VisualAnnotationReferencePayload,
   type WorkspaceId,
@@ -1344,11 +1342,9 @@ const SessionDetail = ({
       typeof activeSession.lastReadAt === 'number' ? activeSession.lastReadAt : null;
     const hasUnread = lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt);
     const isWaiting = activeSessionLiveStatus?.type === 'requestPermission';
-    const legacyActiveSession = activeSession as SessionLegacyMetaFields;
-    // CLI-reported presence (plus goal state) is the fact source for
-    // "working"; meta dispatch pointers are CLI mechanics and can be stale.
-    const isWorking =
-      activeSessionLiveStatus != null || isSessionGoalWorking(legacyActiveSession.latestGoal);
+    // CLI-reported presence is the fact source for "working"; persistent goal
+    // state and meta dispatch pointers do not imply a prompt is running.
+    const isWorking = activeSessionLiveStatus != null;
     if (isWaiting) return 'waiting';
     if (isWorking) return 'working';
     if (hasUnread) return 'unread';
@@ -3838,7 +3834,6 @@ const SessionDetail = ({
           ? activeSession
           : (visibleChildSessions.find((s) => s.id === tabId) ?? null);
       const draft = meta ? null : (draftTabs.find((d) => d.id === tabId) ?? null);
-      const legacy = meta as SessionLegacyMetaFields | null;
       const lastMessageAt = typeof meta?.lastMessageAt === 'number' ? meta.lastMessageAt : null;
       const lastReadAt = typeof meta?.lastReadAt === 'number' ? meta.lastReadAt : null;
       return {
@@ -3849,9 +3844,7 @@ const SessionDetail = ({
           t('sessions.tabs.newTab', 'New Tab'),
         active: conversationTabActive && tabId === activeTabSessionId,
         main: tabId === sessionId,
-        running:
-          meta != null &&
-          (conversationWorkingMap[tabId] === true || isSessionGoalWorking(legacy?.latestGoal)),
+        running: meta != null && conversationWorkingMap[tabId] === true,
         unread:
           meta != null &&
           lastMessageAt !== null &&

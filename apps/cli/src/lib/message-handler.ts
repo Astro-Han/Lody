@@ -133,7 +133,7 @@ import {
   getServerNow,
   CODE_COLLAB_V2_TEXT_LIMITS,
   isActiveSessionStatus,
-  isSessionGoalWorking,
+  isSessionGoalActive,
   resolveLatestSessionGoalFromHistory,
   resolveProjectGitHubRepo,
   type RepoId,
@@ -9855,15 +9855,16 @@ export class MessageHandler {
   }
 
   /**
-   * Active Codex goals run as background ACP turns. They may be idle from
-   * Lody's user-turn perspective, but killing the session kills goal progress.
+   * Persistent active goals may drive a later autonomous ACP cycle even while
+   * no prompt is running. They are not a live-presence signal, but evicting the
+   * ACP process would discard that resumable session state.
    */
   async hasActiveGoal(sessionId: SessionId): Promise<boolean> {
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const historyGoal = resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory());
-    return isSessionGoalWorking(historyGoal ?? legacyMeta?.latestGoal);
+    return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 
   /**

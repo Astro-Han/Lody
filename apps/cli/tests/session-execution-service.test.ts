@@ -980,7 +980,7 @@ describe('SessionExecutionService', () => {
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 
-  it('skips completion notifications while a Codex goal remains active', async () => {
+  it('notifies when a prompt completes while a persistent goal remains active', async () => {
     let history: Array<Record<string, unknown>> = [
       {
         id: 'turn-user-1',
@@ -1071,7 +1071,7 @@ describe('SessionExecutionService', () => {
 
     expect(agentClient.prompt).toHaveBeenCalled();
     expect(history[0]?.status).toBe('handled');
-    expect(notifySessionCompleted).not.toHaveBeenCalled();
+    expect(notifySessionCompleted).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a chat turn before prompt when memory pressure persists', async () => {

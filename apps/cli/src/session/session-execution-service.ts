@@ -29,8 +29,6 @@ import {
   type ProjectRef,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
-  resolveLatestSessionGoalFromHistory,
-  isSessionGoalWorking,
   getSessionRoomId,
   getServerNow,
   SessionCreateRequestValidated,
@@ -38,8 +36,6 @@ import {
   type SessionId,
   type SessionInputBlock,
   type SessionTurnInputConfig,
-  type SessionGoalMessage,
-  type SessionLegacyMetaFields,
   type SessionMeta,
   SessionStatusFactory,
   SessionChatRequestValidated,
@@ -1487,30 +1483,6 @@ export class SessionExecutionService {
     }
   }
 
-  private async resolveLatestGoalForCompletionNotification(
-    sessionId: SessionId,
-    sessionDoc: SessionDocument
-  ): Promise<SessionGoalMessage | null> {
-    let metaGoal: SessionGoalMessage | null = null;
-    try {
-      const meta = await sessionDoc.getMetaState();
-      metaGoal = (meta as SessionLegacyMetaFields | null | undefined)?.latestGoal ?? null;
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to read latest goal meta before completion notification: ${formatErrorMessage(error)}`
-      );
-    }
-
-    try {
-      return resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory()) ?? metaGoal;
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to read latest goal history before completion notification: ${formatErrorMessage(error)}`
-      );
-      return metaGoal;
-    }
-  }
-
   private async evictForTurnStart(sessionId: SessionId): Promise<MemoryPressureEvictionResult> {
     return await this.deps.evictForMemoryPressure(sessionId);
   }
@@ -2561,19 +2533,6 @@ export class SessionExecutionService {
     if (isTurnCancelled() || ctx.abortSignal?.aborted) {
       this.deps.logger.debug(
         `[${sessionId}] Turn ${turnId} was cancelled before completion notification; skipping session completion notification`
-      );
-      return;
-    }
-
-    const latestGoal = await this.runTurnFinalizationStage(
-      sessionId,
-      turnId,
-      'resolveLatestGoalForCompletionNotification',
-      async () => await this.resolveLatestGoalForCompletionNotification(sessionId, sessionDoc)
-    );
-    if (isSessionGoalWorking(latestGoal)) {
-      this.deps.logger.debug(
-        `[${sessionId}] Skipping session completion notification because a thread goal is still active`
       );
       return;
     }

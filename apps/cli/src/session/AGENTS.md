@@ -59,6 +59,10 @@ delegation proofs or a shared-machine gate without a new product and security de
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
+  Goal lifecycle is independent from prompt lifecycle: an `active` session goal does
+  not suppress turn completion or completion notification once the current prompt is
+  quiescent. Use live execution/presence for current-work signals; goal activity may
+  still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
   `TurnRuntimeState` is registered. User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
