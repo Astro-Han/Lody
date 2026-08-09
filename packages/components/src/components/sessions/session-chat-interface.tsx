@@ -350,7 +350,7 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import {
   disableCodexPlanMode,
   findLatestCompletedCodexProposedPlan,
-  isCodexPlanModeEnabled,
+  shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 
@@ -2104,11 +2104,13 @@ export const SessionChatInterface = memo(
     const [pendingProposedPlanDecisionKey, setPendingProposedPlanDecisionKey] = useState<
       string | null
     >(null);
+    const pendingProposedPlanDecisionKeyRef = useRef<string | null>(null);
     // Reset per-session transient UI state on session change.
     useEffect(() => {
       setSendingMessageIds(new Set());
       setDismissedProposedPlanDecisionKeys(new Set());
       setPendingProposedPlanDecisionKey(null);
+      pendingProposedPlanDecisionKeyRef.current = null;
     }, [session.id]);
 
     const trackMessageSend = useCallback(
@@ -3133,15 +3135,17 @@ export const SessionChatInterface = memo(
     const isProposedPlanDecisionPending =
       latestCompletedProposedPlan !== null &&
       pendingProposedPlanDecisionKey === latestCompletedProposedPlan.key;
-    const shouldShowProposedPlanDecisionPrompt =
-      latestCompletedProposedPlan !== null &&
-      !dismissedProposedPlanDecisionKeys.has(latestCompletedProposedPlan.key) &&
-      (isProposedPlanDecisionPending ||
-        (isCodexPlanSession &&
-          session.status?.type === 'idle' &&
-          !isSessionActive &&
-          !isAgentBusy &&
-          isCodexPlanModeEnabled(configOptionValues)));
+    const shouldShowProposedPlanDecisionPrompt = shouldShowCodexProposedPlanDecision({
+      plan: latestCompletedProposedPlan,
+      dismissed:
+        latestCompletedProposedPlan !== null &&
+        dismissedProposedPlanDecisionKeys.has(latestCompletedProposedPlan.key),
+      pending: isProposedPlanDecisionPending,
+      isCodexSession: isCodexPlanSession,
+      isSessionIdle: session.status?.type === 'idle',
+      isSessionActive,
+      isAgentBusy,
+    });
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
     const sessionBranch = useMemo(
@@ -3690,12 +3694,13 @@ export const SessionChatInterface = memo(
     }, [latestCompletedProposedPlan]);
 
     const handleExecuteProposedPlan = useCallback(async () => {
-      if (!latestCompletedProposedPlan || pendingProposedPlanDecisionKey) {
+      if (!latestCompletedProposedPlan || pendingProposedPlanDecisionKeyRef.current) {
         return;
       }
 
       const decisionKey = latestCompletedProposedPlan.key;
       const nextConfigOptionValues = disableCodexPlanMode(configOptionValues);
+      pendingProposedPlanDecisionKeyRef.current = decisionKey;
       setPendingProposedPlanDecisionKey(decisionKey);
       setConfigOptionValues(nextConfigOptionValues);
 
@@ -3718,15 +3723,9 @@ export const SessionChatInterface = memo(
         toast.error(t('sessions.proposedPlanDecision.executeError', 'Failed to execute plan'));
       }
 
+      pendingProposedPlanDecisionKeyRef.current = null;
       setPendingProposedPlanDecisionKey(null);
-    }, [
-      configOptionValues,
-      dispatchPrompt,
-      latestCompletedProposedPlan,
-      pendingProposedPlanDecisionKey,
-      setConfigOptionValues,
-      t,
-    ]);
+    }, [configOptionValues, dispatchPrompt, latestCompletedProposedPlan, setConfigOptionValues, t]);
 
     const handleGoalCommand = useCallback(
       async (
@@ -5305,6 +5304,7 @@ export const SessionChatInterface = memo(
                           onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                           messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
                           assistantActions={assistantQuickActions}
+                          assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
                           onForkLastAssistant={onForkLastAssistant}
                           onEditLastUser={
                             editableLastUserMessageId ? handleEditLastUser : undefined

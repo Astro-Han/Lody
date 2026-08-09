@@ -12,13 +12,14 @@ import {
   disableCodexPlanMode,
   findLatestCompletedCodexProposedPlan,
   isCodexPlanModeEnabled,
+  shouldShowCodexProposedPlanDecision,
 } from '../src/lib/codex-plan-decision';
 
-const makeHistory = (items: unknown[]): SessionDoc['history'] =>
+const makeHistory = (items: unknown[], id = 'assistant-turn'): SessionDoc['history'] =>
   [
     {
-      id: 'assistant-turn',
-      $cid: 'assistant-turn',
+      id,
+      $cid: id,
       role: 'assistant',
       items,
       timestamp: new Date().toISOString(),
@@ -81,6 +82,30 @@ describe('codex plan decision helpers', () => {
     expect(findLatestCompletedCodexProposedPlan(history)).toBeNull();
   });
 
+  it('keeps the plan entry id when a newer plain assistant reply exists', () => {
+    const history = [
+      ...makeHistory(
+        [
+          {
+            type: 'proposed_plan',
+            turnId: 'turn-plan',
+            markdown: '# Final plan',
+            status: 'completed',
+            isLatest: true,
+          },
+        ],
+        'plan-reply'
+      ),
+      ...makeHistory([{ type: 'text', text: 'A later normal reply' }], 'plain-reply'),
+    ] as SessionDoc['history'];
+
+    expect(findLatestCompletedCodexProposedPlan(history)).toEqual({
+      key: 'plan-reply:turn-plan',
+      entryId: 'plan-reply',
+      turnId: 'turn-plan',
+    });
+  });
+
   it('detects and disables Codex collaboration plan mode', () => {
     const config = {
       [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
@@ -103,5 +128,35 @@ describe('codex plan decision helpers', () => {
         [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
       })
     ).toBe(false);
+  });
+
+  it('keeps the completed plan decision visible after plan mode is manually disabled', () => {
+    const plan = findLatestCompletedCodexProposedPlan(
+      makeHistory([
+        {
+          type: 'proposed_plan',
+          turnId: 'turn-completed',
+          markdown: '# Final plan',
+          status: 'completed',
+          isLatest: true,
+        },
+      ])
+    );
+    const config = disableCodexPlanMode({
+      [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_PLAN_VALUE,
+    });
+
+    expect(isCodexPlanModeEnabled(config)).toBe(false);
+    expect(
+      shouldShowCodexProposedPlanDecision({
+        plan,
+        dismissed: false,
+        pending: false,
+        isCodexSession: true,
+        isSessionIdle: true,
+        isSessionActive: false,
+        isAgentBusy: false,
+      })
+    ).toBe(true);
   });
 });

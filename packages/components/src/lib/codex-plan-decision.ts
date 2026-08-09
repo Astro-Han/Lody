@@ -17,6 +17,30 @@ export type CompletedCodexProposedPlan = {
   turnId: string;
 };
 
+export function shouldShowCodexProposedPlanDecision({
+  plan,
+  dismissed,
+  pending,
+  isCodexSession,
+  isSessionIdle,
+  isSessionActive,
+  isAgentBusy,
+}: {
+  plan: CompletedCodexProposedPlan | null;
+  dismissed: boolean;
+  pending: boolean;
+  isCodexSession: boolean;
+  isSessionIdle: boolean;
+  isSessionActive: boolean;
+  isAgentBusy: boolean;
+}): boolean {
+  return (
+    plan !== null &&
+    !dismissed &&
+    (pending || (isCodexSession && isSessionIdle && !isSessionActive && !isAgentBusy))
+  );
+}
+
 export function isCodexPlanModeEnabled(
   configOptionValues: Record<string, AcpConfigOptionValue>
 ): boolean {

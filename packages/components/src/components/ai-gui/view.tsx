@@ -321,6 +321,13 @@ export interface AssistantMessageAction {
   tone?: 'default' | 'accent';
 }
 
+// Exported for focused message/action binding tests.
+export const resolveAssistantMessageActions = (
+  messageId: string,
+  actionsMessageId: string | null | undefined,
+  actions: AssistantMessageAction[] | undefined
+): AssistantMessageAction[] | undefined => (messageId === actionsMessageId ? actions : undefined);
+
 export type GoalCommand = SessionGoalCommand;
 
 export interface SessionChatStreamViewProps {
@@ -338,6 +345,7 @@ export interface SessionChatStreamViewProps {
   lastCompletedAssistantMessageId?: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
+  assistantActionsMessageId?: string | null;
   onForkLastAssistant?: (turnId: string) => void;
   forkingAssistantMessageId?: string | null;
   agentActivityLabel?: string | null;
@@ -715,7 +723,7 @@ type AssistantTurnRowsCacheEntry = {
   messageIndex: number;
   isLastAssistantMessage: boolean;
   fileDiffs: readonly AssistantEditedFileEntry[];
-  lastAssistantActions: AssistantMessageAction[] | undefined;
+  scopedAssistantActions: AssistantMessageAction[] | undefined;
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
 };
@@ -727,6 +735,7 @@ export const buildChatVirtualRows = ({
   lastAssistantMessageId,
   messageFileDiffEntriesByTurn,
   assistantActions,
+  assistantActionsMessageId,
   activeSearchBlockId,
   expansionVersion,
 }: {
@@ -734,6 +743,7 @@ export const buildChatVirtualRows = ({
   lastAssistantMessageId: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
+  assistantActionsMessageId?: string | null;
   activeSearchBlockId?: string | null;
   expansionVersion: number;
 }): ChatVirtualRow[] => {
@@ -758,16 +768,18 @@ export const buildChatVirtualRows = ({
         ? (message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES)
         : (messageFileDiffEntriesByTurn[message.id] ?? EMPTY_EDITED_FILE_ENTRIES);
     const isLastAssistantMessage = message.id === lastAssistantMessageId;
-    // Actions only affect the last assistant turn's footer; scoping the dep this
-    // way keeps an actions-array identity change from invalidating every turn.
-    const lastAssistantActions = isLastAssistantMessage ? assistantActions : undefined;
+    const scopedAssistantActions = resolveAssistantMessageActions(
+      message.id,
+      assistantActionsMessageId,
+      assistantActions
+    );
     const cachedRows = assistantTurnRowsCache.get(item);
     if (
       cachedRows &&
       cachedRows.messageIndex === messageIndex &&
       cachedRows.isLastAssistantMessage === isLastAssistantMessage &&
       cachedRows.fileDiffs === fileDiffs &&
-      cachedRows.lastAssistantActions === lastAssistantActions &&
+      cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
       cachedRows.expansionVersion === expansionVersion
     ) {
@@ -975,7 +987,7 @@ export const buildChatVirtualRows = ({
         message,
         renderEntries: entries,
         fileDiffs,
-        assistantActions: isLastAssistantMessage ? assistantActions : undefined,
+        assistantActions: scopedAssistantActions,
         showDuration: showDurationInFooter,
       })
     ) {
@@ -996,7 +1008,7 @@ export const buildChatVirtualRows = ({
       messageIndex,
       isLastAssistantMessage,
       fileDiffs,
-      lastAssistantActions,
+      scopedAssistantActions,
       activeSearchBlockId,
       expansionVersion,
     });
@@ -1036,6 +1048,7 @@ export const SessionChatStreamView = forwardRef<
       lastCompletedAssistantMessageId = null,
       messageFileDiffEntriesByTurn,
       assistantActions,
+      assistantActionsMessageId = null,
       onForkLastAssistant,
       forkingAssistantMessageId,
       agentActivityLabel = null,
@@ -1118,12 +1131,14 @@ export const SessionChatStreamView = forwardRef<
         lastAssistantMessageId,
         messageFileDiffEntriesByTurn,
         assistantActions,
+        assistantActionsMessageId,
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
       });
     }, [
       activeSearchBlockId,
       assistantActions,
+      assistantActionsMessageId,
       assistantExpansionVersion,
       items,
       lastAssistantMessageId,
@@ -1340,7 +1355,6 @@ export const SessionChatStreamView = forwardRef<
                   );
                 }
 
-                const isLastAssistantMessage = row.item.message.id === lastAssistantMessageId;
                 const canForkAssistantMessage =
                   row.item.message.finished === true &&
                   (row.item.message.id === lastCompletedAssistantMessageId ||
@@ -1355,7 +1369,11 @@ export const SessionChatStreamView = forwardRef<
                     key={row.key}
                     row={row}
                     fileDiffOverride={fileDiffOverride}
-                    assistantActions={isLastAssistantMessage ? assistantActions : undefined}
+                    assistantActions={resolveAssistantMessageActions(
+                      row.item.message.id,
+                      assistantActionsMessageId,
+                      assistantActions
+                    )}
                     onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
                     isForking={forkingAssistantMessageId === row.item.message.id}
                     onFileDiffClick={onFileDiffClick}
