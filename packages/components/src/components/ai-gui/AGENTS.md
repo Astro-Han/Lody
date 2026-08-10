@@ -33,10 +33,13 @@ context/message-flow.md.
     everything after it is itself never collapsed — generated `image_group`s, and the
     `switch_mode` "Exited Plan Mode" card.
   - **One turn can have SEVERAL foldable regions** (`AssistantTurnRenderSegment`).
-    Plan mode is a permission MODE, so one ACP turn proposes the plan AND implements
-    it; the `switch_mode` card cuts a segment so the approved work gets its own
-    region under the plan instead of disappearing into the plan's fold — an approved
-    plan otherwise looks like it produced nothing. Everything the gate needs is
+    A plan is approved from inside a RUNNING turn, so that same turn implements it;
+    the plan-approval card cuts a segment so the approved work gets its own region
+    under the plan instead of disappearing into the plan's fold — an approved plan
+    otherwise looks like it produced nothing. The cut matches the ACP tool KIND
+    `switch_mode`, never a title: Claude's `ExitPlanMode` renders "Ready to code?"
+    and Codex's plan review renders "Implement this plan?" for the same event.
+    Everything the gate needs is
     per-segment: `workBlockKeys`, `hasVisibleFinalContent`, the collapse rule's
     "last item stays visible", and the expansion state
     (`BubbleExpandState.expandedWorkedGroups`, keyed by segment). The turn duration

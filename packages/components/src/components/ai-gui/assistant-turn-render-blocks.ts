@@ -44,12 +44,11 @@ export type AssistantTurnRenderBlock =
 /**
  * One independently foldable region of an assistant turn.
  *
- * A turn is usually one segment. Approving a plan splits it: plan mode is a
- * permission MODE, so the same ACP turn proposes the plan AND implements it,
- * and a single region would fold the whole implementation into the plan's
- * `Worked for …` row — an approved plan would appear to produce nothing. The
- * "Exited Plan Mode" (`switch_mode`) card closes a segment, so the work the
- * user approved gets its own region under the plan.
+ * A turn is usually one segment. Approving a plan splits it: the agent asks to
+ * leave plan mode from INSIDE a running turn, so the same turn goes on to
+ * implement the plan it just proposed. A single region would fold the whole
+ * implementation into the plan's `Worked for …` row — an approved plan would
+ * appear to produce nothing.
  *
  * `blockRange` is a half-open `[start, end)` index range into `blocks`.
  */
@@ -212,7 +211,16 @@ export const buildAssistantTurnRenderBlocks = (
 ): AssistantTurnRenderBlock[] =>
   buildAssistantTurnRenderBlocksFromEntries(messageId, buildAssistantMessageRenderItems(items));
 
-/** The "Exited Plan Mode" card, which closes a segment (see `AssistantTurnRenderSegment`). */
+/**
+ * The plan-approval card, which closes a segment (see `AssistantTurnRenderSegment`).
+ *
+ * Matched on the ACP tool KIND, never on a title — the bundled adapters word it
+ * differently for the same event (Claude's `ExitPlanMode` renders "Ready to
+ * code?", Codex's plan review renders "Implement this plan?"), and both are the
+ * one thing this cares about: the user was asked to let a running turn start
+ * implementing. An agent that emits `switch_mode` for some other mode change
+ * just gets an extra region, which is harmless.
+ */
 const isPlanExitBlock = (block: AssistantTurnRenderBlock | undefined): boolean =>
   block?.kind === 'content' &&
   block.entry.content.type === 'tool_call' &&

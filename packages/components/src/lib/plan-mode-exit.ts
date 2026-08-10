@@ -6,10 +6,12 @@ type ToolCallContent = Extract<MessageContent, { type: 'tool_call' }>;
 type PermissionOption = NonNullable<ToolCallContent['permissionRequest']>['options'][number];
 
 /**
- * Leaving plan mode is a permission request on an ExitPlanMode tool call (ACP
- * kind `switch_mode`). Approving it switches the mode of the RUNNING turn only,
- * so the composer selector would still say Plan and the next message the user
- * sends would quietly plan again.
+ * Leaving plan mode is a permission request carrying ACP tool kind
+ * `switch_mode` (Claude's `ExitPlanMode`, Codex's plan review). Approving it
+ * switches the mode of the RUNNING turn only, so the composer selector would
+ * still say Plan and the next message the user sends would quietly plan again.
+ *
+ * Matched on kind, not title: the adapters word the same event differently.
  */
 const PLAN_EXIT_TOOL_KIND = 'switch_mode';
 
