@@ -1,17 +1,15 @@
 import { createFileRoute, Navigate } from '@tanstack/react-router';
 
-type DevicesSearch = {
-  machine?: string;
-};
+type MyMachinesSearch = { machine?: string };
 
-export const Route = createFileRoute('/$workspaceName/_auth/settings/devices')({
-  component: LegacyDevicesSettingsRoute,
-  validateSearch: (search: Record<string, unknown>): DevicesSearch => ({
+export const Route = createFileRoute('/$workspaceName/_auth/settings/my-machines')({
+  component: LegacyMyMachinesSettingsRoute,
+  validateSearch: (search: Record<string, unknown>): MyMachinesSearch => ({
     machine: typeof search.machine === 'string' ? search.machine : undefined,
   }),
 });
 
-function LegacyDevicesSettingsRoute() {
+function LegacyMyMachinesSettingsRoute() {
   const { workspaceName } = Route.useParams();
   const search = Route.useSearch();
   return (
