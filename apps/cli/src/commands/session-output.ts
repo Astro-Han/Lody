@@ -59,23 +59,41 @@ const findUserTurnIndex = (history: SessionHistoryInput[], userTurnId: string): 
   return history.findIndex((entry) => entry?.id === userTurnId && entry.role === 'user');
 };
 
+/**
+ * Every assistant entry the user turn produced, in order. Normally one; a turn
+ * the CLI split into several visible turns (plan approval) has more, and the
+ * turn's output is their concatenation.
+ */
+export function findAssistantEntriesForUserTurn(
+  history: SessionHistoryInput[],
+  userTurnId: string
+): SessionHistoryInput[] {
+  const userTurnIndex = findUserTurnIndex(history, userTurnId);
+  if (userTurnIndex < 0) {
+    return [];
+  }
+
+  const entries: SessionHistoryInput[] = [];
+  for (let index = userTurnIndex + 1; index < history.length; index += 1) {
+    const entry = history[index];
+    if (entry?.role === 'assistant' && entry.userTurnId === userTurnId) {
+      entries.push(entry);
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * The entry that carries the turn's identity and terminal state — the LAST one
+ * when the turn was split.
+ */
 export function findAssistantEntryForUserTurn(
   history: SessionHistoryInput[],
   userTurnId: string
 ): SessionHistoryInput | undefined {
-  const userTurnIndex = findUserTurnIndex(history, userTurnId);
-  if (userTurnIndex < 0) {
-    return undefined;
-  }
-
-  for (let index = userTurnIndex + 1; index < history.length; index += 1) {
-    const entry = history[index];
-    if (entry?.role === 'assistant' && entry.userTurnId === userTurnId) {
-      return entry;
-    }
-  }
-
-  return undefined;
+  const entries = findAssistantEntriesForUserTurn(history, userTurnId);
+  return entries[entries.length - 1];
 }
 
 const findUserTurn = (
@@ -206,12 +224,16 @@ export async function waitForTurnCompletion(options: {
         return;
       }
 
-      const assistantEntry = findAssistantEntryForUserTurn(history, options.userTurnId);
+      const assistantEntries = findAssistantEntriesForUserTurn(history, options.userTurnId);
+      const assistantEntry = assistantEntries[assistantEntries.length - 1];
 
       if (assistantEntry) {
-        const items = normalizeMessageItems(assistantEntry.items);
-        if (assistantEntry.id !== lastAssistantTurnId) {
-          lastAssistantTurnId = assistantEntry.id;
+        // A split turn's output is the concatenation of its entries, and the
+        // concatenation only ever grows, so the jsonl diff below still works.
+        const items = assistantEntries.flatMap((entry) => normalizeMessageItems(entry.items));
+        const firstEntry = assistantEntries[0] ?? assistantEntry;
+        if (firstEntry.id !== lastAssistantTurnId) {
+          lastAssistantTurnId = firstEntry.id;
           lastSerializedItems = [];
         }
 
@@ -239,7 +261,10 @@ export async function waitForTurnCompletion(options: {
             userTurnId: options.userTurnId,
             turnId: assistantEntry.id,
             content: items,
-            durationMs: calculateTurnDurationMs(assistantEntry),
+            durationMs: calculateTurnDurationMs({
+              timestamp: firstEntry.timestamp,
+              endedAt: assistantEntry.endedAt,
+            }),
             entry: assistantEntry,
           };
           if (options.outputMode === 'jsonl') {

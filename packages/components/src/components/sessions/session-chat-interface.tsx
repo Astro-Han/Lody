@@ -342,6 +342,7 @@ import {
 import { isAskUserQuestionPermissionMeta, type AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
+import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -357,6 +358,8 @@ import {
   findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
+import { resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
+import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 
 // ── Path launcher options for "Open in" split button ──
@@ -3162,6 +3165,21 @@ export const SessionChatInterface = memo(
     });
     const isProposedPlanDecisionReady =
       !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing;
+
+    // Approving "Yes, implement this plan" switches the mode of the RUNNING
+    // turn only — the composer would still say Plan and quietly plan again on
+    // the next send. The permission cards bump this counter when THIS user
+    // approves, so the selector follows.
+    const planModeExitApprovalCount = useAtomValue(planModeExitApprovalCountAtomFamily(session.id));
+    useEffect(() => {
+      if (planModeExitApprovalCount === 0 || selectedModeId !== ACP_PLAN_PERMISSION_MODE_ID) {
+        return;
+      }
+      const nextModeId = resolveModeIdAfterPlanExit(modeOptions, defaultModeId);
+      if (nextModeId) {
+        handleModeChange(nextModeId);
+      }
+    }, [defaultModeId, handleModeChange, modeOptions, planModeExitApprovalCount, selectedModeId]);
     const sessionBranch = useMemo(
       () =>
         resolveBaseBranchPreference({

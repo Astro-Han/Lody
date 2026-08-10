@@ -28,6 +28,14 @@ context/message-flow.md.
   virtual row. Keep streaming turns fully expanded. Expanding completed work must add
   sibling rows to the main `VList`; search hits inside completed work force that outer
   row and the owning activity group open.
+  - "Final answer" is not literally the LAST item (`message-copy.ts`
+    `getTextIndexBeforeTrailingNeverCollapsedItems`): the last TEXT stays visible when
+    everything after it is itself never collapsed — generated `image_group`s, and the
+    `switch_mode` "Exited Plan Mode" card. A plan turn ends on that card, so without
+    this the plan — the entire point of the turn — folds away as progress output.
+  - Approving a plan produces TWO assistant entries for one ACP turn (the CLI splits
+    it; see apps/cli/src/session/AGENTS.md). Consecutive assistant entries with no
+    user entry between them are normal here — do not add pairing assumptions.
 - **`Worked for …` collapse gate (`view.tsx` `shouldUseWorkedGroup`)** requires THREE
   things, not just `message.finished`: (1) the turn is finished, (2) there is foldable
   work, and (3) `hasVisibleFinalContent` — at least one render block is NOT in

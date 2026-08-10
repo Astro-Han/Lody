@@ -521,6 +521,15 @@ export const isSessionHistoryPendingForDispatch = (
 export const sessionHistorySchema = schema.LoroMap({
   id: schema.String(),
   userTurnId: schema.String({ required: false }),
+  /**
+   * Set only on a CONTINUATION assistant entry: the CLI turn id that owns it.
+   * One ACP turn normally maps to exactly one assistant entry whose `id` IS the
+   * turn id, so this is absent. It is written when the CLI splits a single ACP
+   * turn into several visible turns (plan approval — see `apps/cli/src/lib/AGENTS.md`),
+   * and it is what keeps turn-scoped lookups (finalization, fileDiff, Stop,
+   * steer) pointed at the entry that is actually streaming.
+   */
+  ownerTurnId: schema.String({ required: false }),
   // Provider-native assistant turn boundary emitted by the ACP adapter.
   // Lody stores and returns this opaque value without interpreting it.
   acpTurnId: schema.String({ required: false }),
@@ -1009,6 +1018,7 @@ export type SessionToDelete = Pick<Session, 'id'>;
 export type SessionHistoryInput = Omit<
   InferInputType<typeof sessionHistorySchema>,
   | 'userTurnId'
+  | 'ownerTurnId'
   | 'acpTurnId'
   | 'modelInfo'
   | 'fileDiff'
@@ -1028,6 +1038,7 @@ export type SessionHistoryInput = Omit<
   read?: boolean;
   userId?: string;
   userTurnId?: string | undefined;
+  ownerTurnId?: string | undefined;
   acpTurnId?: string | undefined;
   modelInfo?: ModelInfo | undefined;
   fileDiff: FileDiff[];
@@ -1052,9 +1063,52 @@ export type SessionHistoryParsed = Omit<SessionHistory, 'items' | 'fileDiff'> & 
   fileDiff?: FileDiff[] | undefined;
 };
 
+/**
+ * The CLI turn id an assistant entry belongs to. Equals the entry id for an
+ * ordinary turn; a continuation entry (one ACP turn split into several visible
+ * turns) carries the owning turn id in `ownerTurnId`. Every turn-scoped
+ * lookup — Stop, steer, finalization, fileDiff — must go through this so the
+ * split stays invisible outside the renderer.
+ */
+export const resolveAssistantEntryTurnId = (
+  entry: Pick<SessionHistoryInput, 'id' | 'ownerTurnId'>
+): string => entry.ownerTurnId ?? entry.id;
+
+export const isAssistantEntryOwnedByTurn = (
+  entry: Pick<SessionHistoryInput, 'id' | 'role' | 'ownerTurnId'> | undefined,
+  turnId: string
+): boolean =>
+  entry?.role === 'assistant' && (entry.id === turnId || entry.ownerTurnId === turnId);
+
+/**
+ * Last assistant entry produced for a user turn. A split turn has more than
+ * one, and only the LAST one carries the turn's real terminal state — callers
+ * that ask "did this user turn finish?" must not stop at the first match.
+ */
+export const findLastAssistantEntryForUserTurn = <
+  T extends Pick<SessionHistoryInput, 'role' | 'userTurnId'>,
+>(
+  history: ReadonlyArray<T | undefined> | null | undefined,
+  userTurnId: string
+): T | undefined => {
+  if (!history?.length) {
+    return undefined;
+  }
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry?.role === 'assistant' && entry.userTurnId === userTurnId) {
+      return entry;
+    }
+  }
+  return undefined;
+};
+
 export const resolveActiveAssistantTurnId = (
   history:
-    | ReadonlyArray<Pick<SessionHistoryInput, 'id' | 'role' | 'finished' | 'endedAt'> | undefined>
+    | ReadonlyArray<
+        | Pick<SessionHistoryInput, 'id' | 'role' | 'finished' | 'endedAt' | 'ownerTurnId'>
+        | undefined
+      >
     | null
     | undefined
 ): string | undefined => {
@@ -1070,7 +1124,7 @@ export const resolveActiveAssistantTurnId = (
     if (entry.finished === true || typeof entry.endedAt === 'number') {
       return undefined;
     }
-    return entry.id;
+    return resolveAssistantEntryTurnId(entry);
   }
 
   return undefined;

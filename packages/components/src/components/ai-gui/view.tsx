@@ -159,6 +159,7 @@ import { toast } from 'sonner';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
+import { usePlanModeExitApprovalNotifier } from '@/hooks/use-plan-mode-exit-approval';
 import { TaskProposalNotice } from '@/components/tasks/task-proposal-notice';
 import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { shouldRenderSystemRowItem } from './message-content-guards';
@@ -5330,6 +5331,7 @@ const PermissionRequestBlock = ({
 }) => {
   const permission = toolCall.permissionRequest;
   const { respondToPermission, isReady } = usePermissionResponse();
+  const notifyPlanExitApproved = usePlanModeExitApprovalNotifier(sessionId);
   const [pendingOptionId, setPendingOptionId] = useState<string | null>(null);
 
   const askQuestionMeta = useMemo(
@@ -5372,6 +5374,7 @@ const PermissionRequestBlock = ({
         outcome: 'selected',
         optionId,
       });
+      notifyPlanExitApproved(toolCall, permission.options, optionId);
     } catch (error) {
       console.error('Failed to respond to permission request:', error);
       setPendingOptionId(null);
