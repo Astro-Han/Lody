@@ -54,9 +54,19 @@ mobile surfaces.
   wipe plus sign-out, gated behind its own confirmation dialog). Both defer the
   asynchronous deletes to the next boot, because `deleteDatabase()` blocks while the
   runtime holds a connection. Clear synchronous storage BEFORE writing the boot flag.
+- The cache clear also drops localStorage connection-state caches (Streams
+  JWT/gateway, cursor-bypass markers, workspace-info map) via an explicit DELETE
+  list — never a keep-allowlist, so a missed key survives a clear instead of a
+  missed preference being wiped. Register new `lody:*` localStorage cache keys
+  there; the auth token and preferences always survive a cache-level clear.
 - `maybeClearLodyCacheOnBoot` runs at most once per page load and is shared by
   `AppInitializer` (so a user wedged before any workspace still gets the wipe) and
   `RuntimeProvider` (which must await it before opening the repo IndexedDB).
+- `stuck-connection-banner.tsx` (mounted once in `MainLayout`) surfaces the same
+  cache-clear flow after the control connection has been continuously `loading`
+  for 45s. It is observational only: it must never interrupt, retry, or time out
+  the connection attempt itself — a slow first sync completes exactly as it
+  would without it.
 
 ## Workspace runtime
 

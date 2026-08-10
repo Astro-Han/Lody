@@ -18,10 +18,18 @@
  *   a crash loop that survives reloads (e.g. a poisoned sign-in state).
  */
 
+import { LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX } from '@lody/shared';
 import { workspaceInfoCache } from './local-storage-cache';
 import { EAGER_SYNC_HIGH_WATER_DB_NAME } from './eager-sync-high-water-cache';
 import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
+
+/**
+ * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
+ * Written by `create-workspace-runtime.ts` (which imports this constant);
+ * defined here so the cache clear below and the writer can never drift apart.
+ */
+export const META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX = 'lody:loroStreamsMetaCursorBypass';
 
 const CACHE_CLEAR_FLAG = 'lody:clearCacheOnBoot';
 /** Flag value for the recoverable-cache clear. Historic value, kept as-is. */
@@ -65,6 +73,58 @@ function knownWorkspaceDatabaseNames(): string[] {
   return names;
 }
 
+/**
+ * localStorage entries that cache server-derived state and can poison the
+ * connection across a cache clear: a cached Loro Streams JWT pins the client
+ * to the gateway URL embedded in it until expiry (no re-fetch, no re-route),
+ * and a stale slug→workspaceId mapping or cursor-bypass marker survives the
+ * IndexedDB wipe. All of these re-download from the server on the next boot.
+ *
+ * This is an explicit DELETE list, not a keep-allowlist, on purpose: a newly
+ * added cache key that is missing here merely survives one clear (safe),
+ * whereas a preference key missing from an allowlist would be wiped (unsafe).
+ * When adding a `lody:*` localStorage cache, add its key or prefix here.
+ */
+const LOCAL_STORAGE_CACHE_KEYS = [
+  // slug → workspaceId/name map (`local-storage-cache.ts`). Read by
+  // `knownWorkspaceDatabaseNames()` to enumerate per-workspace databases, so
+  // the localStorage pass below must run AFTER that enumeration.
+  'lody:workspaceInfo',
+  'lody:githubReposCache',
+  'lody:githubBranchesCache',
+  // Cached current-user snapshot (`auth-bootstrap.ts`); the auth token itself
+  // is deliberately kept — a cache clear does not sign the user out.
+  'lody:auth-bootstrap',
+];
+
+const LOCAL_STORAGE_CACHE_KEY_PREFIXES = [
+  // Per-workspace Streams JWT + gateway URL (`@lody/shared` loro-streams-auth).
+  `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:`,
+  `${META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX}:`,
+];
+
+/** Remove the connection-state caches above. Never throws. */
+function clearLodyLocalStorageCaches(): void {
+  let keys: string[];
+  try {
+    keys = Object.keys(localStorage);
+  } catch {
+    return;
+  }
+  for (const key of keys) {
+    if (
+      LOCAL_STORAGE_CACHE_KEYS.includes(key) ||
+      LOCAL_STORAGE_CACHE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // A key we cannot remove is not worth aborting the clear for.
+      }
+    }
+  }
+}
+
 /** Bound how long boot waits on a single delete that another tab is blocking. */
 const DELETE_TIMEOUT_MS = 3000;
 
@@ -95,7 +155,9 @@ function deleteDatabaseBestEffort(name: string): Promise<void> {
 }
 
 /**
- * Delete every `lody*` IndexedDB database and Cache Storage entry. Preserves
+ * Delete every `lody*` IndexedDB database and Cache Storage entry, plus the
+ * localStorage connection-state caches (Streams JWT/gateway, workspace-info
+ * map, cursor-bypass markers — see `LOCAL_STORAGE_CACHE_KEYS`). Preserves the
  * localStorage auth token, language, and preferences — this clears recoverable
  * local cache (Loro replica, stream cursors, mention/PR/skill/eager-sync caches,
  * image caches), not the user's session or settings.
@@ -135,6 +197,9 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
       console.warn('[Lody] failed to clear Cache Storage', error);
     }
   }
+
+  // Last: `knownWorkspaceDatabaseNames()` above needs `lody:workspaceInfo`.
+  clearLodyLocalStorageCaches();
 }
 
 /**

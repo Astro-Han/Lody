@@ -111,6 +111,39 @@ describe('maybeClearLodyCacheOnBoot', () => {
     expect(localStorage.getItem(CACHE_CLEAR_FLAG)).toBeNull();
   });
 
+  it('drops connection-state localStorage caches but keeps auth token and preferences', async () => {
+    localStorage.setItem('lody_auth_token', 'token');
+    localStorage.setItem('lody:idePreference', '"vscode"');
+    localStorage.setItem('lody:agentSessionDefaults', '{}');
+    localStorage.setItem('lody:loroStreamsToken:ws1', '{"version":2}');
+    localStorage.setItem('lody:loroStreamsMetaCursorBypass:ws1', 'marker');
+    localStorage.setItem(
+      'lody:workspaceInfo',
+      JSON.stringify({ slug: { workspaceId: 'ws-cached', workspaceName: 'W', updatedAt: 1 } })
+    );
+    localStorage.setItem('lody:githubReposCache', '{}');
+    localStorage.setItem('lody:githubBranchesCache', '{}');
+    localStorage.setItem('lody:auth-bootstrap', '{}');
+    markCacheClearPending();
+
+    await maybeClearLodyCacheOnBoot();
+
+    expect(localStorage.getItem('lody:loroStreamsToken:ws1')).toBeNull();
+    expect(localStorage.getItem('lody:loroStreamsMetaCursorBypass:ws1')).toBeNull();
+    expect(localStorage.getItem('lody:workspaceInfo')).toBeNull();
+    expect(localStorage.getItem('lody:githubReposCache')).toBeNull();
+    expect(localStorage.getItem('lody:githubBranchesCache')).toBeNull();
+    expect(localStorage.getItem('lody:auth-bootstrap')).toBeNull();
+    // The user stays signed in and keeps preferences.
+    expect(localStorage.getItem('lody_auth_token')).toBe('token');
+    expect(localStorage.getItem('lody:idePreference')).toBe('"vscode"');
+    expect(localStorage.getItem('lody:agentSessionDefaults')).toBe('{}');
+    // The workspace-info map must be read for database names BEFORE it is
+    // removed — the cached workspace's databases still get deleted.
+    expect(deletedDatabases).toContain('lody-loro-repo-db-ws-cached');
+    expect(deletedDatabases).toContain('lody-loro-stream-cursors-ws-cached');
+  });
+
   it('runs one clear per page load no matter how many callers await it', async () => {
     markCacheClearPending();
 
