@@ -298,6 +298,50 @@ describe('MessageHandler plan approval turn split', () => {
     }
   });
 
+  it('never throws when the split fails, so the agent is not left waiting on an answered permission', async () => {
+    const sessionId = 's-plan-5' as SessionId;
+    const userTurnId = 'user-turn-5';
+    const { repo, doc, handler, turnId } = await startPlanTurn(sessionId, userTurnId);
+
+    try {
+      // The caller awaits this from a floating promise inside a `new Promise`
+      // executor whose `resolved` latch is already set and whose timeout is
+      // already cleared, so an escaping rejection would leave the ACP
+      // `requestPermission` call unsettled forever.
+      const flushFailure = new Error('history write unavailable');
+      const flushSpy = vi
+        .spyOn(
+          handler as unknown as { flushACPUpdatesNow: (id: SessionId) => Promise<void> },
+          'flushACPUpdatesNow'
+        )
+        .mockRejectedValue(flushFailure);
+
+      await expect(
+        handler.rollAssistantEntryForPlanExit(sessionId, planExitPermission(sessionId), {
+          outcome: 'selected',
+          optionId: 'proceed',
+        })
+      ).resolves.toBeUndefined();
+
+      flushSpy.mockRestore();
+
+      // Degraded, not broken: no continuation entry, and the turn keeps
+      // streaming into the plan entry exactly as it did before the split.
+      const history = await doc.getHistory();
+      expect(history.map((entry) => entry.id)).toEqual([userTurnId, turnId]);
+      expect(history[1]?.finished).toBeUndefined();
+
+      handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'Implemented anyway.'));
+      await vi.advanceTimersByTimeAsync(200);
+
+      const afterExecution = await doc.getHistory();
+      expect(afterExecution.map((entry) => entry.id)).toEqual([userTurnId, turnId]);
+      expect(itemTexts(afterExecution[1])).toEqual(['Here is the plan.', 'Implemented anyway.']);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   it('only splits on a mode switch, not on ordinary approved tool calls', async () => {
     const sessionId = 's-plan-3' as SessionId;
     const userTurnId = 'user-turn-3';

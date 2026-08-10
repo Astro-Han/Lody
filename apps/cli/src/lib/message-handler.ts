@@ -1166,13 +1166,20 @@ export class MessageHandler {
       return;
     }
 
-    await this.awaitTurnHistoryGate(sessionId);
-    // Everything streamed so far belongs to the plan turn. Persist it before
-    // the target moves, or buffered plan output lands in the execution entry.
-    await this.flushACPUpdatesNow(sessionId);
-
+    // MUST NOT THROW: the caller awaits this between resolving the permission
+    // and handing the outcome back to the agent, from a floating promise
+    // inside a `new Promise` executor whose `resolved` latch is already set.
+    // An escaping rejection would therefore leave that promise unsettled
+    // forever — the agent would block on a permission the user already
+    // answered, with no timeout left to rescue it (`cleanup()` ran). Every
+    // failure here degrades to "keep running in the plan entry" instead.
     let rolled = false;
     try {
+      await this.awaitTurnHistoryGate(sessionId);
+      // Everything streamed so far belongs to the plan turn. Persist it before
+      // the target moves, or buffered plan output lands in the execution entry.
+      await this.flushACPUpdatesNow(sessionId);
+
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const endedAt = getServerNow();
       await sessionDoc.updateHistory((history) => {
@@ -1203,24 +1210,20 @@ export class MessageHandler {
         rolled = true;
         return history;
       });
+
+      // Only move the target once the entry is durable: a missing target entry
+      // would be auto-created without `ownerTurnId`, which is exactly what Stop
+      // and finalization need.
+      if (rolled && this.store.rollTurnAssistantEntry(sessionId, turnId, continuationEntryId)) {
+        this.logger.debug(
+          `[${sessionId}] Plan approved; turn ${turnId} continues in assistant entry ${continuationEntryId}`
+        );
+      }
     } catch (error) {
       this.logger.warn(
         `[${sessionId}] Failed to open a plan execution entry for turn ${turnId}; keeping execution in the plan entry: ${formatErrorMessage(
           error
         )}`
-      );
-      return;
-    }
-
-    // Only move the target once the entry is durable: a missing target entry
-    // would be auto-created without `ownerTurnId`, which is exactly what Stop
-    // and finalization need.
-    if (!rolled) {
-      return;
-    }
-    if (this.store.rollTurnAssistantEntry(sessionId, turnId, continuationEntryId)) {
-      this.logger.debug(
-        `[${sessionId}] Plan approved; turn ${turnId} continues in assistant entry ${continuationEntryId}`
       );
     }
   }
