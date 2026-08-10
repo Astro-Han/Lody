@@ -1,6 +1,7 @@
 import { atom, useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
+import { motion } from 'framer-motion';
 import { Loader2, X } from 'lucide-react';
 import { Button } from '@/ui/button';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
@@ -14,19 +15,23 @@ const stuckConnectionBannerDismissedAtom = atom(false);
 
 export type StuckConnectionBannerLabels = {
   title: string;
+  description: string;
   clearCache: string;
   dismissAriaLabel: string;
 };
 
 /**
  * Floating hint shown when the workspace connection has been stuck in
- * `loading` for an extended time (see `useStuckConnectionHint`). A single
- * compact row — spinner, title, one action, dismiss — because the action's
- * confirmation dialog already explains what a cache clear does; repeating that
- * here would cost the height of two chat-list rows on a phone. The clear +
- * reload is the one recovery that reliably unwedges poisoned local state (the
- * reload also cancels any hung in-flight connection work). Presentational;
- * `StuckConnectionBannerContainer` wires state.
+ * `loading` for an extended time (see `useStuckConnectionHint`).
+ *
+ * Sits at the BOTTOM, above the mobile dock (`bottom-0 z-30`, ~72px tall plus
+ * safe area) rather than under the header: the bottom of a list is usually
+ * empty space, while the top covers the rows the user came to read, and a
+ * bottom sheet is both the platform-conventional place for a recoverable
+ * status and within thumb reach. The description stays — without the "broken
+ * local cache" link, "Clear cache" reads as an unrelated button next to a
+ * connection problem — but the specifics of what gets deleted live in the
+ * confirmation dialog the action opens, not here.
  */
 export function StuckConnectionBanner({
   labels,
@@ -39,28 +44,42 @@ export function StuckConnectionBanner({
 }) {
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.5rem)] z-40 flex justify-center px-4"
+      className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--k-safe-area-bottom,0px)+5.25rem)] z-40 flex justify-center px-4"
       role="status"
     >
-      <div className="pointer-events-auto flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border/70 bg-card/95 py-1.5 pl-3 pr-1.5 shadow-lg backdrop-blur">
-        <Loader2
-          className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
-          aria-hidden="true"
-        />
-        <span className="min-w-0 truncate text-sm font-medium">{labels.title}</span>
-        <Button size="sm" className="h-7 shrink-0 rounded-full px-3" onClick={onClearCache}>
-          {labels.clearCache}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0 rounded-full text-muted-foreground"
-          onClick={onDismiss}
-          aria-label={labels.dismissAriaLabel}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.8 }}
+        className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/70 bg-card/95 p-3 shadow-lg backdrop-blur"
+      >
+        <div className="flex items-start gap-2.5">
+          <Loader2
+            className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">{labels.title}</p>
+            <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
+              {labels.description}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-mr-1 -mt-1 h-7 w-7 shrink-0 text-muted-foreground"
+            onClick={onDismiss}
+            aria-label={labels.dismissAriaLabel}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="mt-2 flex justify-end">
+          <Button size="sm" className="h-8 rounded-full px-4" onClick={onClearCache}>
+            {labels.clearCache}
+          </Button>
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -88,6 +107,7 @@ export function StuckConnectionBannerContainer() {
       <StuckConnectionBanner
         labels={{
           title: t('connectionRecovery.title'),
+          description: t('connectionRecovery.description'),
           clearCache: t('connectionRecovery.clearCache'),
           dismissAriaLabel: t('connectionRecovery.dismiss'),
         }}

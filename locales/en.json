@@ -3308,5 +3308,6 @@
   "errorBoundary.serverErrorSummary": "The Lody backend returned a server error.",
   "connectionRecovery.title": "Still connecting…",
   "connectionRecovery.dismiss": "Dismiss",
-  "connectionRecovery.clearCache": "Clear cache"
+  "connectionRecovery.clearCache": "Clear cache",
+  "connectionRecovery.description": "This is often caused by broken local cache. Clearing it reloads the app and reconnects — you stay signed in."
 }
