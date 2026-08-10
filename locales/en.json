@@ -3307,8 +3307,6 @@
   "errorBoundary.descriptionRetriesStopped": "This error came back every time, so Lody stopped retrying on its own — the screen now stays put until you choose a step below.",
   "errorBoundary.serverErrorSummary": "The Lody backend returned a server error.",
   "connectionRecovery.title": "Still connecting…",
-  "connectionRecovery.description": "The workspace has been unable to connect for a while. This can be caused by broken local cache — clearing it and reloading usually fixes it. Synced data re-downloads and you stay signed in.",
-  "connectionRecovery.clearAndReload": "Clear cache & reload",
-  "connectionRecovery.report": "Report a bug",
-  "connectionRecovery.dismiss": "Dismiss"
+  "connectionRecovery.dismiss": "Dismiss",
+  "connectionRecovery.clearCache": "Clear cache"
 }

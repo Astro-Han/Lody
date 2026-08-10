@@ -1,9 +1,8 @@
-import { atom, useAtom, useSetAtom } from 'jotai';
+import { atom, useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
 import { Loader2, X } from 'lucide-react';
 import { Button } from '@/ui/button';
-import { bugReportDialogOpenAtom } from '@/atoms/bug-report';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { ClearCacheConfirmDialog, useClearCache } from './settings/clear-cache';
 
@@ -15,29 +14,27 @@ const stuckConnectionBannerDismissedAtom = atom(false);
 
 export type StuckConnectionBannerLabels = {
   title: string;
-  description: string;
-  clearAndReload: string;
-  report: string;
+  clearCache: string;
   dismissAriaLabel: string;
 };
 
 /**
  * Floating hint shown when the workspace connection has been stuck in
- * `loading` for an extended time (see `useStuckConnectionHint`). Offers the one
- * recovery action that reliably unwedges a poisoned local state — clear the
- * local cache and reload (the reload also cancels any hung in-flight
- * connection work) — plus a bug-report escape hatch for when the problem is
- * not local. Presentational; `StuckConnectionBannerContainer` wires state.
+ * `loading` for an extended time (see `useStuckConnectionHint`). A single
+ * compact row — spinner, title, one action, dismiss — because the action's
+ * confirmation dialog already explains what a cache clear does; repeating that
+ * here would cost the height of two chat-list rows on a phone. The clear +
+ * reload is the one recovery that reliably unwedges poisoned local state (the
+ * reload also cancels any hung in-flight connection work). Presentational;
+ * `StuckConnectionBannerContainer` wires state.
  */
 export function StuckConnectionBanner({
   labels,
   onClearCache,
-  onReport,
   onDismiss,
 }: {
   labels: StuckConnectionBannerLabels;
   onClearCache: () => void;
-  onReport: () => void;
   onDismiss: () => void;
 }) {
   return (
@@ -45,34 +42,24 @@ export function StuckConnectionBanner({
       className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.5rem)] z-40 flex justify-center px-4"
       role="status"
     >
-      <div className="pointer-events-auto w-full max-w-md rounded-xl border border-border/70 bg-card/95 p-3 shadow-lg backdrop-blur">
-        <div className="flex items-start gap-2.5">
-          <Loader2
-            className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground"
-            aria-hidden="true"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{labels.title}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{labels.description}</p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="-mr-1 -mt-1 h-7 w-7 shrink-0 text-muted-foreground"
-            onClick={onDismiss}
-            aria-label={labels.dismissAriaLabel}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-        <div className="mt-2.5 flex items-center justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onReport}>
-            {labels.report}
-          </Button>
-          <Button size="sm" onClick={onClearCache}>
-            {labels.clearAndReload}
-          </Button>
-        </div>
+      <div className="pointer-events-auto flex min-w-0 max-w-full items-center gap-2 rounded-full border border-border/70 bg-card/95 py-1.5 pl-3 pr-1.5 shadow-lg backdrop-blur">
+        <Loader2
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 truncate text-sm font-medium">{labels.title}</span>
+        <Button size="sm" className="h-7 shrink-0 rounded-full px-3" onClick={onClearCache}>
+          {labels.clearCache}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 shrink-0 rounded-full text-muted-foreground"
+          onClick={onDismiss}
+          aria-label={labels.dismissAriaLabel}
+        >
+          <X className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );
@@ -90,7 +77,6 @@ export function StuckConnectionBannerContainer() {
   const platform = usePlatform();
   const stuck = useStuckConnectionHint();
   const [dismissed, setDismissed] = useAtom(stuckConnectionBannerDismissedAtom);
-  const openBugReport = useSetAtom(bugReportDialogOpenAtom);
   const { dialogOpen, setDialogOpen, isClearing, confirmClear } = useClearCache();
 
   if (platform.sync.mode === 'local' || !stuck || dismissed) {
@@ -102,13 +88,10 @@ export function StuckConnectionBannerContainer() {
       <StuckConnectionBanner
         labels={{
           title: t('connectionRecovery.title'),
-          description: t('connectionRecovery.description'),
-          clearAndReload: t('connectionRecovery.clearAndReload'),
-          report: t('connectionRecovery.report'),
+          clearCache: t('connectionRecovery.clearCache'),
           dismissAriaLabel: t('connectionRecovery.dismiss'),
         }}
         onClearCache={() => setDialogOpen(true)}
-        onReport={() => openBugReport(true)}
         onDismiss={() => setDismissed(true)}
       />
       <ClearCacheConfirmDialog

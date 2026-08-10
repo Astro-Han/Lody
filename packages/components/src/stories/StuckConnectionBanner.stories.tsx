@@ -5,19 +5,13 @@ import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
 
 const labels = {
   title: 'Still connecting…',
-  description:
-    'The workspace has been unable to connect for a while. This can be caused by broken local cache — clearing it and reloading usually fixes it. Synced data re-downloads and you stay signed in.',
-  clearAndReload: 'Clear cache & reload',
-  report: 'Report a bug',
+  clearCache: 'Clear cache',
   dismissAriaLabel: 'Dismiss',
 };
 
 const zhLabels = {
   title: '连接时间较长',
-  description:
-    '工作区较长时间未能连接，可能是本地缓存异常导致。清空缓存并重新加载通常可以修复。已同步数据会重新下载，且不会退出登录。',
-  clearAndReload: '清空缓存并重新加载',
-  report: '报告 Bug',
+  clearCache: '清空缓存',
   dismissAriaLabel: '关闭',
 };
 
@@ -27,7 +21,6 @@ const meta = {
   args: {
     labels,
     onClearCache: fn(),
-    onReport: fn(),
     onDismiss: fn(),
   },
   parameters: {

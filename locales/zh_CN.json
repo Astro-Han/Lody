@@ -3305,8 +3305,6 @@
   "errorBoundary.descriptionRetriesStopped": "这个错误每次都会重现，因此 Lody 已停止自动重试——页面会保持不动，直到你选择下面的某个步骤。",
   "errorBoundary.serverErrorSummary": "Lody 后端返回了服务器错误。",
   "connectionRecovery.title": "连接时间较长",
-  "connectionRecovery.description": "工作区较长时间未能连接，可能是本地缓存异常导致。清空缓存并重新加载通常可以修复。已同步数据会重新下载，且不会退出登录。",
-  "connectionRecovery.clearAndReload": "清空缓存并重新加载",
-  "connectionRecovery.report": "报告 Bug",
-  "connectionRecovery.dismiss": "关闭"
+  "connectionRecovery.dismiss": "关闭",
+  "connectionRecovery.clearCache": "清空缓存"
 }
