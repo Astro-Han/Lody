@@ -60,7 +60,7 @@
   "agents.editConfigDescription": "Edit agent configuration",
   "agents.envVars": "Environment Variables",
   "agents.envVarsLineError": "Line {{line}}: {{message}}",
-  "agents.envVarsTextareaHelp": "One variable per line in KEY=VALUE format. A leading \"export\" is stripped automatically. Lines starting with # are comments. Do not add quotes around values; quotes will be treated as part of the value.",
+  "agents.envVarsTextareaHelp": "One variable per line in KEY=VALUE format. A leading \"export\" and matching quotes around values are stripped automatically. Lines starting with # are comments.",
   "agents.envVarsTextareaPlaceholder": "ENV_A=value1\nexport ENV_B=value2\n# This is a comment",
   "agents.noAgents": "No agents created",
   "agents.noConfigs": "No configurations yet",

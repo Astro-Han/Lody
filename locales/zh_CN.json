@@ -60,7 +60,7 @@
   "agents.editConfigDescription": "编辑代理配置",
   "agents.envVars": "环境变量",
   "agents.envVarsLineError": "第 {{line}} 行: {{message}}",
-  "agents.envVarsTextareaHelp": "每行一个变量，格式为 KEY=VALUE。开头的 \"export\" 会自动去除。以 # 开头的行为注释。值不需要添加引号，引号会被视为值的一部分。",
+  "agents.envVarsTextareaHelp": "每行一个变量，格式为 KEY=VALUE。开头的 \"export\" 和包裹值的成对引号会自动去除。以 # 开头的行为注释。",
   "agents.envVarsTextareaPlaceholder": "ENV_A=value1\nexport ENV_B=value2\n# 这是注释",
   "agents.noAgents": "暂无代理",
   "agents.noConfigs": "暂无配置",
