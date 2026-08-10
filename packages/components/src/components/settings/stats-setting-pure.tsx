@@ -12,6 +12,7 @@ import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
   SettingsUsageRange,
+  SettingsUsageTimelineData,
 } from './settings-data-cache';
 
 export type StatsSettingsViewProps = {
@@ -24,6 +25,8 @@ export type StatsSettingsViewProps = {
   byModelBuckets: StackedAreaBucket[];
   byMemberBuckets: StackedAreaBucket[];
   usageCalendar?: SettingsUsageCalendarData;
+  /** Timeline for the selected range; drives the range-aware skyline and composition rings. */
+  usageTimeline?: SettingsUsageTimelineData;
   /** Breakdown for the day selected in the calendar, when one is open. */
   usageDay?: SettingsUsageDayData;
   usageDayLoading?: boolean;
@@ -189,6 +192,7 @@ export function StatsSettingsView({
   byModelBuckets,
   byMemberBuckets,
   usageCalendar,
+  usageTimeline,
   usageDay,
   usageDayLoading,
   onSelectedUsageDayChange,
@@ -256,6 +260,7 @@ export function StatsSettingsView({
         <Suspense fallback={null}>
           <UsageCalendarVisualization
             calendar={usageCalendar}
+            timeline={usageTimeline}
             workspaceName={workspaceName}
             dayDetail={usageDay}
             dayDetailLoading={usageDayLoading}

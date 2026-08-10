@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import lodyLogo from '@/assets/lody-icon.png';
 import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
 import { Button } from '@/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
@@ -32,17 +31,25 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
-import type { SettingsUsageCalendarData, SettingsUsageDayData } from './settings-data-cache';
+import { stripRecommended } from '@/components/shared/acp-selector-options';
+import type {
+  SettingsUsageCalendarData,
+  SettingsUsageDayData,
+  SettingsUsageTimelineData,
+} from './settings-data-cache';
 import {
   createUsageCalendarModel,
   createUsageHeatScale,
   createUsageSkylineLodyLogoTriangles,
   createUsageSkylineAscii,
   createUsageSkylineBinaryStl,
+  getUsageSkylineViewport,
   getUsageColumnHeight,
+  getUsageCalendarLevel,
   USAGE_CALENDAR_CELLS,
   USAGE_CALENDAR_COLUMNS,
   USAGE_CALENDAR_ROWS,
+  USAGE_HEAT_MIN_INTENSITY,
   USAGE_SKYLINE_STL_BASE_HEIGHT,
   USAGE_SKYLINE_STL_BACK_MARGIN,
   USAGE_SKYLINE_STL_BASE_DEPTH,
@@ -84,8 +91,20 @@ const FUTURE_DAY_COLOR = 'hsl(var(--muted-foreground) / 0.05)';
 
 function formatTokens(value: number): string {
   const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(abs >= 100_000_000 ? 0 : 1)}M`;
-  if (abs >= 1_000) return `${(value / 1_000).toFixed(abs >= 100_000 ? 0 : 1)}K`;
+  if (abs >= 1_000_000) {
+    const fractionDigits = abs >= 100_000_000 ? 0 : 1;
+    return `${new Intl.NumberFormat(undefined, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(value / 1_000_000)}M`;
+  }
+  if (abs >= 1_000) {
+    const fractionDigits = abs >= 100_000 ? 0 : 1;
+    return `${new Intl.NumberFormat(undefined, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(value / 1_000)}K`;
+  }
   return new Intl.NumberFormat().format(Math.round(value));
 }
 
@@ -230,6 +249,73 @@ function HeatLegend() {
         }}
       />
       <span>{t('workspace.usage.skyline.more')}</span>
+    </div>
+  );
+}
+
+function UsageTimelineHeatmap({
+  timeline,
+  metric,
+}: {
+  timeline: SettingsUsageTimelineData;
+  metric: UsageCalendarMetric;
+}) {
+  const { t } = useTranslation();
+  const values = useMemo(
+    () => timeline.buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD)),
+    [metric, timeline.buckets]
+  );
+  const referenceValue = useMemo(() => {
+    const active = values.filter((value) => value > 0).sort((a, b) => a - b);
+    return active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
+  }, [values]);
+  const showEveryLabel = timeline.range === 'day' || timeline.range === 'week';
+
+  return (
+    <div
+      key={timeline.range}
+      className="animate-in fade-in-0 space-y-3 duration-300 motion-reduce:animate-none"
+    >
+      <div
+        role="grid"
+        aria-label={t('workspace.usage.skyline.heatmap')}
+        className="grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${Math.max(1, values.length)}, minmax(0, 1fr))` }}
+      >
+        {timeline.buckets.map((bucket, index) => {
+          const value = values[index] ?? 0;
+          const intensity =
+            value > 0 && referenceValue > 0
+              ? USAGE_HEAT_MIN_INTENSITY +
+                (1 - USAGE_HEAT_MIN_INTENSITY) * Math.min(1, value / referenceValue) ** 0.6
+              : 0;
+          return (
+            <div key={bucket.bucketStartMs} className="min-w-0 text-center">
+              <div
+                role="gridcell"
+                title={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
+                aria-label={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
+                className="animate-usage-heatmap-cell h-8 rounded-[28%]"
+                style={{
+                  backgroundColor: intensity > 0 ? heatColor(intensity) : EMPTY_DAY_COLOR,
+                  animationDelay: `${index * CELL_REVEAL_STAGGER_MS}ms`,
+                }}
+              />
+              {showEveryLabel ? (
+                <span className="mt-1 block truncate text-[9px] tabular-nums text-muted-foreground">
+                  {bucket.bucketLabel}
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <p className="truncate text-xs text-muted-foreground">
+          {t(`workspace.usage.window.${timeline.range}.long`)}
+        </p>
+        <HeatLegend />
+      </div>
     </div>
   );
 }
@@ -560,6 +646,220 @@ const COMPOSITION_ALPHAS = [0.75, 0.55, 0.38, 0.24] as const;
 const compositionFill = (index: number) =>
   heatColor(COMPOSITION_ALPHAS[index % COMPOSITION_ALPHAS.length]!);
 
+const RING_SEGMENT_LIMIT = 5;
+const MODEL_RING_COLORS = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#93c5fd'] as const;
+const MEMBER_RING_COLORS = ['#c084fc', '#a855f7', '#9333ea', '#7e22ce', '#d8b4fe'] as const;
+
+type UsageCompositionSegment = {
+  id: string;
+  label: string;
+  tokens: number;
+  share: number;
+};
+
+function createUsageCompositionSegments(
+  rows: Array<{ id: string; label: string; tokens: number }>,
+  otherLabel: string
+): UsageCompositionSegment[] {
+  const totals = new Map<string, { label: string; tokens: number }>();
+  for (const row of rows) {
+    if (!Number.isFinite(row.tokens) || row.tokens <= 0) continue;
+    const previous = totals.get(row.id);
+    totals.set(row.id, {
+      label: row.label,
+      tokens: (previous?.tokens ?? 0) + row.tokens,
+    });
+  }
+
+  const sorted = [...totals.entries()]
+    .map(([id, value]) => ({ id, ...value }))
+    .sort((a, b) => b.tokens - a.tokens || a.label.localeCompare(b.label));
+  const visible = sorted.slice(0, RING_SEGMENT_LIMIT - 1);
+  const hidden = sorted.slice(RING_SEGMENT_LIMIT - 1);
+  if (hidden.length > 0) {
+    visible.push({
+      id: '__other__',
+      label: otherLabel,
+      tokens: hidden.reduce((total, row) => total + row.tokens, 0),
+    });
+  }
+
+  const total = visible.reduce((sum, row) => sum + row.tokens, 0);
+  return visible.map((row) => ({ ...row, share: total > 0 ? row.tokens / total : 0 }));
+}
+
+function CompositionRing({
+  segments,
+  radius,
+  strokeWidth,
+  colors,
+}: {
+  segments: UsageCompositionSegment[];
+  radius: number;
+  strokeWidth: number;
+  colors: readonly string[];
+}) {
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  return (
+    <>
+      <circle
+        aria-hidden="true"
+        cx="88"
+        cy="88"
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        className="text-muted-foreground/10"
+      />
+      {segments.map((segment, index) => {
+        const segmentLength = segment.share * circumference;
+        const gap = segments.length > 1 ? Math.min(2.5, segmentLength * 0.16) : 0;
+        const dashLength = Math.max(0, segmentLength - gap);
+        const circle = (
+          <circle
+            key={segment.id}
+            cx="88"
+            cy="88"
+            r={radius}
+            fill="none"
+            stroke={colors[index % colors.length]}
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${dashLength} ${circumference - dashLength}`}
+            strokeDashoffset={-offset * circumference}
+            className="transition-[stroke-width,opacity] duration-200 hover:opacity-80"
+          >
+            <title>{`${segment.label}: ${Math.round(segment.share * 100)}%`}</title>
+          </circle>
+        );
+        offset += segment.share;
+        return circle;
+      })}
+    </>
+  );
+}
+
+function CompositionLegend({
+  title,
+  segments,
+  colors,
+}: {
+  title: string;
+  segments: UsageCompositionSegment[];
+  colors: readonly string[];
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="min-w-0">
+      <p className="mb-2 text-[11px] font-medium text-muted-foreground">{title}</p>
+      {segments.length > 0 ? (
+        <ul className="space-y-1.5">
+          {segments.map((segment, index) => (
+            <li key={segment.id} className="flex min-w-0 items-center gap-2 text-[11px]">
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: colors[index % colors.length] }}
+              />
+              <span className="truncate text-foreground/80">{segment.label}</span>
+              <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
+                {new Intl.NumberFormat(undefined, { style: 'percent' }).format(segment.share)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">{t('workspace.usage.skyline.noUsage')}</p>
+      )}
+    </div>
+  );
+}
+
+function UsageCompositionRings({ timeline }: { timeline: SettingsUsageTimelineData }) {
+  const { t } = useTranslation();
+  const modelSegments = useMemo(
+    () =>
+      createUsageCompositionSegments(
+        timeline.buckets.flatMap((bucket) =>
+          bucket.byModel.map((row) => ({
+            id: row.modelId,
+            label: stripRecommended(row.modelId),
+            tokens: row.tokens,
+          }))
+        ),
+        t('workspace.usage.skyline.other')
+      ),
+    [t, timeline]
+  );
+  const memberSegments = useMemo(
+    () =>
+      createUsageCompositionSegments(
+        timeline.buckets.flatMap((bucket) =>
+          bucket.byUser.map((row) => ({
+            id: row.userId,
+            label:
+              timeline.users?.[row.userId]?.name ||
+              timeline.users?.[row.userId]?.email ||
+              row.userId,
+            tokens: row.tokens,
+          }))
+        ),
+        t('workspace.usage.skyline.other')
+      ),
+    [t, timeline]
+  );
+
+  return (
+    <div
+      key={timeline.range}
+      className="animate-in fade-in-0 slide-in-from-left-4 grid items-center gap-5 duration-500 motion-reduce:animate-none sm:grid-cols-[11rem_minmax(0,1fr)]"
+    >
+      <div className="relative mx-auto h-44 w-44 shrink-0">
+        <svg
+          viewBox="0 0 176 176"
+          role="img"
+          aria-label={`${t('workspace.usage.byModel')}; ${t('workspace.usage.byUser')}`}
+          className="h-full w-full -rotate-90 overflow-visible"
+        >
+          <CompositionRing
+            segments={modelSegments}
+            radius={72}
+            strokeWidth={13}
+            colors={MODEL_RING_COLORS}
+          />
+          <CompositionRing
+            segments={memberSegments}
+            radius={51}
+            strokeWidth={11}
+            colors={MEMBER_RING_COLORS}
+          />
+        </svg>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-10 text-center">
+          <span className="max-w-full truncate text-lg font-semibold leading-none tabular-nums text-foreground">
+            {formatTokens(timeline.totals.tokens)}
+          </span>
+          <span className="mt-1 text-[10px] text-muted-foreground">
+            {t('workspace.usage.tokens')}
+          </span>
+        </div>
+      </div>
+      <div className="grid min-w-0 grid-cols-2 gap-5">
+        <CompositionLegend
+          title={t('workspace.usage.byModel')}
+          segments={modelSegments}
+          colors={MODEL_RING_COLORS}
+        />
+        <CompositionLegend
+          title={t('workspace.usage.byUser')}
+          segments={memberSegments}
+          colors={MEMBER_RING_COLORS}
+        />
+      </div>
+    </div>
+  );
+}
+
 /** Longest model/member list the panel shows before folding the rest into "other". */
 const DAY_DETAIL_ROW_LIMIT = 5;
 
@@ -810,6 +1110,7 @@ function FitCamera({
   width,
   depth,
   height,
+  centerX = 0,
   padding = 1,
   framing = 1,
   front = false,
@@ -817,6 +1118,7 @@ function FitCamera({
   width: number;
   depth: number;
   height: number;
+  centerX?: number;
   padding?: number;
   framing?: number;
   front?: boolean;
@@ -842,13 +1144,13 @@ function FitCamera({
     orthographic.top = frustumHeight / 2;
     orthographic.bottom = -frustumHeight / 2;
     orthographic.position.set(
-      front ? cameraDistance * 0.45 : cameraDistance,
+      centerX + (front ? cameraDistance * 0.45 : cameraDistance),
       cameraDistance * 0.72 + height,
       front ? -cameraDistance : cameraDistance
     );
-    orthographic.lookAt(0, height * 0.16, 0);
+    orthographic.lookAt(centerX, height * 0.16, 0);
     orthographic.updateProjectionMatrix();
-  }, [camera, depth, framing, front, height, padding, size.height, size.width, width]);
+  }, [camera, centerX, depth, framing, front, height, padding, size.height, size.width, width]);
   return null;
 }
 
@@ -871,7 +1173,60 @@ function SceneOrbitControls({ targetY }: { targetY: number }) {
   return null;
 }
 
-function UsageColumns({ model }: { model: UsageCalendarModel }) {
+type UsageSkylineRenderCell = Pick<UsageCalendarCell, 'column' | 'row' | 'value' | 'level'> & {
+  isFuture: boolean;
+};
+
+type UsageSkylineRenderModel = {
+  cells: UsageSkylineRenderCell[];
+  maxValue: number;
+  columns: number;
+  rows: number;
+  centerX: number;
+  viewportWidth: number;
+};
+
+function createTimelineSkylineModel(
+  timeline: SettingsUsageTimelineData,
+  metric: UsageCalendarMetric
+): UsageSkylineRenderModel {
+  // Short ranges read most clearly as a strip (24h / 7d). The 30-day view
+  // folds back into seven rows, preserving the familiar calendar silhouette.
+  const rows = timeline.range === 'month' || timeline.range === 'total' ? 7 : 1;
+  const columns = Math.max(1, Math.ceil(timeline.buckets.length / rows));
+  const values = timeline.buckets.map((bucket) =>
+    metric === 'tokens' ? bucket.tokens : bucket.costUSD
+  );
+  const maxValue = values.reduce((maximum, value) => Math.max(maximum, value), 0);
+  return {
+    cells: values.map((value, index) => ({
+      column: Math.floor(index / rows),
+      row: index % rows,
+      value,
+      level: getUsageCalendarLevel(value, maxValue),
+      isFuture: false,
+    })),
+    maxValue,
+    columns,
+    rows,
+    centerX: 0,
+    viewportWidth: columns,
+  };
+}
+
+function createCalendarSkylineRenderModel(model: UsageCalendarModel): UsageSkylineRenderModel {
+  const viewport = getUsageSkylineViewport(model);
+  return {
+    cells: model.cells,
+    maxValue: model.maxValue,
+    columns: USAGE_CALENDAR_COLUMNS,
+    rows: USAGE_CALENDAR_ROWS,
+    centerX: viewport.centerX,
+    viewportWidth: viewport.width,
+  };
+}
+
+function UsageColumns({ model }: { model: UsageSkylineRenderModel }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const color = useMemo(() => new THREE.Color(), []);
@@ -887,9 +1242,9 @@ function UsageColumns({ model }: { model: UsageCalendarModel }) {
     for (const [index, cell] of activeCells.entries()) {
       const height = getUsageColumnHeight(cell.value, model.maxValue, 'skyline');
       dummy.position.set(
-        cell.column - (USAGE_CALENDAR_COLUMNS - 1) / 2,
+        cell.column - (model.columns - 1) / 2,
         height / 2,
-        cell.row - (USAGE_CALENDAR_ROWS - 1) / 2
+        cell.row - (model.rows - 1) / 2
       );
       dummy.scale.set(0.9, height, 0.9);
       dummy.updateMatrix();
@@ -899,7 +1254,7 @@ function UsageColumns({ model }: { model: UsageCalendarModel }) {
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [activeCells, color, dummy, model.maxValue]);
+  }, [activeCells, color, dummy, model.columns, model.maxValue, model.rows]);
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, Math.max(1, activeCells.length)]}>
@@ -914,7 +1269,7 @@ function IsometricView({
   className,
   framing,
 }: {
-  model: UsageCalendarModel;
+  model: UsageSkylineRenderModel;
   className?: string;
   framing?: number;
 }) {
@@ -929,9 +1284,10 @@ function IsometricView({
         <directionalLight position={[22, 32, 18]} intensity={2.2} />
         <directionalLight position={[-18, 12, -8]} intensity={0.55} color="#78c8ff" />
         <FitCamera
-          width={USAGE_CALENDAR_COLUMNS}
-          depth={USAGE_CALENDAR_ROWS}
+          width={model.viewportWidth}
+          depth={model.rows}
           height={6}
+          centerX={model.centerX}
           framing={framing}
         />
         <UsageColumns model={model} />
@@ -1130,12 +1486,15 @@ function SkylineAscii({ content }: { content: string }) {
 
 export function UsageCalendarVisualization({
   calendar,
+  timeline,
   workspaceName,
   dayDetail,
   dayDetailLoading = false,
   onSelectedDayChange,
 }: {
   calendar: SettingsUsageCalendarData;
+  /** Selected-range timeline used for the compact skyline and 100% composition rings. */
+  timeline?: SettingsUsageTimelineData;
   workspaceName?: string;
   /** Breakdown for the currently selected day; the container owns the query. */
   dayDetail?: SettingsUsageDayData;
@@ -1157,6 +1516,13 @@ export function UsageCalendarVisualization({
   const tokenModel = useMemo(() => createUsageCalendarModel(calendar, 'tokens'), [calendar]);
   const costModel = useMemo(() => createUsageCalendarModel(calendar, 'costUSD'), [calendar]);
   const model = metric === 'tokens' ? tokenModel : costModel;
+  const skylineModel = useMemo(
+    () =>
+      timeline && timeline.range !== 'total'
+        ? createTimelineSkylineModel(timeline, metric)
+        : createCalendarSkylineRenderModel(model),
+    [metric, model, timeline]
+  );
   const ascii = useMemo(() => createUsageSkylineAscii(tokenModel), [tokenModel]);
   const stem = fileStem(workspaceName || 'lody-usage');
 
@@ -1177,6 +1543,10 @@ export function UsageCalendarVisualization({
     },
     [onSelectedDayChange]
   );
+
+  useEffect(() => {
+    if (timeline && timeline.range !== 'total' && selectedDay) selectDay(null);
+  }, [selectDay, selectedDay, timeline]);
 
   const copyAscii = async () => {
     try {
@@ -1269,7 +1639,9 @@ export function UsageCalendarVisualization({
             {t('workspace.usage.skyline.title')}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {t('workspace.usage.skyline.subtitle')}
+            {timeline && timeline.range !== 'total'
+              ? t(`workspace.usage.window.${timeline.range}.long`)
+              : t('workspace.usage.skyline.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -1345,12 +1717,16 @@ export function UsageCalendarVisualization({
       </header>
 
       <div className="p-4">
-        <UsageHeatmap
-          model={model}
-          metric={metric}
-          selectedDayMs={selectedDay?.dayStartMs ?? null}
-          onSelectDay={selectDay}
-        />
+        {timeline && timeline.range !== 'total' ? (
+          <UsageTimelineHeatmap timeline={timeline} metric={metric} />
+        ) : (
+          <UsageHeatmap
+            model={model}
+            metric={metric}
+            selectedDayMs={selectedDay?.dayStartMs ?? null}
+            onSelectDay={selectDay}
+          />
+        )}
         {/* Expanding a row height needs a definite value; the 0fr -> 1fr grid
             track does it without measuring the panel. */}
         <div
@@ -1379,9 +1755,14 @@ export function UsageCalendarVisualization({
       {/* Metrics band — the skyline lives here as a watermark. Hovering the band
           brings it forward (opacity + a small lift) instead of giving the 3D view
           a tab of its own. */}
-      <div className="group relative min-h-32 overflow-hidden border-t border-border/60 bg-muted/25 px-4 py-4 sm:min-h-36 sm:px-5">
+      <div
+        className={cn(
+          'group relative overflow-hidden border-t border-border/60 bg-muted/25 px-4 py-4 sm:px-5',
+          timeline ? 'min-h-56' : 'min-h-32 sm:min-h-36'
+        )}
+      >
         <IsometricView
-          model={model}
+          model={skylineModel}
           className={cn(
             'pointer-events-none absolute -right-16 -top-20 h-64 w-[38rem] origin-top-right rounded-none bg-transparent',
             // Tailwind v4 emits the standalone `scale` property, not `transform`.
@@ -1389,15 +1770,14 @@ export function UsageCalendarVisualization({
             'group-hover:scale-[1.06] group-hover:opacity-35',
             'motion-reduce:transition-none motion-reduce:group-hover:scale-100'
           )}
-          framing={0.4}
-        />
-        <img
-          src={lodyLogo}
-          alt="Lody"
-          className="pointer-events-none absolute bottom-3 right-4 h-7 w-7 object-contain opacity-80 sm:right-5"
+          framing={timeline && timeline.range !== 'total' ? 0.85 : 0.4}
         />
         <div className="relative">
-          <UsageSummary model={model} metric={metric} />
+          {timeline ? (
+            <UsageCompositionRings timeline={timeline} />
+          ) : (
+            <UsageSummary model={model} metric={metric} />
+          )}
         </div>
       </div>
 

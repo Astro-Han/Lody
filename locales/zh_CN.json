@@ -2762,6 +2762,7 @@
   "workspace.usage.skyline.metric": "用量指标",
   "workspace.usage.skyline.more": "多",
   "workspace.usage.skyline.noUsage": "无用量",
+  "workspace.usage.skyline.other": "其他",
   "workspace.usage.skyline.otherRows": "另外 {{count}} 项 · {{tokens}}",
   "workspace.usage.skyline.peakDay": "峰值日期",
   "workspace.usage.skyline.peakShare": "为峰值日的 {{percent}}%",

@@ -4,6 +4,8 @@ import { useState } from 'react';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
+  SettingsUsageRange,
+  SettingsUsageTimelineData,
 } from '@/components/settings/settings-data-cache';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -15,9 +17,30 @@ function wave(index: number): number {
   return primary * secondary;
 }
 
-type Shape = 'default' | 'empty' | 'outlier';
+type Shape = 'default' | 'empty' | 'outlier' | 'recent' | 'largeTotal';
+
+const RECENT_ACTIVE_DAYS = 124;
+const LARGE_TOTAL_TOKENS = 71_061_000_000;
+
+function buildRecentTokens(totalTokens?: number): number[] {
+  const weights = Array.from({ length: RECENT_ACTIVE_DAYS }, (_, index) =>
+    Math.max(1, Math.round((0.2 + wave(index + 241)) * 1_000))
+  );
+  if (totalTokens === undefined) return weights.map((weight) => weight * 180);
+
+  const totalWeight = weights.reduce((total, weight) => total + weight, 0);
+  const tokens = weights.map((weight) => Math.floor((totalTokens * weight) / totalWeight));
+  tokens[tokens.length - 1]! += totalTokens - tokens.reduce((total, value) => total + value, 0);
+  return tokens;
+}
 
 function buildCalendar(shape: Shape): SettingsUsageCalendarData {
+  const recentTokens =
+    shape === 'recent'
+      ? buildRecentTokens()
+      : shape === 'largeTotal'
+        ? buildRecentTokens(LARGE_TOTAL_TOKENS)
+        : null;
   return {
     workspaceId: 'workspace-story',
     timezone: 'UTC',
@@ -25,10 +48,17 @@ function buildCalendar(shape: Shape): SettingsUsageCalendarData {
     endMs: START_MS + 370 * DAY_MS,
     days: Array.from({ length: 371 }, (_, index) => {
       const dayStartMs = START_MS + index * DAY_MS;
-      const activity = shape === 'empty' || index > 364 ? 0 : Math.round(wave(index) * 180_000);
+      const recentIndex = index - (365 - RECENT_ACTIVE_DAYS);
+      const recentActivity = recentIndex >= 0 ? (recentTokens?.[recentIndex] ?? 0) : 0;
+      const activity =
+        shape === 'empty' || index > 364
+          ? 0
+          : recentTokens
+            ? recentActivity
+            : Math.round(wave(index) * 180_000);
       // One launch-day spike that would flatten the whole ramp under a max-anchored scale.
       const spike = shape === 'outlier' && index === 300 ? 12_000_000 : 0;
-      const tokens = index % 9 === 0 ? 0 : activity + spike;
+      const tokens = recentTokens ? activity : index % 9 === 0 ? 0 : activity + spike;
       return {
         dayStartMs,
         date: new Date(dayStartMs).toISOString().slice(0, 10),
@@ -79,12 +109,84 @@ function buildDayDetail(dayStartMs: number): SettingsUsageDayData {
   };
 }
 
-function Harness({ shape = 'default' }: { shape?: Shape }) {
+const RANGE_BUCKETS: Record<SettingsUsageRange, number> = {
+  day: 12,
+  week: 7,
+  month: 30,
+  total: 365,
+};
+
+function splitTokens(total: number, weights: number[]): number[] {
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  const values = weights.map((weight) => Math.floor((total * weight) / weightTotal));
+  values[0]! += total - values.reduce((sum, value) => sum + value, 0);
+  return values;
+}
+
+function buildTimeline(
+  calendar: SettingsUsageCalendarData,
+  range: SettingsUsageRange
+): SettingsUsageTimelineData {
+  const bucketCount = RANGE_BUCKETS[range];
+  const days = calendar.days.filter((day) => !day.isFuture).slice(-bucketCount);
+  const buckets = days.map((day, index) => {
+    const modelTokens = splitTokens(day.tokens, [46, 27, 17, 7, 3]);
+    const memberTokens = splitTokens(day.tokens, [52, 31, 12, 5]);
+    return {
+      bucketStartMs: day.dayStartMs,
+      bucketLabel: range === 'day' ? `${String(index * 2).padStart(2, '0')}:00` : day.date,
+      tokens: day.tokens,
+      costUSD: day.costUSD,
+      byModel: [
+        'claude-sonnet-5',
+        'gpt-5-codex',
+        'claude-opus-4-8',
+        'gemini-2.5-pro',
+        'claude-haiku-4-5',
+      ].map((modelId, modelIndex) => ({
+        modelId,
+        tokens: modelTokens[modelIndex] ?? 0,
+        costUSD: 0,
+      })),
+      byUser: ['u1', 'u2', 'u3', 'u4'].map((userId, userIndex) => ({
+        userId,
+        tokens: memberTokens[userIndex] ?? 0,
+        costUSD: 0,
+      })),
+    };
+  });
+  const tokens = buckets.reduce((sum, bucket) => sum + bucket.tokens, 0);
+  return {
+    workspaceId: calendar.workspaceId,
+    range,
+    startMs: buckets[0]?.bucketStartMs ?? calendar.startMs,
+    endMs: calendar.endMs,
+    bucketSizeMs: range === 'day' ? 2 * 60 * 60 * 1000 : DAY_MS,
+    totals: { tokens, costUSD: buckets.reduce((sum, bucket) => sum + bucket.costUSD, 0) },
+    users: {
+      u1: { name: 'Ada Lovelace' },
+      u2: { name: 'Grace Hopper' },
+      u3: { name: 'Katherine Johnson' },
+      u4: { email: 'margaret@acme.dev' },
+    },
+    buckets,
+  };
+}
+
+function Harness({
+  shape = 'default',
+  range = 'total',
+}: {
+  shape?: Shape;
+  range?: SettingsUsageRange;
+}) {
   const [selectedDayMs, setSelectedDayMs] = useState<number | null>(null);
+  const calendar = buildCalendar(shape);
   return (
     <div className="mx-auto max-w-5xl p-6">
       <UsageCalendarVisualization
-        calendar={buildCalendar(shape)}
+        calendar={calendar}
+        timeline={buildTimeline(calendar, range)}
         workspaceName="Acme Robotics"
         dayDetail={selectedDayMs === null ? undefined : buildDayDetail(selectedDayMs)}
         onSelectedDayChange={setSelectedDayMs}
@@ -105,3 +207,8 @@ type Story = StoryObj<typeof Harness>;
 export const Default: Story = { args: {} };
 export const Empty: Story = { args: { shape: 'empty' } };
 export const SingleDaySpike: Story = { args: { shape: 'outlier' } };
+export const RecentActivity: Story = { args: { shape: 'recent' } };
+export const LargeTotal: Story = { args: { shape: 'largeTotal' } };
+export const Last24Hours: Story = { args: { range: 'day' } };
+export const Last7Days: Story = { args: { range: 'week' } };
+export const Last30Days: Story = { args: { range: 'month' } };

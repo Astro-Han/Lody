@@ -5,6 +5,7 @@ import {
   createUsageSkylineLodyLogoTriangles,
   createUsageSkylineAscii,
   createUsageSkylineBinaryStl,
+  getUsageSkylineViewport,
   USAGE_CALENDAR_CELLS,
   USAGE_CALENDAR_COLUMNS,
   USAGE_CALENDAR_ROWS,
@@ -44,6 +45,29 @@ describe('usage calendar model', () => {
     expect(model.cells[2]).toMatchObject({ column: 0, row: 2, level: 3 });
     expect(model.cells[3]).toMatchObject({ column: 0, row: 3, level: 4 });
     expect(model.cells.at(-1)).toMatchObject({ column: 52, row: 6, level: 0 });
+  });
+
+  it('centers a recent active range in a minimum-width skyline viewport', () => {
+    const model = createUsageCalendarModel(
+      createCalendar({
+        [43 * USAGE_CALENDAR_ROWS]: 100,
+        [47 * USAGE_CALENDAR_ROWS]: 200,
+        [52 * USAGE_CALENDAR_ROWS]: 300,
+      })
+    );
+    model.weeks[52]![0]!.isFuture = true;
+
+    expect(getUsageSkylineViewport(model)).toEqual({ centerX: 19, width: 44 });
+  });
+
+  it('keeps full-year and empty skylines in the complete 53-column viewport', () => {
+    const fullYear = createUsageCalendarModel(
+      createCalendar({ 0: 100, [USAGE_CALENDAR_CELLS - 1]: 200 })
+    );
+    const empty = createUsageCalendarModel(createCalendar());
+
+    expect(getUsageSkylineViewport(fullYear)).toEqual({ centerX: 0, width: 53 });
+    expect(getUsageSkylineViewport(empty)).toEqual({ centerX: 0, width: 53 });
   });
 
   it('matches gh-skyline stacking with intensity tops and future dates', () => {

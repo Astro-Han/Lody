@@ -51,6 +51,16 @@ export type UsageCalendarModel = {
   currentStreak: number;
 };
 
+export type UsageSkylineViewport = {
+  /** Horizontal center in the skyline's world coordinates. */
+  centerX: number;
+  /** Number of calendar columns included by the camera framing. */
+  width: number;
+};
+
+export const USAGE_SKYLINE_MIN_VIEWPORT_COLUMNS = 44;
+export const USAGE_SKYLINE_ACTIVE_COLUMN_PADDING = 4;
+
 const EMPTY_DAY: UsageCalendarDay = {
   dayStartMs: 0,
   date: '',
@@ -193,6 +203,40 @@ export function createUsageCalendarModel(
     totalValue,
     activeDays: cells.filter((cell) => !cell.isFuture && cell.value > 0).length,
     ...streaks,
+  };
+}
+
+/**
+ * Frame the useful part of a sparse skyline without changing its stable 53x7 model.
+ * Empty and near-full-year ranges retain the complete calendar framing.
+ */
+export function getUsageSkylineViewport(model: UsageCalendarModel): UsageSkylineViewport {
+  const activeColumns = model.weeks
+    .map((week, column) => (week.some((cell) => !cell.isFuture && cell.value > 0) ? column : null))
+    .filter((column): column is number => column !== null);
+
+  const firstActiveColumn = activeColumns[0];
+  const lastActiveColumn = activeColumns.at(-1);
+  if (firstActiveColumn === undefined || lastActiveColumn === undefined) {
+    return { centerX: 0, width: USAGE_CALENDAR_COLUMNS };
+  }
+
+  const activeWidth = lastActiveColumn - firstActiveColumn + 1;
+  const width = Math.min(
+    USAGE_CALENDAR_COLUMNS,
+    Math.max(
+      USAGE_SKYLINE_MIN_VIEWPORT_COLUMNS,
+      activeWidth + USAGE_SKYLINE_ACTIVE_COLUMN_PADDING * 2
+    )
+  );
+
+  if (width === USAGE_CALENDAR_COLUMNS) {
+    return { centerX: 0, width };
+  }
+
+  return {
+    centerX: (firstActiveColumn + lastActiveColumn) / 2 - (USAGE_CALENDAR_COLUMNS - 1) / 2,
+    width,
   };
 }
 

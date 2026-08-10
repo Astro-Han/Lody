@@ -103,6 +103,7 @@ function CloudStatsSettings() {
         byModelBuckets={byModelBuckets}
         byMemberBuckets={byMemberBuckets}
         usageCalendar={usageCalendar}
+        usageTimeline={usageTimeline}
         usageDay={usageDay}
         usageDayLoading={usageDayLoading}
         onSelectedUsageDayChange={setSelectedUsageDayMs}

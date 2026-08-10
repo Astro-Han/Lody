@@ -2764,6 +2764,7 @@
   "workspace.usage.skyline.metric": "Usage metric",
   "workspace.usage.skyline.more": "More",
   "workspace.usage.skyline.noUsage": "No usage",
+  "workspace.usage.skyline.other": "Other",
   "workspace.usage.skyline.otherRows": "+{{count}} more · {{tokens}}",
   "workspace.usage.skyline.peakDay": "Peak day",
   "workspace.usage.skyline.peakShare": "{{percent}}% of peak day",
