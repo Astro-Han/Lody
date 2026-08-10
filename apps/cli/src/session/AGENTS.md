@@ -67,17 +67,6 @@ delegation proofs or a shared-machine gate without a new product and security de
   `TurnRuntimeState` is registered. User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
   the same history entry.
-  ONE EXCEPTION, and it does not mint a second ACP turn: approving a plan splits the
-  running turn's OUTPUT across two assistant entries (`message-handler.ts`
-  `rollAssistantEntryForPlanExit`). Claude-family plan mode is a permission mode, so
-  the same ACP turn implements the plan it just proposed, and one entry would fold the
-  whole implementation into the plan turn's collapsed work block. The continuation
-  entry carries `ownerTurnId = <turnId>` and the SAME `userTurnId`; the ACP turn, its
-  id, Stop, and steer are unchanged. Anything that looks up "the assistant entry for
-  turn T" must use `@lody/shared` `isAssistantEntryOwnedByTurn` and take the LAST
-  match (finalization, `setLatestAssistantHistoryFileDiff`, resume reopen); anything
-  asking "did this user turn finish?" must use `findLastAssistantEntryForUserTurn`,
-  because the plan entry is already `finished` while the turn is still running.
   INVARIANT: a steer (guide) the agent never accepted must not stay parked in
   `pending_apply` — dispatch skips that status, so nothing else would ever run it.
   `requeueUndeliveredSteer` hands it back to ordinary dispatch, and the load-bearing

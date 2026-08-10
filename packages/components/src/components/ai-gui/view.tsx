@@ -201,7 +201,9 @@ const EMPTY_GALLERY_ENTRIES: readonly SessionImageGalleryEntry[] = [];
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
 // when the user scrolls a message out of the VList buffer and back.
 interface BubbleExpandState {
-  groupExpanded: boolean;
+  /** Keyed by `AssistantTurnRenderSegment.key`: a turn can have more than one
+   *  foldable region (plan, then the approved implementation). */
+  expandedWorkedGroups: Record<string, boolean>;
   expandedGroups: Record<string, boolean>;
   expandedByIndex: Record<number, boolean>;
   planOpen: boolean;
@@ -216,7 +218,7 @@ const MAX_EXPAND_CACHE = 500;
 function getExpandState(messageId: string): BubbleExpandState {
   return (
     expandStateCache.get(messageId) ?? {
-      groupExpanded: false,
+      expandedWorkedGroups: {},
       expandedGroups: {},
       expandedByIndex: {},
       planOpen: false,
@@ -261,7 +263,12 @@ export type ChatStreamItem = SessionMessageItem | EmptySessionItem;
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
-  | { kind: 'worked_group_header'; expanded: boolean; durationMs: number | null }
+  | {
+      kind: 'worked_group_header';
+      segmentKey: string;
+      expanded: boolean;
+      durationMs: number | null;
+    }
   | { kind: 'content'; block: Extract<AssistantTurnRenderBlock, { kind: 'content' }> }
   | {
       kind: 'activity_group_header';
@@ -693,6 +700,8 @@ type AssistantTurnLayout = ReturnType<typeof buildAssistantTurnRenderLayout> & {
   subagentTasks: ReturnType<typeof collectSubagentTasks>;
 };
 
+const EMPTY_SUBAGENT_TASKS: ReturnType<typeof collectSubagentTasks> = [];
+
 // Assistant-turn layout (block grouping + subagent-task collection) is derived
 // purely from the message's id/items/finished state, and `buildChatStreamItems`
 // hands back a stable parsed-message object for unchanged turns and a fresh one
@@ -788,8 +797,7 @@ export const buildChatVirtualRows = ({
       continue;
     }
 
-    const { blocks, workBlockKeys, firstWorkBlockIndex, entries, subagentTasks } =
-      getAssistantTurnLayout(message);
+    const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
     const cachedState = getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
@@ -802,32 +810,12 @@ export const buildChatVirtualRows = ({
     // turns fully expanded. `message.finished` alone is not enough: it is set on every
     // teardown/cancel path too, not just on a completed answer. Do not relax this back to
     // `finished && workBlockKeys.size > 0` — see AGENTS.md "Worked for …" invariants.
-    const hasVisibleFinalContent = blocks.some((block) => !workBlockKeys.has(block.key));
-    const shouldUseWorkedGroup =
-      message.finished === true &&
-      (workBlockKeys.size > 0 || subagentTasks.length > 0) &&
-      hasVisibleFinalContent;
-    const workedSearchEntries: { itemIndex: number }[] = [];
-    for (const block of blocks) {
-      if (!workBlockKeys.has(block.key)) continue;
-      if (block.kind === 'content') {
-        workedSearchEntries.push(block.entry);
-      } else {
-        workedSearchEntries.push(...block.entries);
-      }
-    }
-    for (let itemIndex = 0; itemIndex < message.items.length; itemIndex += 1) {
-      if (message.items[itemIndex]?.type === 'subagent_task') {
-        workedSearchEntries.push({ itemIndex });
-      }
-    }
-    const isWorkedSearchExpanded = assistantGroupHasActiveSearch(
-      message.id,
-      workedSearchEntries,
-      activeSearchBlockId
-    );
-    const isWorkedGroupExpanded =
-      shouldUseWorkedGroup && (isWorkedSearchExpanded || cachedState.groupExpanded);
+    //
+    // Evaluated PER SEGMENT: a plan-approval turn has two regions and each needs
+    // its own verdict, or the implementation would fold into the plan's row.
+    const isTurnFinished = message.finished === true;
+    // Subagent tasks are message-scoped, so they ride the LAST segment.
+    const lastSegmentIndex = segments.length - 1;
     const assistantRows: AssistantChatVirtualRow[] = [];
 
     if ((message.plan?.length ?? 0) > 0) {
@@ -921,19 +909,77 @@ export const buildChatVirtualRows = ({
       });
     };
 
-    if (shouldUseWorkedGroup) {
+    let anySegmentUsesWorkedGroup = false;
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+      const segment = segments[segmentIndex];
+      if (!segment) continue;
+      const [segmentStart, segmentEnd] = segment.blockRange;
+      const isLastSegment = segmentIndex === lastSegmentIndex;
+      const segmentSubagentTasks = isLastSegment ? subagentTasks : EMPTY_SUBAGENT_TASKS;
+
+      let hasVisibleFinalContent = false;
+      for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
+        const block = blocks[blockIndex];
+        if (block && !segment.workBlockKeys.has(block.key)) {
+          hasVisibleFinalContent = true;
+          break;
+        }
+      }
+      const shouldUseWorkedGroup =
+        isTurnFinished &&
+        (segment.workBlockKeys.size > 0 || segmentSubagentTasks.length > 0) &&
+        hasVisibleFinalContent;
+
+      const workedSearchEntries: { itemIndex: number }[] = [];
+      for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
+        const block = blocks[blockIndex];
+        if (!block || !segment.workBlockKeys.has(block.key)) continue;
+        if (block.kind === 'content') {
+          workedSearchEntries.push(block.entry);
+        } else {
+          workedSearchEntries.push(...block.entries);
+        }
+      }
+      if (isLastSegment) {
+        for (let itemIndex = 0; itemIndex < message.items.length; itemIndex += 1) {
+          if (message.items[itemIndex]?.type === 'subagent_task') {
+            workedSearchEntries.push({ itemIndex });
+          }
+        }
+      }
+      const isWorkedSearchExpanded = assistantGroupHasActiveSearch(
+        message.id,
+        workedSearchEntries,
+        activeSearchBlockId
+      );
+      const isWorkedGroupExpanded =
+        shouldUseWorkedGroup &&
+        (isWorkedSearchExpanded || cachedState.expandedWorkedGroups[segment.key] === true);
+      anySegmentUsesWorkedGroup ||= shouldUseWorkedGroup;
+
+      if (!shouldUseWorkedGroup) {
+        for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
+          const block = blocks[blockIndex];
+          if (block) appendBlockRows(assistantRows, block, blockIndex, false);
+        }
+        if (segmentSubagentTasks.length > 0) {
+          appendSubagentTasksRow(assistantRows, false);
+        }
+        continue;
+      }
+
       // Collapsed is the default state, and the detail rows of a collapsed
       // group are discarded unrendered — don't pay for building them. Initial
       // mount of a long finished session hits this for every turn.
       const workedRows: AssistantChatVirtualRow[] = [];
       if (isWorkedGroupExpanded) {
-        for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+        for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
           const block = blocks[blockIndex];
-          if (block && workBlockKeys.has(block.key)) {
+          if (block && segment.workBlockKeys.has(block.key)) {
             appendBlockRows(workedRows, block, blockIndex, true);
           }
         }
-        if (subagentTasks.length > 0) {
+        if (segmentSubagentTasks.length > 0) {
           appendSubagentTasksRow(workedRows, true);
         }
       }
@@ -941,13 +987,16 @@ export const buildChatVirtualRows = ({
       const insertWorkedGroup = () => {
         assistantRows.push({
           type: 'assistant',
-          key: `assistant:${message.id}:worked-header`,
+          key: `assistant:${message.id}:${segment.key}:worked-header`,
           messageIndex,
           item,
           content: {
             kind: 'worked_group_header',
+            segmentKey: segment.key,
             expanded: isWorkedGroupExpanded,
-            durationMs: resolveSessionHistoryDurationMs(message),
+            // The turn's duration covers ALL its segments, so only the last one
+            // may claim it; earlier regions fall back to "Finished working".
+            durationMs: isLastSegment ? resolveSessionHistoryDurationMs(message) : null,
           },
           isLastRowForMessage: false,
         });
@@ -956,33 +1005,26 @@ export const buildChatVirtualRows = ({
         }
       };
 
-      const insertionBlockIndex = firstWorkBlockIndex === -1 ? 0 : firstWorkBlockIndex;
+      const insertionBlockIndex =
+        segment.firstWorkBlockIndex === -1 ? segmentStart : segment.firstWorkBlockIndex;
       let didInsertWorkedGroup = false;
-      for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+      for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
         const block = blocks[blockIndex];
         if (!block) continue;
         if (!didInsertWorkedGroup && blockIndex === insertionBlockIndex) {
           insertWorkedGroup();
           didInsertWorkedGroup = true;
         }
-        if (!workBlockKeys.has(block.key)) {
+        if (!segment.workBlockKeys.has(block.key)) {
           appendBlockRows(assistantRows, block, blockIndex, false);
         }
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
       }
-    } else {
-      for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
-        const block = blocks[blockIndex];
-        if (block) appendBlockRows(assistantRows, block, blockIndex, false);
-      }
-      if (subagentTasks.length > 0) {
-        appendSubagentTasksRow(assistantRows, false);
-      }
     }
 
-    const showDurationInFooter = !shouldUseWorkedGroup;
+    const showDurationInFooter = !anySegmentUsesWorkedGroup;
     if (
       shouldRenderAssistantFooter({
         message,
@@ -1101,14 +1143,17 @@ export const SessionChatStreamView = forwardRef<
       []
     );
     const handleAssistantWorkedGroupExpandedChange = useCallback(
-      (messageId: string, expanded: boolean) => {
+      (messageId: string, segmentKey: string, expanded: boolean) => {
         const cached = getExpandState(messageId);
         setExpandState(messageId, {
           ...cached,
-          groupExpanded: expanded,
+          expandedWorkedGroups: {
+            ...cached.expandedWorkedGroups,
+            [segmentKey]: expanded,
+          },
         });
         if (expanded) {
-          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:worked-header`;
+          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:${segmentKey}:worked-header`;
           groupExpansionScrollTokenRef.current += 1;
           groupExpansionAutoScrollSuppressedRef.current = true;
         }
@@ -3003,7 +3048,7 @@ interface AssistantChatItemProps {
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   onGroupExpandedChange: (messageId: string, groupKey: string, expanded: boolean) => void;
-  onWorkedGroupExpandedChange: (messageId: string, expanded: boolean) => void;
+  onWorkedGroupExpandedChange: (messageId: string, segmentKey: string, expanded: boolean) => void;
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
   conversationFontSize: ConversationFontSize;
@@ -3027,6 +3072,7 @@ const areAssistantVirtualContentsEqual = (
     case 'worked_group_header':
       return (
         b.kind === 'worked_group_header' &&
+        a.segmentKey === b.segmentKey &&
         a.expanded === b.expanded &&
         a.durationMs === b.durationMs
       );
@@ -3131,7 +3177,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
           <WorkedGroupHeader
             durationMs={content.durationMs}
             expanded={content.expanded}
-            onExpandedChange={(expanded) => onWorkedGroupExpandedChange(message.id, expanded)}
+            onExpandedChange={(expanded) =>
+              onWorkedGroupExpandedChange(message.id, content.segmentKey, expanded)
+            }
           />
         );
       case 'content': {

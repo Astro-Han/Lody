@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  findLastAssistantEntryForUserTurn,
-  isAssistantEntryOwnedByTurn,
-  resolveActiveAssistantTurnId,
-  type MachineMeta,
-  type SessionMeta,
-} from '../src/schema';
+import { resolveActiveAssistantTurnId, type MachineMeta, type SessionMeta } from '../src/schema';
 
 describe('meta schema fields', () => {
   it('keeps legacy session meta shape readable', () => {
@@ -115,57 +109,6 @@ describe('meta schema fields', () => {
         },
       ])
     ).toBeUndefined();
-  });
-
-  it('reports the owning turn id for a split turn, not the continuation entry id', () => {
-    // Plan approval finishes the plan entry and continues the SAME turn in a
-    // continuation entry, so Stop/steer must still address `assistant-turn-1`.
-    expect(
-      resolveActiveAssistantTurnId([
-        {
-          id: 'assistant-turn-1',
-          role: 'assistant',
-          finished: true,
-          endedAt: 123,
-        },
-        {
-          id: 'assistant-turn-1#exec',
-          role: 'assistant',
-          ownerTurnId: 'assistant-turn-1',
-        },
-      ])
-    ).toBe('assistant-turn-1');
-  });
-
-  it('finds the last assistant entry of a user turn', () => {
-    const history = [
-      { id: 'user-1', role: 'user' as const },
-      { id: 'assistant-turn-1', role: 'assistant' as const, userTurnId: 'user-1', endedAt: 1 },
-      {
-        id: 'assistant-turn-1#exec',
-        role: 'assistant' as const,
-        userTurnId: 'user-1',
-        ownerTurnId: 'assistant-turn-1',
-      },
-    ];
-
-    expect(findLastAssistantEntryForUserTurn(history, 'user-1')?.id).toBe('assistant-turn-1#exec');
-    expect(findLastAssistantEntryForUserTurn(history, 'user-2')).toBeUndefined();
-  });
-
-  it('recognizes both entries of a split turn as owned by that turn', () => {
-    expect(
-      isAssistantEntryOwnedByTurn({ id: 'assistant-turn-1', role: 'assistant' }, 'assistant-turn-1')
-    ).toBe(true);
-    expect(
-      isAssistantEntryOwnedByTurn(
-        { id: 'assistant-turn-1#exec', role: 'assistant', ownerTurnId: 'assistant-turn-1' },
-        'assistant-turn-1'
-      )
-    ).toBe(true);
-    expect(
-      isAssistantEntryOwnedByTurn({ id: 'user-1', role: 'user' }, 'assistant-turn-1')
-    ).toBe(false);
   });
 
   it('accepts machine rpc capability fields', () => {

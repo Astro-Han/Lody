@@ -4,7 +4,6 @@ import {
   buildMissingEmail,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
-  findLastAssistantEntryForUserTurn,
   getSessionRoomId,
   getLegacyReadForSessionHistoryStatus,
   type ChatFailedReason,
@@ -2249,10 +2248,12 @@ export class SessionDispatchWatcher {
       // Restart backstop (in-memory record is gone): a completed assistant
       // entry linked to this user turn is positive proof it ran to completion.
       // endedAt is written at ACP finalization. Only this proves 'handled'.
-      // A split turn (plan approval) leaves an EARLIER finished entry behind
-      // mid-run, so only the last entry's terminal state counts here.
-      const assistantCompleted =
-        typeof findLastAssistantEntryForUserTurn(history, turn.id)?.endedAt === 'number';
+      const assistantCompleted = history.some(
+        (entry) =>
+          entry.role === 'assistant' &&
+          entry.userTurnId === turn.id &&
+          typeof entry.endedAt === 'number'
+      );
       if (assistantCompleted) {
         terminalStatus = 'handled';
       } else if (meta.lastHandledUserMsgId === turn.id) {

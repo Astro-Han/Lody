@@ -167,7 +167,6 @@ import {
   normalizeSessionTurnInputConfig,
   hasAgentRunConfigSelection,
   buildMissingEmail,
-  isAssistantEntryOwnedByTurn,
   type AgentRunConfigSelection,
   type LodyOperationItemResult,
   type StoredLodyOperation,
@@ -760,26 +759,6 @@ function isCodexImageGenerationTerminalStatus(status: string): boolean {
 }
 
 /**
- * ACP tool kind agents use to ask permission to leave plan mode (Claude's
- * ExitPlanMode). Approving it does NOT end the ACP turn — see
- * `MessageHandler.rollAssistantEntryForPlanExit`.
- */
-const PLAN_EXIT_TOOL_KIND = 'switch_mode';
-
-const buildPlanExecutionEntryId = (turnId: string): string => `${turnId}#exec`;
-
-const isApprovedPlanExitPermission = (
-  request: RequestPermissionRequest,
-  outcome: RequestPermissionResponse['outcome']
-): boolean => {
-  if (request.toolCall.kind !== PLAN_EXIT_TOOL_KIND || outcome.outcome !== 'selected') {
-    return false;
-  }
-  const selected = request.options.find((option) => option.optionId === outcome.optionId);
-  return selected?.kind?.startsWith('allow') === true;
-};
-
-/**
  * MessageHandler has two responsibilities:
  *
  * 1) Local control plane:
@@ -1056,21 +1035,13 @@ export class MessageHandler {
     });
     this.logger.debug(`[${sessionId}] Creating assistant entry for turn ${turnId}`);
     try {
-      // A turn that was split (plan approval) owns several entries; the LAST
-      // one is the one it was streaming into, so resume must reopen that one
-      // instead of rewinding to the plan entry and writing above it.
-      let reopenedEntryId: string | undefined;
       await sessionDoc.updateHistory((history) => {
-        for (let index = history.length - 1; index >= 0; index -= 1) {
-          if (isAssistantEntryOwnedByTurn(history[index], turnId)) {
-            reopenedEntryId = history[index]?.id;
-            break;
-          }
-        }
-        if (reopenedEntryId !== undefined) {
-          const existingEntryId = reopenedEntryId;
+        const existingEntry = history.find(
+          (entry) => entry.id === turnId && entry.role === 'assistant'
+        );
+        if (existingEntry) {
           return history.map((entry) => {
-            if (entry.id !== existingEntryId || entry.role !== 'assistant') {
+            if (entry.id !== turnId || entry.role !== 'assistant') {
               return entry;
             }
             // Reopen a reused assistant entry for a live turn: clear the terminal
@@ -1110,121 +1081,11 @@ export class MessageHandler {
         });
         return history;
       });
-      if (reopenedEntryId !== undefined && reopenedEntryId !== turnId) {
-        this.store.rollTurnAssistantEntry(sessionId, turnId, reopenedEntryId);
-      }
       span.end();
       this.logger.debug(`[${sessionId}] Assistant entry created`);
     } catch (error) {
       span.fail(error);
       throw error;
-    }
-  }
-
-  /**
-   * Split ONE ACP turn into two visible turns when the user approves a plan.
-   *
-   * Claude-family agents express planning as a permission MODE: the plan is
-   * presented by an ExitPlanMode tool call (ACP kind `switch_mode`), and once
-   * its permission request is approved the SAME ACP turn implements the whole
-   * plan. Left alone that is one assistant entry, so the renderer folds the
-   * plan and every execution step into that turn's collapsed "work" block and
-   * an approved plan appears to produce no new output.
-   *
-   * ACP has no "approve, but end the turn" outcome, and ending the turn for
-   * real (reject / cancel) would tell the agent the user refused. So the split
-   * is document-only: finish the plan entry, open a continuation entry, and
-   * point the live turn's ACP updates at it. The ACP turn and its id are
-   * untouched — the continuation carries `ownerTurnId`, which is what keeps
-   * Stop, steer, finalization, and fileDiff addressing the same turn.
-   *
-   * Late `tool_call_update`s for the plan tool still land in the plan entry:
-   * `history-apply.ts` resolves tool call updates to the entry where the tool
-   * call first appeared, not to the current target.
-   */
-  private async rollAssistantEntryForPlanExit(
-    sessionId: SessionId,
-    request: RequestPermissionRequest,
-    outcome: RequestPermissionResponse['outcome']
-  ): Promise<void> {
-    if (!isApprovedPlanExitPermission(request, outcome)) {
-      return;
-    }
-    const turnId = this.store.getTurnId(sessionId);
-    if (!turnId) {
-      return;
-    }
-    const planEntryId = this.store.getTurnAssistantEntryId(sessionId, turnId);
-    if (!planEntryId) {
-      return;
-    }
-
-    // Deterministic id so a duplicate outcome (another device answering the
-    // same request) rolls to the same entry instead of opening a second one.
-    const continuationEntryId = buildPlanExecutionEntryId(turnId);
-    if (planEntryId === continuationEntryId) {
-      return;
-    }
-
-    // MUST NOT THROW: the caller awaits this between resolving the permission
-    // and handing the outcome back to the agent, from a floating promise
-    // inside a `new Promise` executor whose `resolved` latch is already set.
-    // An escaping rejection would therefore leave that promise unsettled
-    // forever — the agent would block on a permission the user already
-    // answered, with no timeout left to rescue it (`cleanup()` ran). Every
-    // failure here degrades to "keep running in the plan entry" instead.
-    let rolled = false;
-    try {
-      await this.awaitTurnHistoryGate(sessionId);
-      // Everything streamed so far belongs to the plan turn. Persist it before
-      // the target moves, or buffered plan output lands in the execution entry.
-      await this.flushACPUpdatesNow(sessionId);
-
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const endedAt = getServerNow();
-      await sessionDoc.updateHistory((history) => {
-        if (history.some((entry) => entry?.id === continuationEntryId)) {
-          rolled = true;
-          return history;
-        }
-        const planEntry = history.find(
-          (entry) => entry?.role === 'assistant' && entry.id === planEntryId
-        );
-        if (!planEntry) {
-          return history;
-        }
-        planEntry.finished = true;
-        planEntry.endedAt = endedAt;
-        history.push({
-          id: continuationEntryId,
-          role: 'assistant',
-          userTurnId: planEntry.userTurnId,
-          ownerTurnId: turnId,
-          items: [] as unknown as SessionHistoryInput['items'],
-          timestamp: new Date(endedAt).toISOString(),
-          userId: undefined,
-          read: undefined,
-          modelInfo: planEntry.modelInfo,
-          fileDiff: [],
-        });
-        rolled = true;
-        return history;
-      });
-
-      // Only move the target once the entry is durable: a missing target entry
-      // would be auto-created without `ownerTurnId`, which is exactly what Stop
-      // and finalization need.
-      if (rolled && this.store.rollTurnAssistantEntry(sessionId, turnId, continuationEntryId)) {
-        this.logger.debug(
-          `[${sessionId}] Plan approved; turn ${turnId} continues in assistant entry ${continuationEntryId}`
-        );
-      }
-    } catch (error) {
-      this.logger.warn(
-        `[${sessionId}] Failed to open a plan execution entry for turn ${turnId}; keeping execution in the plan entry: ${formatErrorMessage(
-          error
-        )}`
-      );
     }
   }
 
@@ -6028,18 +5889,12 @@ export class MessageHandler {
         await sessionDoc.setLastMessageAt();
       }
 
-      // Mark the owning assistant entry as finished and record timing. A split
-      // turn owns more than one entry (`ownerTurnId`); the LAST one is the one
-      // still streaming, so scanning backwards picks the right target.
+      // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.updateHistory((history) => {
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
-          if (
-            entry &&
-            entry.role === 'assistant' &&
-            (!turnId || isAssistantEntryOwnedByTurn(entry, turnId))
-          ) {
+          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
             entry.finished = true;
             entry.endedAt = endedAt;
             if (permissionWaitMs !== undefined) {
@@ -8864,11 +8719,6 @@ export class MessageHandler {
             )}`
           );
         }
-
-        // Before the agent is unblocked: an approved plan continues in a fresh
-        // visible turn, so implementation output cannot be folded into the
-        // plan turn's collapsed work block.
-        await this.rollAssistantEntryForPlanExit(sessionId, request, outcome);
 
         resolve({ outcome });
       };

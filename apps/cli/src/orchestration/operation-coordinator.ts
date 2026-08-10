@@ -7,7 +7,6 @@ import type { RepoWatchHandle } from 'loro-repo';
 
 import {
   buildMissingEmail,
-  findLastAssistantEntryForUserTurn,
   getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -122,18 +121,16 @@ export type LodyOperationCoordinatorOptions = {
   ) => Promise<void>;
 };
 
-// Only the LAST assistant entry of a user turn carries its real terminal
-// state: a split turn (plan approval) finishes an earlier entry while the
-// implementation is still running.
 const terminalAssistantFor = (
   history: SessionHistoryInput[],
   userTurnId: string
-): SessionHistoryInput | undefined => {
-  const entry = findLastAssistantEntryForUserTurn(history, userTurnId);
-  return entry && (entry.finished === true || typeof entry.endedAt === 'number')
-    ? entry
-    : undefined;
-};
+): SessionHistoryInput | undefined =>
+  history.find(
+    (entry) =>
+      entry.role === 'assistant' &&
+      entry.userTurnId === userTurnId &&
+      (entry.finished === true || typeof entry.endedAt === 'number')
+  );
 
 const completionText = (operation: StoredLodyOperation): string =>
   [

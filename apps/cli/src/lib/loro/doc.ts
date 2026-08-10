@@ -103,15 +103,6 @@ const normalizeSessionHistoryEntry = (entry: SessionHistoryInput): SessionHistor
   inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
 });
 
-/**
- * CRDT-level form of `@lody/shared` `isAssistantEntryOwnedByTurn`: an ordinary
- * assistant entry's id IS the turn id, while a continuation entry from a split
- * turn (plan approval) points back with `ownerTurnId`.
- */
-const isAssistantEntryOwnedByTurnMap = (entry: LoroMap, turnId: string): boolean =>
-  entry.get('role') === 'assistant' &&
-  (entry.get('id') === turnId || entry.get('ownerTurnId') === turnId);
-
 type GlobalWithOptionalBun = typeof globalThis & { Bun?: unknown };
 type GlobalWithWebSocket = { WebSocket: typeof ProxiedWebSocket };
 type LoroMapSetValue = Parameters<LoroMap['set']>[1];
@@ -2484,10 +2475,11 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       const role = entry.get('role') as string | undefined;
       if (role !== 'assistant') continue;
 
-      // If turnId is specified, only update an entry owned by that turn. A
-      // split turn (plan approval) owns several entries; searching from the
-      // end lands on the one that actually ran the work.
-      if (turnId && !isAssistantEntryOwnedByTurnMap(entry, turnId)) continue;
+      // If turnId is specified, only update the entry with matching ID
+      if (turnId) {
+        const entryId = entry.get('id') as string | undefined;
+        if (entryId !== turnId) continue;
+      }
 
       // See setHistoryEntryField: undefined must delete, not persist null.
       if (fileDiff === undefined) {
@@ -2513,7 +2505,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     const historyList = this.handle.doc.getList('history') as LoroList<LoroMap>;
     for (let index = historyList.length - 1; index >= 0; index -= 1) {
       const entry = historyList.get(index) as LoroMap | undefined;
-      if (!entry || !isAssistantEntryOwnedByTurnMap(entry, turnId)) continue;
+      if (!entry || entry.get('role') !== 'assistant' || entry.get('id') !== turnId) continue;
       const userTurnId = entry.get('userTurnId');
       let timestamp = entry.get('timestamp');
       if (typeof userTurnId === 'string') {

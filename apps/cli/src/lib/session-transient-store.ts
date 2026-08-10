@@ -262,35 +262,6 @@ export class SessionTransientStore {
     return turnEpoch;
   }
 
-  /**
-   * Point the live turn at a DIFFERENT assistant entry without ending the ACP
-   * turn. One ACP turn keeps streaming, but everything from here on is written
-   * into `assistantEntryId` so the doc shows a fresh visible turn (plan
-   * approval — see `message-handler.ts` `rollAssistantEntryForPlanExit`).
-   * `turnId` is unchanged: Stop, steer, and finalization still address the turn
-   * by it.
-   */
-  rollTurnAssistantEntry(sessionId: SessionId, turnId: string, assistantEntryId: string): boolean {
-    const state = this.sessions.get(sessionId);
-    if (!state || state.turn.phase === 'idle' || state.turn.turnId !== turnId) {
-      return false;
-    }
-    if (state.turn.assistantEntryId === assistantEntryId) {
-      return false;
-    }
-    state.turn = { ...state.turn, assistantEntryId };
-    return true;
-  }
-
-  /** Assistant entry the turn is currently streaming into (`undefined` if it is not live). */
-  getTurnAssistantEntryId(sessionId: SessionId, turnId: string): string | undefined {
-    const state = this.sessions.get(sessionId);
-    if (!state || state.turn.phase === 'idle' || state.turn.turnId !== turnId) {
-      return undefined;
-    }
-    return state.turn.assistantEntryId;
-  }
-
   activateTurnACPUpdateTarget(sessionId: SessionId, turnId: string): void {
     const state = this.sessions.get(sessionId);
     if (!state || state.turn.phase === 'idle' || state.turn.turnId !== turnId) {

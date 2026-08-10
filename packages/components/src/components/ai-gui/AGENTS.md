@@ -24,18 +24,25 @@ context/message-flow.md.
   streams; active search blocks force their owning group open, and `scrollToIndex`
   translates history indexes to the matching virtual child row.
 - A finished assistant turn keeps its final answer/result tail visible and collapses
-  earlier progress text, activity groups, and subagent work under one `Worked for …`
+  earlier progress text, activity groups, and subagent work under a `Worked for …`
   virtual row. Keep streaming turns fully expanded. Expanding completed work must add
   sibling rows to the main `VList`; search hits inside completed work force that outer
   row and the owning activity group open.
   - "Final answer" is not literally the LAST item (`message-copy.ts`
     `getTextIndexBeforeTrailingNeverCollapsedItems`): the last TEXT stays visible when
     everything after it is itself never collapsed — generated `image_group`s, and the
-    `switch_mode` "Exited Plan Mode" card. A plan turn ends on that card, so without
-    this the plan — the entire point of the turn — folds away as progress output.
-  - Approving a plan produces TWO assistant entries for one ACP turn (the CLI splits
-    it; see apps/cli/src/session/AGENTS.md). Consecutive assistant entries with no
-    user entry between them are normal here — do not add pairing assumptions.
+    `switch_mode` "Exited Plan Mode" card.
+  - **One turn can have SEVERAL foldable regions** (`AssistantTurnRenderSegment`).
+    Plan mode is a permission MODE, so one ACP turn proposes the plan AND implements
+    it; the `switch_mode` card cuts a segment so the approved work gets its own
+    region under the plan instead of disappearing into the plan's fold — an approved
+    plan otherwise looks like it produced nothing. Everything the gate needs is
+    per-segment: `workBlockKeys`, `hasVisibleFinalContent`, the collapse rule's
+    "last item stays visible", and the expansion state
+    (`BubbleExpandState.expandedWorkedGroups`, keyed by segment). The turn duration
+    is NOT per-segment — only the last region may print "Worked for …", earlier ones
+    fall back to "Finished working". Do not collapse this back to one region per
+    message, and do not key expansion by message id alone.
 - **`Worked for …` collapse gate (`view.tsx` `shouldUseWorkedGroup`)** requires THREE
   things, not just `message.finished`: (1) the turn is finished, (2) there is foldable
   work, and (3) `hasVisibleFinalContent` — at least one render block is NOT in
