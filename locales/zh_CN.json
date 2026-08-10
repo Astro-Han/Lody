@@ -3307,5 +3307,5 @@
   "connectionRecovery.title": "连接时间较长",
   "connectionRecovery.dismiss": "关闭",
   "connectionRecovery.clearCache": "清空缓存",
-  "connectionRecovery.description": "通常是本地缓存异常导致。清空后会重新加载并重新连接，不会退出登录。"
+  "connectionRecovery.description": "通常是本地缓存异常导致"
 }

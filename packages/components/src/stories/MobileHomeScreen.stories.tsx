@@ -442,7 +442,7 @@ export const StuckConnectionHint: Story = {
       <StuckConnectionBanner
         labels={{
           title: '连接时间较长',
-          description: '通常是本地缓存异常导致。清空后会重新加载并重新连接，不会退出登录。',
+          description: '通常是本地缓存异常导致',
           clearCache: '清空缓存',
           dismissAriaLabel: '关闭',
         }}

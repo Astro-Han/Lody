@@ -5,15 +5,14 @@ import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
 
 const labels = {
   title: 'Still connecting…',
-  description:
-    'This is often caused by broken local cache. Clearing it reloads the app and reconnects — you stay signed in.',
+  description: 'Often caused by broken local cache.',
   clearCache: 'Clear cache',
   dismissAriaLabel: 'Dismiss',
 };
 
 const zhLabels = {
   title: '连接时间较长',
-  description: '通常是本地缓存异常导致。清空后会重新加载并重新连接，不会退出登录。',
+  description: '通常是本地缓存异常导致',
   clearCache: '清空缓存',
   dismissAriaLabel: '关闭',
 };

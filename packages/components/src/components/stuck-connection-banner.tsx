@@ -51,31 +51,36 @@ export function StuckConnectionBanner({
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.8 }}
-        className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/70 bg-card/95 p-3 shadow-lg backdrop-blur"
+        className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-lg backdrop-blur"
       >
-        <div className="flex items-start gap-2.5">
+        <div className="flex items-center gap-2">
           <Loader2
-            className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+            className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
             aria-hidden="true"
           />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{labels.title}</p>
-            <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
-              {labels.description}
-            </p>
-          </div>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">{labels.title}</p>
           <Button
             variant="ghost"
             size="icon"
-            className="-mr-1 -mt-1 h-7 w-7 shrink-0 text-muted-foreground"
+            className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground"
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" />
           </Button>
         </div>
-        <div className="mt-2 flex justify-end">
-          <Button size="sm" className="h-8 rounded-full px-4" onClick={onClearCache}>
+        {/* Reason and action share one row: the action alone on its own row
+            left a wide empty gutter, and the reason is what makes "clear
+            cache" a sensible answer to a connection problem. */}
+        <div className="mt-1 flex items-center gap-2 pl-6">
+          <p className="min-w-0 flex-1 text-xs leading-snug text-muted-foreground">
+            {labels.description}
+          </p>
+          <Button
+            size="sm"
+            className="h-7 shrink-0 rounded-full px-3 text-xs"
+            onClick={onClearCache}
+          >
             {labels.clearCache}
           </Button>
         </div>
