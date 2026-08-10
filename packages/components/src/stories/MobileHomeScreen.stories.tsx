@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { fn } from 'storybook/test';
 
 import type { FilterPill } from '@/components/mobile/mobile-filter-pill-bar';
+import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
 import {
   MobileHomeScreen,
   type MobileConversationItem,
@@ -419,6 +420,39 @@ export const TeamTaskOwners: Story = {
         },
       }))}
     />
+  ),
+};
+
+/* The stuck-connection recovery hint layered over the home screen, exactly as
+   `MainLayout` mounts it after 45s of continuous `loading`. The banner is
+   fixed-positioned to the viewport, so view this story at a phone-sized
+   viewport for a faithful composition. */
+export const StuckConnectionHint: Story = {
+  args: {
+    workspace: { id: 'lody', name: 'Lody' },
+    machines,
+    selectedTab: 'chat',
+    localProjects,
+    githubRepositories,
+    chats,
+  },
+  render: () => (
+    <>
+      <MobileHomeScreenStory theme="ios" connectionUiState="loading" />
+      <StuckConnectionBanner
+        labels={{
+          title: '连接时间较长',
+          description:
+            '工作区较长时间未能连接，可能是本地缓存异常导致。清空缓存并重新加载通常可以修复。已同步数据会重新下载，且不会退出登录。',
+          clearAndReload: '清空缓存并重新加载',
+          report: '报告 Bug',
+          dismissAriaLabel: '关闭',
+        }}
+        onClearCache={fn()}
+        onReport={fn()}
+        onDismiss={fn()}
+      />
+    </>
   ),
 };
 
