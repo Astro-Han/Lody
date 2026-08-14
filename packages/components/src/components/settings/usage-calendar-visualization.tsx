@@ -741,43 +741,13 @@ function CompositionRing({
   );
 }
 
-function CompositionLegend({
-  title,
-  segments,
-  colors,
+function UsageCompositionRings({
+  timeline,
+  summary,
 }: {
-  title: string;
-  segments: UsageCompositionSegment[];
-  colors: readonly string[];
+  timeline: SettingsUsageTimelineData;
+  summary: ReactNode;
 }) {
-  const { t } = useTranslation();
-  return (
-    <div className="min-w-0">
-      <p className="mb-2 text-[11px] font-medium text-muted-foreground">{title}</p>
-      {segments.length > 0 ? (
-        <ul className="space-y-1.5">
-          {segments.map((segment, index) => (
-            <li key={segment.id} className="flex min-w-0 items-center gap-2 text-[11px]">
-              <span
-                aria-hidden="true"
-                className="h-2 w-2 shrink-0 rounded-full"
-                style={{ backgroundColor: colors[index % colors.length] }}
-              />
-              <span className="truncate text-foreground/80">{segment.label}</span>
-              <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-                {new Intl.NumberFormat(undefined, { style: 'percent' }).format(segment.share)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-[11px] text-muted-foreground">{t('workspace.usage.skyline.noUsage')}</p>
-      )}
-    </div>
-  );
-}
-
-function UsageCompositionRings({ timeline }: { timeline: SettingsUsageTimelineData }) {
   const { t } = useTranslation();
   const modelSegments = useMemo(
     () =>
@@ -845,18 +815,7 @@ function UsageCompositionRings({ timeline }: { timeline: SettingsUsageTimelineDa
           </span>
         </div>
       </div>
-      <div className="grid min-w-0 grid-cols-2 gap-5">
-        <CompositionLegend
-          title={t('workspace.usage.byModel')}
-          segments={modelSegments}
-          colors={MODEL_RING_COLORS}
-        />
-        <CompositionLegend
-          title={t('workspace.usage.byUser')}
-          segments={memberSegments}
-          colors={MEMBER_RING_COLORS}
-        />
-      </div>
+      <div className="min-w-0">{summary}</div>
     </div>
   );
 }
@@ -1361,6 +1320,62 @@ function UsageSummary({
   );
 }
 
+function UsageTimelineSummary({
+  timeline,
+  metric,
+}: {
+  timeline: SettingsUsageTimelineData;
+  metric: UsageCalendarMetric;
+}) {
+  const { t } = useTranslation();
+  const values = timeline.buckets.map((bucket) =>
+    metric === 'tokens' ? bucket.tokens : bucket.costUSD
+  );
+  const active = values.filter((value) => value > 0);
+  const peakIndex = values.reduce(
+    (peak, value, index) => (value > (values[peak] ?? 0) ? index : peak),
+    0
+  );
+  let currentStreak = 0;
+  for (let index = values.length - 1; index >= 0 && values[index]! > 0; index -= 1) {
+    currentStreak += 1;
+  }
+  let longestStreak = 0;
+  let streak = 0;
+  for (const value of values) {
+    streak = value > 0 ? streak + 1 : 0;
+    longestStreak = Math.max(longestStreak, streak);
+  }
+  const peakBucket = timeline.buckets[peakIndex];
+
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+      <SummaryStat
+        label={t('workspace.usage.skyline.total')}
+        value={formatMetric(metric === 'tokens' ? timeline.totals.tokens : timeline.totals.costUSD, metric)}
+      />
+      <SummaryStat
+        label={t('workspace.usage.skyline.averagePerInterval')}
+        value={formatMetric(values.length > 0 ? (metric === 'tokens' ? timeline.totals.tokens : timeline.totals.costUSD) / values.length : 0, metric)}
+      />
+      <SummaryStat
+        label={t('workspace.usage.skyline.peakInterval')}
+        value={formatMetric(values[peakIndex] ?? 0, metric)}
+        detail={peakBucket?.bucketLabel ?? t('workspace.usage.skyline.noUsage')}
+      />
+      <SummaryStat
+        label={t('workspace.usage.skyline.activeIntervals')}
+        value={String(active.length)}
+        detail={t('workspace.usage.skyline.currentIntervalStreakDetail', { count: currentStreak })}
+      />
+      <SummaryStat
+        label={t('workspace.usage.skyline.longestStreak')}
+        value={String(longestStreak)}
+      />
+    </dl>
+  );
+}
+
 function StlMetalColumns({ model }: { model: UsageCalendarModel }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -1775,7 +1790,16 @@ export function UsageCalendarVisualization({
         />
         <div className="relative">
           {timeline ? (
-            <UsageCompositionRings timeline={timeline} />
+            <UsageCompositionRings
+              timeline={timeline}
+              summary={
+                timeline.range === 'total' ? (
+                  <UsageSummary model={model} metric={metric} />
+                ) : (
+                  <UsageTimelineSummary timeline={timeline} metric={metric} />
+                )
+              }
+            />
           ) : (
             <UsageSummary model={model} metric={metric} />
           )}
