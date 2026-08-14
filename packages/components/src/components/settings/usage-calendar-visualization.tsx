@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import NumberFlow from '@number-flow/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -254,7 +256,10 @@ function HeatLegend() {
   );
 }
 
-function UsageDayHourlyHeatmap({
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+function UsageHourlyStrip({
   buckets,
   metric,
 }: {
@@ -308,6 +313,152 @@ function UsageDayHourlyHeatmap({
         <HeatLegend />
       </div>
     </div>
+  );
+}
+
+function UsageWeekHourlyHeatmap({
+  timeline,
+  metric,
+}: {
+  timeline: SettingsUsageTimelineData;
+  metric: UsageCalendarMetric;
+}) {
+  const { t } = useTranslation();
+  const startDayMs = Math.floor(timeline.startMs / DAY_MS) * DAY_MS;
+  const dayStarts = Array.from({ length: 7 }, (_, index) => startDayMs + index * DAY_MS);
+  const valuesByHour = useMemo(() => {
+    const values = new Map<number, number>();
+    for (const bucket of timeline.buckets) {
+      values.set(bucket.bucketStartMs, metric === 'tokens' ? bucket.tokens : bucket.costUSD);
+    }
+    return values;
+  }, [metric, timeline.buckets]);
+  const referenceValue = useMemo(() => {
+    const active = [...valuesByHour.values()].filter((value) => value > 0).sort((a, b) => a - b);
+    return active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
+  }, [valuesByHour]);
+
+  return (
+    <div className="min-w-0">
+      <div
+        role="grid"
+        aria-label={t('workspace.usage.skyline.heatmap')}
+        className="grid grid-cols-[2rem_repeat(7,minmax(0,1fr))] items-center gap-x-1 gap-y-1.5"
+      >
+        <span aria-hidden="true" />
+        {dayStarts.map((dayStartMs) => (
+          <span key={dayStartMs} className="truncate text-center text-[10px] font-medium text-muted-foreground">
+            {new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(new Date(dayStartMs))}
+          </span>
+        ))}
+        {Array.from({ length: 24 }, (_, hour) => (
+          <Fragment key={hour}>
+            <span className="text-right text-[9px] tabular-nums text-muted-foreground">
+              {String(hour).padStart(2, '0')}
+            </span>
+            {dayStarts.map((dayStartMs) => {
+              const value = valuesByHour.get(dayStartMs + hour * HOUR_MS) ?? 0;
+              const intensity =
+                value > 0 && referenceValue > 0
+                  ? USAGE_HEAT_MIN_INTENSITY +
+                    (1 - USAGE_HEAT_MIN_INTENSITY) * Math.min(1, value / referenceValue) ** 0.6
+                  : 0;
+              return (
+                <span
+                  key={dayStartMs}
+                  role="gridcell"
+                  title={`${String(hour).padStart(2, '0')}:00 · ${formatMetric(value, metric)}`}
+                  aria-label={`${String(hour).padStart(2, '0')}:00 · ${formatMetric(value, metric)}`}
+                  className="mx-auto block size-3 rounded-full sm:size-3.5"
+                  style={{ backgroundColor: intensity > 0 ? heatColor(intensity) : EMPTY_DAY_COLOR }}
+                />
+              );
+            })}
+          </Fragment>
+        ))}
+      </div>
+      <div className="mt-3 flex justify-end">
+        <HeatLegend />
+      </div>
+    </div>
+  );
+}
+
+function UsageMonthHeatmap({
+  timeline,
+  metric,
+}: {
+  timeline: SettingsUsageTimelineData;
+  metric: UsageCalendarMetric;
+}) {
+  const { t } = useTranslation();
+  const values = timeline.buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD));
+  const referenceValue = useMemo(() => {
+    const active = values.filter((value) => value > 0).sort((a, b) => a - b);
+    return active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
+  }, [values]);
+  return (
+    <div className="min-w-0">
+      <div
+        role="grid"
+        aria-label={t('workspace.usage.skyline.heatmap')}
+        className="grid grid-cols-7 gap-1.5"
+      >
+        {timeline.buckets.map((bucket, index) => {
+          const value = values[index] ?? 0;
+          const intensity =
+            value > 0 && referenceValue > 0
+              ? USAGE_HEAT_MIN_INTENSITY +
+                (1 - USAGE_HEAT_MIN_INTENSITY) * Math.min(1, value / referenceValue) ** 0.6
+              : 0;
+          return (
+            <div key={bucket.bucketStartMs} className="min-w-0 text-center">
+              <span
+                role="gridcell"
+                title={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
+                aria-label={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
+                className="block h-6 rounded-[32%]"
+                style={{ backgroundColor: intensity > 0 ? heatColor(intensity) : EMPTY_DAY_COLOR }}
+              />
+              <span className="mt-1 block truncate text-[9px] tabular-nums text-muted-foreground">
+                {bucket.bucketLabel.slice(-2)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex justify-end">
+        <HeatLegend />
+      </div>
+    </div>
+  );
+}
+
+function UsageRangeHeatmap({
+  timeline,
+  metric,
+}: {
+  timeline: SettingsUsageTimelineData;
+  metric: UsageCalendarMetric;
+}) {
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={timeline.range}
+        initial={{ opacity: 0, filter: 'blur(8px)', y: 8 }}
+        animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
+        exit={{ opacity: 0, filter: 'blur(6px)', y: -5 }}
+        transition={{ duration: 0.28, ease: 'easeOut' }}
+      >
+        {timeline.range === 'week' ? (
+          <UsageWeekHourlyHeatmap timeline={timeline} metric={metric} />
+        ) : timeline.range === 'month' ? (
+          <UsageMonthHeatmap timeline={timeline} metric={metric} />
+        ) : (
+          <UsageHourlyStrip buckets={timeline.buckets} metric={metric} />
+        )}
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -928,14 +1079,6 @@ function UsageDayDetailPanel({
         >
           <X className="h-3.5 w-3.5" />
         </Button>
-        {day?.hourlyBuckets && day.hourlyBuckets.length > 0 ? (
-          <div className="mb-5">
-            <p className="mb-2 text-[11px] font-medium text-muted-foreground">
-              {t('workspace.usage.skyline.hourlyUsage')}
-            </p>
-            <UsageDayHourlyHeatmap buckets={day.hourlyBuckets} metric="tokens" />
-          </div>
-        ) : null}
         <div className="grid gap-x-6 gap-y-4 lg:grid-cols-[minmax(0,13rem)_1fr]">
           <div className="min-w-0">
             <p className="text-[11px] font-medium text-muted-foreground">
@@ -1559,6 +1702,10 @@ export function UsageCalendarVisualization({
     [onSelectedDayChange]
   );
 
+  useEffect(() => {
+    if (timeline && timeline.range !== 'total' && selectedDay) selectDay(null);
+  }, [selectDay, selectedDay, timeline]);
+
   const copyAscii = async () => {
     try {
       await navigator.clipboard.writeText(ascii);
@@ -1728,12 +1875,19 @@ export function UsageCalendarVisualization({
       </header>
 
       <div className="p-4">
-        <UsageHeatmap
-          model={model}
-          metric={metric}
-          selectedDayMs={selectedDay?.dayStartMs ?? null}
-          onSelectDay={selectDay}
-        />
+        {timeline && timeline.range !== 'total' ? (
+          <UsageCompositionRings
+            timeline={timeline}
+            summary={<UsageRangeHeatmap timeline={timeline} metric={metric} />}
+          />
+        ) : (
+          <UsageHeatmap
+            model={model}
+            metric={metric}
+            selectedDayMs={selectedDay?.dayStartMs ?? null}
+            onSelectDay={selectDay}
+          />
+        )}
         {/* Expanding a row height needs a definite value; the 0fr -> 1fr grid
             track does it without measuring the panel. */}
         <div
@@ -1781,16 +1935,11 @@ export function UsageCalendarVisualization({
         />
         <div className="relative">
           {timeline ? (
-            <UsageCompositionRings
-              timeline={timeline}
-              summary={
-                timeline.range === 'total' ? (
-                  <UsageSummary model={model} metric={metric} />
-                ) : (
-                  <UsageTimelineSummary timeline={timeline} metric={metric} />
-                )
-              }
-            />
+            timeline.range === 'total' ? (
+              <UsageSummary model={model} metric={metric} />
+            ) : (
+              <UsageTimelineSummary timeline={timeline} metric={metric} />
+            )
           ) : (
             <UsageSummary model={model} metric={metric} />
           )}

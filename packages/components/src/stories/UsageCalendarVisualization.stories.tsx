@@ -10,7 +10,6 @@ import type {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
-const TWO_HOUR_MS = 2 * HOUR_MS;
 const START_MS = Date.UTC(2025, 6, 20);
 
 function wave(index: number): number {
@@ -76,10 +75,6 @@ function buildCalendar(shape: Shape): SettingsUsageCalendarData {
 function buildDayDetail(dayStartMs: number): SettingsUsageDayData {
   const index = Math.round((dayStartMs - START_MS) / DAY_MS);
   const tokens = Math.max(1_000, Math.round(wave(index) * 180_000));
-  const hourlyTokens = splitTokens(
-    tokens,
-    Array.from({ length: 24 }, (_, hour) => 8 + Math.round(wave(index * 3 + hour) * 32))
-  );
   return {
     workspaceId: 'workspace-story',
     dayStartMs,
@@ -112,22 +107,12 @@ function buildDayDetail(dayStartMs: number): SettingsUsageDayData {
       u2: { name: 'Grace Hopper' },
       u3: { email: 'kat@acme.dev' },
     },
-    hourlyBuckets: hourlyTokens.map((hourTokens, hour) => ({
-      bucketStartMs: dayStartMs + hour * HOUR_MS,
-      bucketLabel: `${String(hour).padStart(2, '0')}:00`,
-      tokens: hourTokens,
-      costUSD: hourTokens * 0.000012,
-      byModel: [
-        { modelId: 'claude-sonnet-5', tokens: Math.round(hourTokens * 0.52), costUSD: 0 },
-      ],
-      byUser: [{ userId: 'u1', tokens: hourTokens, costUSD: 0 }],
-    })),
   };
 }
 
 const RANGE_BUCKETS: Record<SettingsUsageRange, number> = {
-  day: 12,
-  week: 7,
+  day: 24,
+  week: 168,
   month: 30,
   total: 365,
 };
@@ -151,33 +136,37 @@ function buildTimeline(
       range,
       startMs: calendar.startMs,
       endMs: calendar.endMs,
-      bucketSizeMs: range === 'day' ? TWO_HOUR_MS : DAY_MS,
+      bucketSizeMs: range === 'day' || range === 'week' ? HOUR_MS : DAY_MS,
       totals: { tokens: 0, costUSD: 0 },
       users: {},
       buckets: [],
     };
   }
 
-  const bucketCount = RANGE_BUCKETS[range];
-  const days = activeDays.slice(-bucketCount);
-  const bucketTokens =
-    range === 'day'
-      ? splitTokens(latestDay.tokens, [8, 13, 20, 29, 36, 27, 17, 5, 11, 7, 10, 14])
-      : days.map((day) => day.tokens);
-  const timelineStartMs = range === 'day' ? latestDay.dayStartMs : (days[0]?.dayStartMs ?? calendar.startMs);
-  const buckets = bucketTokens.map((tokens, index) => {
+  const hourlyRange = range === 'day' || range === 'week';
+  const days = hourlyRange
+    ? activeDays.slice(-(range === 'day' ? 1 : 7))
+    : activeDays.slice(-RANGE_BUCKETS[range]);
+  const timelineStartMs = days[0]?.dayStartMs ?? calendar.startMs;
+  const buckets = (hourlyRange
+    ? days.flatMap((day, dayIndex) =>
+        splitTokens(
+          day.tokens,
+          Array.from({ length: 24 }, (_, hour) => 8 + Math.round(wave(dayIndex * 29 + hour) * 32))
+        ).map((tokens, hour) => ({ tokens, day, hour }))
+      )
+    : days.map((day) => ({ tokens: day.tokens, day, hour: null }))
+  ).map(({ tokens, day, hour }) => {
     const modelTokens = splitTokens(tokens, [46, 27, 17, 7, 3]);
     const memberTokens = splitTokens(tokens, [52, 31, 12, 5]);
-    const bucketStartMs = range === 'day' ? timelineStartMs + index * TWO_HOUR_MS : days[index]!.dayStartMs;
-    const costUSD = latestDay.tokens > 0 ? latestDay.costUSD * (tokens / latestDay.tokens) : 0;
+    const bucketStartMs = hour === null ? day.dayStartMs : day.dayStartMs + hour * HOUR_MS;
+    const costUSD = day.tokens > 0 ? day.costUSD * (tokens / day.tokens) : 0;
     return {
       bucketStartMs,
       bucketLabel:
-        range === 'day'
-          ? `${String(index * 2).padStart(2, '0')}:00`
-          : (days[index]?.date ?? new Date(bucketStartMs).toISOString().slice(0, 10)),
+        hour === null ? day.date : `${String(hour).padStart(2, '0')}:00`,
       tokens,
-      costUSD: range === 'day' ? costUSD : (days[index]?.costUSD ?? 0),
+      costUSD,
       byModel: [
         'claude-sonnet-5',
         'gpt-5-codex',
@@ -201,8 +190,8 @@ function buildTimeline(
     workspaceId: calendar.workspaceId,
     range,
     startMs: timelineStartMs,
-    endMs: range === 'day' ? timelineStartMs + DAY_MS : calendar.endMs,
-    bucketSizeMs: range === 'day' ? TWO_HOUR_MS : DAY_MS,
+    endMs: hourlyRange ? timelineStartMs + days.length * DAY_MS : calendar.endMs,
+    bucketSizeMs: hourlyRange ? HOUR_MS : DAY_MS,
     totals: { tokens, costUSD: buckets.reduce((sum, bucket) => sum + bucket.costUSD, 0) },
     users: {
       u1: { name: 'Ada Lovelace' },
