@@ -119,7 +119,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   // Preload all stats ranges once at settings-root level to avoid re-fetch when switching tabs.
   const dayUsage = useCloudQuery(
     cloudOperations.usage.getWorkspaceUsageTimeline,
-    workspaceId ? { workspaceId, range: 'day' } : 'skip'
+    workspaceId ? { workspaceId, range: 'day', granularity: 'hour' } : 'skip'
   ) as SettingsUsageTimelineData | undefined;
   const weekUsage = useCloudQuery(
     cloudOperations.usage.getWorkspaceUsageTimeline,

@@ -17,7 +17,7 @@ import {
 } from '@/components/settings/settings-data-cache';
 import { UsageCalendarVisualization } from '@/components/settings/usage-calendar-visualization';
 
-const TWO_HOUR_MS = 2 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 function formatTokens(value: number): string {
   return new Intl.NumberFormat().format(Math.round(value));
@@ -105,7 +105,7 @@ export function MobileStatsSettings() {
       if (!usageTimeline) {
         return bucket.bucketLabel;
       }
-      if (usageTimeline.bucketSizeMs !== TWO_HOUR_MS) {
+      if (usageTimeline.bucketSizeMs !== HOUR_MS) {
         return bucket.bucketLabel;
       }
 

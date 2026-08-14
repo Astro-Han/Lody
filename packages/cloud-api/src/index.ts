@@ -74,6 +74,8 @@ export type OperationGitHubTokenResult =
   | { success: false; errorCode: GitHubTokenErrorCode; errorMessage: string };
 
 export type UsageRange = 'month' | 'day' | 'week' | 'total';
+/** Requested timeline bucket size. The server validates which sizes each range supports. */
+export type UsageTimelineGranularity = 'hour' | 'day';
 export type UsageSummary = {
   workspaceId: string;
   range: UsageRange;
@@ -532,7 +534,10 @@ export type CloudApi = {
   };
   usage: {
     getWorkspaceUsageSummary: Query<{ workspaceId: string; range: UsageRange }, UsageSummary>;
-    getWorkspaceUsageTimeline: Query<{ workspaceId: string; range: UsageRange }, UsageTimeline>;
+    getWorkspaceUsageTimeline: Query<
+      { workspaceId: string; range: UsageRange; granularity?: UsageTimelineGranularity },
+      UsageTimeline
+    >;
     getWorkspaceUsageCalendar: Query<{ workspaceId: string }, UsageCalendar>;
     getWorkspaceUsageDay: Query<{ workspaceId: string; dayStartMs: number }, UsageDay>;
     getWorkspaceUsageSummaryBundleFromCliToken: Query<
@@ -547,7 +552,12 @@ export type CloudApi = {
       }
     >;
     getWorkspaceUsageTimelineFromCliToken: Query<
-      { workspaceId: string; cliToken: string; range: UsageRange },
+      {
+        workspaceId: string;
+        cliToken: string;
+        range: UsageRange;
+        granularity?: UsageTimelineGranularity;
+      },
       UsageTimeline
     >;
     upsertSessionUsageFromCli: Mutation<

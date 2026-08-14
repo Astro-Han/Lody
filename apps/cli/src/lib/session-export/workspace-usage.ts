@@ -23,6 +23,7 @@ export async function fetchWorkspaceUsageBundle(args: {
       workspaceId: args.workspaceId,
       cliToken: args.cliToken,
       range: 'day',
+      granularity: 'hour',
     }),
     client.query(api.usage.getWorkspaceUsageTimelineFromCliToken, {
       workspaceId: args.workspaceId,
