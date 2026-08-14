@@ -1,16 +1,16 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
 import NumberFlow from '@number-flow/react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -52,7 +52,6 @@ import {
   USAGE_CALENDAR_CELLS,
   USAGE_CALENDAR_COLUMNS,
   USAGE_CALENDAR_ROWS,
-  USAGE_HEAT_MIN_INTENSITY,
   USAGE_SKYLINE_STL_BASE_HEIGHT,
   USAGE_SKYLINE_STL_BACK_MARGIN,
   USAGE_SKYLINE_STL_BASE_DEPTH,
@@ -202,6 +201,13 @@ function useCalendarFormats() {
     () => ({
       month: new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' }),
       weekday: new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' }),
+      /** Compact span endpoints such as "Jul 20"; the year lives in the range label. */
+      dayShort: new Intl.DateTimeFormat(locale, {
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+      }),
+      dayOfMonth: new Intl.DateTimeFormat(locale, { day: 'numeric', timeZone: 'UTC' }),
       day: new Intl.DateTimeFormat(locale, {
         weekday: 'short',
         month: 'short',
@@ -259,132 +265,395 @@ function HeatLegend() {
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-function UsageHourlyStrip({
+/**
+ * The range panel keeps its blue deliberately quiet: even the densest hour stops
+ * short of the full-saturation chart blue, so a busy week reads as texture rather
+ * than a solid slab. The year heatmap above still uses the full ramp — it has far
+ * more empty space to carry it.
+ */
+const RANGE_HEAT_FLOOR = 0.13;
+const RANGE_HEAT_CEILING = 0.8;
+const rangeHeatColor = (intensity: number) =>
+  heatColor(RANGE_HEAT_FLOOR + (RANGE_HEAT_CEILING - RANGE_HEAT_FLOOR) * intensity);
+const RANGE_EMPTY_COLOR = 'hsl(var(--muted-foreground) / 0.1)';
+
+/**
+ * Percentile-anchored so one spike hour cannot flatten a whole week; the gamma
+ * lifts the quiet-but-not-empty buckets that a linear ramp loses.
+ */
+function createRangeIntensity(values: number[]): (value: number) => number {
+  const active = values.filter((value) => value > 0).sort((a, b) => a - b);
+  const reference = active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
+  return (value: number) =>
+    value > 0 && reference > 0 ? Math.min(1, value / reference) ** 0.62 : 0;
+}
+
+/** Per-column delay of the reveal sweep; the widest range (24 columns) lands in ~0.9s. */
+const RANGE_SWEEP_STEP_S = 0.026;
+const RANGE_SWEEP_EASE = [0.22, 1, 0.36, 1] as const;
+
+/**
+ * One column of the matrix. The sweep — a blurred slide that resolves left to
+ * right — is what makes 24h, 7d, and 30d read as the same object changing shape
+ * rather than three separate charts. Motion lives on the column, not on each of
+ * the 168 cells, so the blur stays cheap.
+ */
+function HeatColumn({
+  index,
+  reduced,
+  className,
+  children,
+}: {
+  index: number;
+  reduced: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <motion.div
+      // Presentational: the wrapper only carries the sweep, so the grid still
+      // sees its cells directly.
+      role="presentation"
+      className={cn('flex min-w-0 flex-col', className)}
+      initial={reduced ? false : { opacity: 0, y: 5, filter: 'blur(5px)' }}
+      animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+      transition={
+        reduced
+          ? { duration: 0 }
+          : { duration: 0.34, delay: index * RANGE_SWEEP_STEP_S, ease: RANGE_SWEEP_EASE }
+      }
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+function HeatCell({
+  intensity,
+  label,
+  className,
+  style,
+}: {
+  intensity: number;
+  label: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <span
+      role="gridcell"
+      title={label}
+      aria-label={label}
+      className={cn('block transition-colors duration-200', className)}
+      style={{
+        backgroundColor: intensity > 0 ? rangeHeatColor(intensity) : RANGE_EMPTY_COLOR,
+        ...style,
+      }}
+    />
+  );
+}
+
+/** Hour rows are labelled every three hours; a label on all 24 becomes noise. */
+const HOUR_LABEL_STEP = 3;
+
+function hourLabel(hour: number): string {
+  return `${String(hour).padStart(2, '0')}:00`;
+}
+
+function UsageDayMatrix({
   buckets,
   metric,
+  intensityOf,
+  reduced,
 }: {
   buckets: SettingsUsageTimelineBucket[];
   metric: UsageCalendarMetric;
+  intensityOf: (value: number) => number;
+  reduced: boolean;
 }) {
-  const { t } = useTranslation();
-  const values = useMemo(
-    () => buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD)),
-    [buckets, metric]
+  const maxValue = buckets.reduce(
+    (peak, bucket) => Math.max(peak, metric === 'tokens' ? bucket.tokens : bucket.costUSD),
+    0
   );
-  const referenceValue = useMemo(() => {
-    const active = values.filter((value) => value > 0).sort((a, b) => a - b);
-    return active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
-  }, [values]);
   return (
-    <div className="animate-in fade-in-0 space-y-3 duration-300 motion-reduce:animate-none">
-      <div
-        role="grid"
-        aria-label={t('workspace.usage.skyline.heatmap')}
-        className="grid gap-1.5"
-        style={{ gridTemplateColumns: `repeat(${Math.max(1, values.length)}, minmax(0, 1fr))` }}
-      >
-        {buckets.map((bucket, index) => {
-          const value = values[index] ?? 0;
-          const intensity =
-            value > 0 && referenceValue > 0
-              ? USAGE_HEAT_MIN_INTENSITY +
-                (1 - USAGE_HEAT_MIN_INTENSITY) * Math.min(1, value / referenceValue) ** 0.6
-              : 0;
-          return (
-            <div key={bucket.bucketStartMs} className="min-w-0 text-center">
-              <div
-                role="gridcell"
-                title={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
-                aria-label={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
-                className="animate-usage-heatmap-cell h-8 rounded-[28%]"
+    <div className="flex items-end gap-[3px]">
+      {buckets.map((bucket, index) => {
+        const value = metric === 'tokens' ? bucket.tokens : bucket.costUSD;
+        const intensity = intensityOf(value);
+        const label = `${bucket.bucketLabel} · ${formatMetric(value, metric)}`;
+        return (
+          <HeatColumn key={bucket.bucketStartMs} index={index} reduced={reduced} className="flex-1">
+            {/* Height carries magnitude, colour carries share of the peak: 24 cells
+                is few enough that a bar column beats a flat row of squares. */}
+            <span
+              className="relative flex h-16 w-full items-end overflow-hidden rounded-[3px]"
+              style={{ backgroundColor: RANGE_EMPTY_COLOR }}
+            >
+              <HeatCell
+                intensity={intensity}
+                label={label}
+                className="w-full rounded-[3px]"
                 style={{
-                  backgroundColor: intensity > 0 ? heatColor(intensity) : EMPTY_DAY_COLOR,
-                  animationDelay: `${index * CELL_REVEAL_STAGGER_MS}ms`,
+                  height: `${value > 0 && maxValue > 0 ? Math.max(6, (value / maxValue) * 100) : 0}%`,
                 }}
               />
-              <span className="mt-1 block truncate text-[9px] tabular-nums text-muted-foreground">
-                {bucket.bucketLabel}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex justify-end">
-        <HeatLegend />
-      </div>
+            </span>
+            <span className="mt-1 h-3 text-center text-[9px] leading-3 tabular-nums text-muted-foreground/70">
+              {index % HOUR_LABEL_STEP === 0 ? bucket.bucketLabel.replace(':00', '') : ''}
+            </span>
+          </HeatColumn>
+        );
+      })}
     </div>
   );
 }
 
-function UsageWeekHourlyHeatmap({
+function UsageWeekMatrix({
   timeline,
   metric,
+  intensityOf,
+  reduced,
+  weekdayFormat,
+  dayOfMonthFormat,
 }: {
   timeline: SettingsUsageTimelineData;
   metric: UsageCalendarMetric;
+  intensityOf: (value: number) => number;
+  reduced: boolean;
+  weekdayFormat: Intl.DateTimeFormat;
+  dayOfMonthFormat: Intl.DateTimeFormat;
 }) {
-  const { t } = useTranslation();
   const startDayMs = Math.floor(timeline.startMs / DAY_MS) * DAY_MS;
   const dayStarts = Array.from({ length: 7 }, (_, index) => startDayMs + index * DAY_MS);
-  const valuesByHour = useMemo(() => {
+  const valuesByBucket = useMemo(() => {
     const values = new Map<number, number>();
     for (const bucket of timeline.buckets) {
       values.set(bucket.bucketStartMs, metric === 'tokens' ? bucket.tokens : bucket.costUSD);
     }
     return values;
   }, [metric, timeline.buckets]);
-  const referenceValue = useMemo(() => {
-    const active = [...valuesByHour.values()].filter((value) => value > 0).sort((a, b) => a - b);
-    return active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
-  }, [valuesByHour]);
 
   return (
-    <div className="min-w-0">
-      <div
-        role="grid"
-        aria-label={t('workspace.usage.skyline.heatmap')}
-        className="grid grid-cols-[2rem_repeat(7,minmax(0,1fr))] items-center gap-x-1 gap-y-1.5"
-      >
-        <span aria-hidden="true" />
-        {dayStarts.map((dayStartMs) => (
-          <span key={dayStartMs} className="truncate text-center text-[10px] font-medium text-muted-foreground">
-            {new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(new Date(dayStartMs))}
-          </span>
-        ))}
-        {Array.from({ length: 24 }, (_, hour) => (
-          <Fragment key={hour}>
-            <span className="text-right text-[9px] tabular-nums text-muted-foreground">
-              {String(hour).padStart(2, '0')}
+    <div className="flex gap-1.5">
+      {/* Hour gutter, outside the columns so the sweep cannot drag the labels. */}
+      <div aria-hidden="true" className="flex w-7 shrink-0 flex-col">
+        <span className="h-4" />
+        <div className="flex flex-1 flex-col gap-[2px]">
+          {Array.from({ length: 24 }, (_, hour) => (
+            <span
+              key={hour}
+              className="flex h-2 items-center justify-end text-[8px] leading-none tabular-nums text-muted-foreground/70"
+            >
+              {hour % HOUR_LABEL_STEP === 0 ? hourLabel(hour).slice(0, 2) : ''}
             </span>
-            {dayStarts.map((dayStartMs) => {
-              const value = valuesByHour.get(dayStartMs + hour * HOUR_MS) ?? 0;
-              const intensity =
-                value > 0 && referenceValue > 0
-                  ? USAGE_HEAT_MIN_INTENSITY +
-                    (1 - USAGE_HEAT_MIN_INTENSITY) * Math.min(1, value / referenceValue) ** 0.6
-                  : 0;
-              return (
-                <span
-                  key={dayStartMs}
-                  role="gridcell"
-                  title={`${String(hour).padStart(2, '0')}:00 · ${formatMetric(value, metric)}`}
-                  aria-label={`${String(hour).padStart(2, '0')}:00 · ${formatMetric(value, metric)}`}
-                  className="mx-auto block size-3 rounded-full sm:size-3.5"
-                  style={{ backgroundColor: intensity > 0 ? heatColor(intensity) : EMPTY_DAY_COLOR }}
-                />
-              );
-            })}
-          </Fragment>
-        ))}
+          ))}
+        </div>
       </div>
-      <div className="mt-3 flex justify-end">
-        <HeatLegend />
+      <div className="grid min-w-0 flex-1 grid-cols-7 gap-[3px]">
+        {dayStarts.map((dayStartMs, dayIndex) => (
+          <HeatColumn key={dayStartMs} index={dayIndex} reduced={reduced}>
+            <span className="flex h-4 items-center justify-center gap-1 text-[10px] font-medium leading-none text-muted-foreground">
+              <span className="truncate">{weekdayFormat.format(new Date(dayStartMs))}</span>
+              <span className="tabular-nums text-muted-foreground/55">
+                {dayOfMonthFormat.format(new Date(dayStartMs))}
+              </span>
+            </span>
+            <div className="flex flex-col gap-[2px]">
+              {Array.from({ length: 24 }, (_, hour) => {
+                const value = valuesByBucket.get(dayStartMs + hour * HOUR_MS) ?? 0;
+                return (
+                  <HeatCell
+                    key={hour}
+                    intensity={intensityOf(value)}
+                    label={`${weekdayFormat.format(new Date(dayStartMs))} ${hourLabel(hour)} · ${formatMetric(value, metric)}`}
+                    className="h-2 w-full rounded-[2px]"
+                  />
+                );
+              })}
+            </div>
+          </HeatColumn>
+        ))}
       </div>
     </div>
   );
 }
 
-function UsageMonthHeatmap({
+function UsageMonthMatrix({
+  buckets,
+  metric,
+  intensityOf,
+  reduced,
+  weekdayFormat,
+  dayOfMonthFormat,
+}: {
+  buckets: SettingsUsageTimelineBucket[];
+  metric: UsageCalendarMetric;
+  intensityOf: (value: number) => number;
+  reduced: boolean;
+  weekdayFormat: Intl.DateTimeFormat;
+  dayOfMonthFormat: Intl.DateTimeFormat;
+}) {
+  // Calendar columns, so a weekday rhythm in the month is visible at a glance.
+  // Leading blanks keep every row a real week; without them the first partial
+  // week would shift each column against its neighbours.
+  const { columns, rows } = useMemo(() => {
+    const leading = buckets[0] ? new Date(buckets[0].bucketStartMs).getUTCDay() : 0;
+    const weeks = Math.ceil((leading + buckets.length) / 7);
+    const byWeekday = Array.from(
+      { length: 7 },
+      () => Array.from({ length: weeks }, () => undefined) as Array<SettingsUsageTimelineBucket | undefined>
+    );
+    for (const [index, bucket] of buckets.entries()) {
+      const slot = leading + index;
+      byWeekday[slot % 7]![Math.floor(slot / 7)] = bucket;
+    }
+    return { columns: byWeekday, rows: weeks };
+  }, [buckets]);
+
+  return (
+    <div className="grid grid-cols-7 gap-[3px]">
+      {columns.map((column, weekday) => {
+        const sample = column.find(Boolean);
+        return (
+          <HeatColumn key={weekday} index={weekday} reduced={reduced}>
+            <span className="flex h-4 items-center justify-center text-[10px] font-medium leading-none text-muted-foreground">
+              {sample ? weekdayFormat.format(new Date(sample.bucketStartMs)) : ''}
+            </span>
+            <div className="flex flex-col gap-[3px]">
+              {Array.from({ length: rows }, (_, row) => {
+                const bucket = column[row];
+                if (!bucket) return <span key={row} className="h-7" />;
+                const value = metric === 'tokens' ? bucket.tokens : bucket.costUSD;
+                const intensity = intensityOf(value);
+                return (
+                  <span key={bucket.bucketStartMs} className="relative block">
+                    <HeatCell
+                      intensity={intensity}
+                      label={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
+                      className="h-7 w-full rounded-[4px]"
+                    />
+                    {/* The date rides inside the cell: 30 separate captions below the
+                        grid would double its height for the same information. */}
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'pointer-events-none absolute inset-0 flex items-center justify-center text-[9px] font-medium leading-none tabular-nums',
+                        intensity > 0.55 ? 'text-background/85' : 'text-muted-foreground/70'
+                      )}
+                    >
+                      {dayOfMonthFormat.format(new Date(bucket.bucketStartMs))}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          </HeatColumn>
+        );
+      })}
+    </div>
+  );
+}
+
+const COMPOSITION_SEGMENT_LIMIT = 5;
+const MODEL_SERIES_COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'] as const;
+const MEMBER_SERIES_COLORS = ['#7c3aed', '#9333ea', '#a855f7', '#c084fc', '#e9d5ff'] as const;
+
+type UsageCompositionSegment = {
+  id: string;
+  label: string;
+  tokens: number;
+  share: number;
+};
+
+function createUsageCompositionSegments(
+  rows: Array<{ id: string; label: string; tokens: number }>,
+  otherLabel: string
+): UsageCompositionSegment[] {
+  const totals = new Map<string, { label: string; tokens: number }>();
+  for (const row of rows) {
+    if (!Number.isFinite(row.tokens) || row.tokens <= 0) continue;
+    const previous = totals.get(row.id);
+    totals.set(row.id, {
+      label: row.label,
+      tokens: (previous?.tokens ?? 0) + row.tokens,
+    });
+  }
+
+  const sorted = [...totals.entries()]
+    .map(([id, value]) => ({ id, ...value }))
+    .sort((a, b) => b.tokens - a.tokens || a.label.localeCompare(b.label));
+  const visible = sorted.slice(0, COMPOSITION_SEGMENT_LIMIT - 1);
+  const hidden = sorted.slice(COMPOSITION_SEGMENT_LIMIT - 1);
+  if (hidden.length > 0) {
+    visible.push({
+      id: '__other__',
+      label: otherLabel,
+      tokens: hidden.reduce((total, row) => total + row.tokens, 0),
+    });
+  }
+
+  const total = visible.reduce((sum, row) => sum + row.tokens, 0);
+  return visible.map((row) => ({ ...row, share: total > 0 ? row.tokens / total : 0 }));
+}
+
+/**
+ * The rings this replaced spent a 13rem square on two numbers. A pair of 6px
+ * rules carries the same shares inside the panel's own text rhythm.
+ */
+function UsageCompositionBar({
+  label,
+  segments,
+  colors,
+  reduced,
+}: {
+  label: string;
+  segments: UsageCompositionSegment[];
+  colors: readonly string[];
+  reduced: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">
+        {label}
+      </p>
+      <div className="mt-1.5 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted-foreground/10">
+        {segments.map((segment, index) => (
+          <motion.span
+            key={segment.id}
+            title={`${segment.label} · ${Math.round(segment.share * 100)}%`}
+            className="h-full"
+            style={{ backgroundColor: colors[index % colors.length] }}
+            initial={reduced ? false : { width: 0 }}
+            animate={{ width: `${segment.share * 100}%` }}
+            transition={reduced ? { duration: 0 } : { duration: 0.5, ease: RANGE_SWEEP_EASE }}
+          />
+        ))}
+      </div>
+      <ul className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        {segments.map((segment, index) => (
+          <li key={segment.id} className="flex min-w-0 items-center gap-1 text-[10px]">
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: colors[index % colors.length] }}
+            />
+            <span className="max-w-[8rem] truncate text-muted-foreground">{segment.label}</span>
+            <span className="tabular-nums text-foreground/70">
+              {Math.round(segment.share * 100)}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The single range view. 24h, 7d, and 30d share one frame — total, span, peak,
+ * legend, and composition rules stay put while only the matrix inside changes
+ * shape, so switching ranges reads as one object deforming.
+ */
+function UsageRangePanel({
   timeline,
   metric,
 }: {
@@ -392,73 +661,160 @@ function UsageMonthHeatmap({
   metric: UsageCalendarMetric;
 }) {
   const { t } = useTranslation();
-  const values = timeline.buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD));
-  const referenceValue = useMemo(() => {
-    const active = values.filter((value) => value > 0).sort((a, b) => a - b);
-    return active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
-  }, [values]);
+  const formats = useCalendarFormats();
+  const reduced = useReducedMotion() ?? false;
+
+  const values = useMemo(
+    () => timeline.buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD)),
+    [metric, timeline.buckets]
+  );
+  const intensityOf = useMemo(() => createRangeIntensity(values), [values]);
+  const peakIndex = values.reduce(
+    (peak, value, index) => (value > (values[peak] ?? 0) ? index : peak),
+    0
+  );
+  const peakBucket = timeline.buckets[peakIndex];
+  const activeCount = values.filter((value) => value > 0).length;
+
+  const modelSegments = useMemo(
+    () =>
+      createUsageCompositionSegments(
+        timeline.buckets.flatMap((bucket) =>
+          bucket.byModel.map((row) => ({
+            id: row.modelId,
+            label: stripRecommended(row.modelId),
+            tokens: row.tokens,
+          }))
+        ),
+        t('workspace.usage.skyline.other')
+      ),
+    [t, timeline.buckets]
+  );
+  const memberSegments = useMemo(
+    () =>
+      createUsageCompositionSegments(
+        timeline.buckets.flatMap((bucket) =>
+          bucket.byUser.map((row) => ({
+            id: row.userId,
+            label:
+              timeline.users?.[row.userId]?.name ||
+              timeline.users?.[row.userId]?.email ||
+              row.userId,
+            tokens: row.tokens,
+          }))
+        ),
+        t('workspace.usage.skyline.other')
+      ),
+    [t, timeline.buckets, timeline.users]
+  );
+
+  const spanLabel =
+    timeline.range === 'day'
+      ? formats.day.format(new Date(timeline.startMs))
+      : `${formats.dayShort.format(new Date(timeline.startMs))} – ${formats.dayShort.format(
+          new Date(Math.max(timeline.startMs, timeline.endMs - DAY_MS))
+        )}`;
+
   return (
     <div className="min-w-0">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <p className="flex items-baseline gap-1.5">
+            <span className="text-2xl font-semibold leading-none tabular-nums tracking-tight text-foreground">
+              {metric === 'tokens' ? (
+                <NumberFlow
+                  value={timeline.totals.tokens}
+                  format={{ notation: 'compact', maximumFractionDigits: 1 }}
+                />
+              ) : (
+                formatCost(timeline.totals.costUSD)
+              )}
+            </span>
+            {metric === 'tokens' ? (
+              <span className="text-xs text-muted-foreground">{t('workspace.usage.tokens')}</span>
+            ) : null}
+          </p>
+          <p className="mt-1 truncate text-[11px] tabular-nums text-muted-foreground">
+            {spanLabel}
+            <span className="text-muted-foreground/60">
+              {` · ${t('workspace.usage.skyline.activeIntervals')} ${activeCount}/${values.length}`}
+            </span>
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          {peakBucket && (values[peakIndex] ?? 0) > 0 ? (
+            <p className="text-[11px] tabular-nums text-muted-foreground">
+              <span className="text-muted-foreground/60">{`${t('workspace.usage.skyline.peakInterval')} `}</span>
+              <span className="font-medium text-foreground">
+                {formatMetric(values[peakIndex] ?? 0, metric)}
+              </span>
+              <span className="text-muted-foreground/60">{` · ${peakBucket.bucketLabel}`}</span>
+            </p>
+          ) : null}
+          <HeatLegend />
+        </div>
+      </div>
+
+      {/* The frame keeps its height across ranges so the panel below it does not
+          jump while a range animates in. */}
       <div
         role="grid"
         aria-label={t('workspace.usage.skyline.heatmap')}
-        className="grid grid-cols-7 gap-1.5"
+        className="relative mt-3 min-h-[8.5rem]"
       >
-        {timeline.buckets.map((bucket, index) => {
-          const value = values[index] ?? 0;
-          const intensity =
-            value > 0 && referenceValue > 0
-              ? USAGE_HEAT_MIN_INTENSITY +
-                (1 - USAGE_HEAT_MIN_INTENSITY) * Math.min(1, value / referenceValue) ** 0.6
-              : 0;
-          return (
-            <div key={bucket.bucketStartMs} className="min-w-0 text-center">
-              <span
-                role="gridcell"
-                title={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
-                aria-label={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
-                className="block h-6 rounded-[32%]"
-                style={{ backgroundColor: intensity > 0 ? heatColor(intensity) : EMPTY_DAY_COLOR }}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={timeline.range}
+            initial={reduced ? false : { opacity: 0, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, filter: 'blur(0px)' }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, filter: 'blur(6px)' }}
+            transition={{ duration: reduced ? 0 : 0.2, ease: 'easeOut' }}
+          >
+            {timeline.range === 'week' ? (
+              <UsageWeekMatrix
+                timeline={timeline}
+                metric={metric}
+                intensityOf={intensityOf}
+                reduced={reduced}
+                weekdayFormat={formats.weekday}
+                dayOfMonthFormat={formats.dayOfMonth}
               />
-              <span className="mt-1 block truncate text-[9px] tabular-nums text-muted-foreground">
-                {bucket.bucketLabel.slice(-2)}
-              </span>
-            </div>
-          );
-        })}
+            ) : timeline.range === 'day' ? (
+              <UsageDayMatrix
+                buckets={timeline.buckets}
+                metric={metric}
+                intensityOf={intensityOf}
+                reduced={reduced}
+              />
+            ) : (
+              <UsageMonthMatrix
+                buckets={timeline.buckets}
+                metric={metric}
+                intensityOf={intensityOf}
+                reduced={reduced}
+                weekdayFormat={formats.weekday}
+                dayOfMonthFormat={formats.dayOfMonth}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
-      <div className="mt-3 flex justify-end">
-        <HeatLegend />
+
+      <div className="mt-4 grid gap-x-6 gap-y-3 border-t border-border/50 pt-3 sm:grid-cols-2">
+        <UsageCompositionBar
+          label={t('workspace.usage.byModel')}
+          segments={modelSegments}
+          colors={MODEL_SERIES_COLORS}
+          reduced={reduced}
+        />
+        <UsageCompositionBar
+          label={t('workspace.usage.byUser')}
+          segments={memberSegments}
+          colors={MEMBER_SERIES_COLORS}
+          reduced={reduced}
+        />
       </div>
     </div>
-  );
-}
-
-function UsageRangeHeatmap({
-  timeline,
-  metric,
-}: {
-  timeline: SettingsUsageTimelineData;
-  metric: UsageCalendarMetric;
-}) {
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={timeline.range}
-        initial={{ opacity: 0, filter: 'blur(8px)', y: 8 }}
-        animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
-        exit={{ opacity: 0, filter: 'blur(6px)', y: -5 }}
-        transition={{ duration: 0.28, ease: 'easeOut' }}
-      >
-        {timeline.range === 'week' ? (
-          <UsageWeekHourlyHeatmap timeline={timeline} metric={metric} />
-        ) : timeline.range === 'month' ? (
-          <UsageMonthHeatmap timeline={timeline} metric={metric} />
-        ) : (
-          <UsageHourlyStrip buckets={timeline.buckets} metric={metric} />
-        )}
-      </motion.div>
-    </AnimatePresence>
   );
 }
 
@@ -787,180 +1143,6 @@ const rankFill = (rank: number) =>
 const COMPOSITION_ALPHAS = [0.75, 0.55, 0.38, 0.24] as const;
 const compositionFill = (index: number) =>
   heatColor(COMPOSITION_ALPHAS[index % COMPOSITION_ALPHAS.length]!);
-
-const RING_SEGMENT_LIMIT = 5;
-const MODEL_RING_COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'] as const;
-const MEMBER_RING_COLORS = ['#7c3aed', '#9333ea', '#a855f7', '#c084fc', '#e9d5ff'] as const;
-
-type UsageCompositionSegment = {
-  id: string;
-  label: string;
-  tokens: number;
-  share: number;
-};
-
-function createUsageCompositionSegments(
-  rows: Array<{ id: string; label: string; tokens: number }>,
-  otherLabel: string
-): UsageCompositionSegment[] {
-  const totals = new Map<string, { label: string; tokens: number }>();
-  for (const row of rows) {
-    if (!Number.isFinite(row.tokens) || row.tokens <= 0) continue;
-    const previous = totals.get(row.id);
-    totals.set(row.id, {
-      label: row.label,
-      tokens: (previous?.tokens ?? 0) + row.tokens,
-    });
-  }
-
-  const sorted = [...totals.entries()]
-    .map(([id, value]) => ({ id, ...value }))
-    .sort((a, b) => b.tokens - a.tokens || a.label.localeCompare(b.label));
-  const visible = sorted.slice(0, RING_SEGMENT_LIMIT - 1);
-  const hidden = sorted.slice(RING_SEGMENT_LIMIT - 1);
-  if (hidden.length > 0) {
-    visible.push({
-      id: '__other__',
-      label: otherLabel,
-      tokens: hidden.reduce((total, row) => total + row.tokens, 0),
-    });
-  }
-
-  const total = visible.reduce((sum, row) => sum + row.tokens, 0);
-  return visible.map((row) => ({ ...row, share: total > 0 ? row.tokens / total : 0 }));
-}
-
-function CompositionRing({
-  segments,
-  radius,
-  strokeWidth,
-  colors,
-}: {
-  segments: UsageCompositionSegment[];
-  radius: number;
-  strokeWidth: number;
-  colors: readonly string[];
-}) {
-  const circumference = 2 * Math.PI * radius;
-  let offset = 0;
-  return (
-    <>
-      <circle
-        aria-hidden="true"
-        cx="88"
-        cy="88"
-        r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={strokeWidth}
-        className="text-muted-foreground/10"
-      />
-      {segments.map((segment, index) => {
-        const segmentLength = segment.share * circumference;
-        const gap = segments.length > 1 ? Math.min(4, segmentLength * 0.2) : 0;
-        const dashLength = Math.max(0, segmentLength - gap);
-        const circle = (
-          <circle
-            key={segment.id}
-            cx="88"
-            cy="88"
-            r={radius}
-            fill="none"
-            stroke={colors[index % colors.length]}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            strokeDasharray={`${dashLength} ${circumference - dashLength}`}
-            strokeDashoffset={-offset * circumference}
-            className="transition-opacity duration-200 hover:opacity-80"
-          >
-            <title>{`${segment.label}: ${Math.round(segment.share * 100)}%`}</title>
-          </circle>
-        );
-        offset += segment.share;
-        return circle;
-      })}
-    </>
-  );
-}
-
-function UsageCompositionRings({
-  timeline,
-  summary,
-}: {
-  timeline: SettingsUsageTimelineData;
-  summary: ReactNode;
-}) {
-  const { t } = useTranslation();
-  const modelSegments = useMemo(
-    () =>
-      createUsageCompositionSegments(
-        timeline.buckets.flatMap((bucket) =>
-          bucket.byModel.map((row) => ({
-            id: row.modelId,
-            label: stripRecommended(row.modelId),
-            tokens: row.tokens,
-          }))
-        ),
-        t('workspace.usage.skyline.other')
-      ),
-    [t, timeline]
-  );
-  const memberSegments = useMemo(
-    () =>
-      createUsageCompositionSegments(
-        timeline.buckets.flatMap((bucket) =>
-          bucket.byUser.map((row) => ({
-            id: row.userId,
-            label:
-              timeline.users?.[row.userId]?.name ||
-              timeline.users?.[row.userId]?.email ||
-              row.userId,
-            tokens: row.tokens,
-          }))
-        ),
-        t('workspace.usage.skyline.other')
-      ),
-    [t, timeline]
-  );
-
-  return (
-    <div
-      key={timeline.range}
-      className="animate-in fade-in-0 slide-in-from-left-4 grid items-center gap-5 duration-500 motion-reduce:animate-none sm:grid-cols-[13rem_minmax(0,1fr)]"
-    >
-      <div className="relative mx-auto h-52 w-52 shrink-0">
-        <svg
-          viewBox="0 0 176 176"
-          role="img"
-          aria-label={`${t('workspace.usage.byModel')}; ${t('workspace.usage.byUser')}`}
-          className="h-full w-full -rotate-90 overflow-visible drop-shadow-[0_10px_18px_rgba(59,130,246,0.12)]"
-        >
-          <CompositionRing
-            segments={modelSegments}
-            radius={70}
-            strokeWidth={14}
-            colors={MODEL_RING_COLORS}
-          />
-          <CompositionRing
-            segments={memberSegments}
-            radius={56}
-            strokeWidth={14}
-            colors={MEMBER_RING_COLORS}
-          />
-        </svg>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
-          <span className="max-w-full truncate text-base font-semibold leading-none tabular-nums tracking-tight text-foreground">
-            {formatTokens(timeline.totals.tokens)}
-          </span>
-          <span className="mt-1 text-[10px] font-medium text-muted-foreground">
-            {t('workspace.usage.tokens')}
-          </span>
-        </div>
-      </div>
-      <div className="min-w-0">{summary}</div>
-    </div>
-  );
-}
 
 /** Longest model/member list the panel shows before folding the rest into "other". */
 const DAY_DETAIL_ROW_LIMIT = 5;
@@ -1876,10 +2058,7 @@ export function UsageCalendarVisualization({
 
       <div className="p-4">
         {timeline && timeline.range !== 'total' ? (
-          <UsageCompositionRings
-            timeline={timeline}
-            summary={<UsageRangeHeatmap timeline={timeline} metric={metric} />}
-          />
+          <UsageRangePanel timeline={timeline} metric={metric} />
         ) : (
           <UsageHeatmap
             model={model}
