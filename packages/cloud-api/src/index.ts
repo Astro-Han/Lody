@@ -97,13 +97,22 @@ export type UsageTimelineBucket = {
   byUser: Array<{ userId: string; tokens: number; costUSD: number }>;
 };
 
+/** Token-type split of a range total. Optional: not every deployment reports it. */
+export type UsageTokenBreakdown = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  reasoningOutputTokens: number;
+};
+
 export type UsageTimeline = {
   workspaceId: string;
   range: UsageRange;
   startMs: number;
   endMs: number;
   bucketSizeMs: number;
-  totals: { tokens: number; costUSD: number };
+  totals: { tokens: number; costUSD: number; breakdown?: UsageTokenBreakdown };
   users: Record<string, { name?: string; email?: string; image?: string | null }>;
   buckets: UsageTimelineBucket[];
 };

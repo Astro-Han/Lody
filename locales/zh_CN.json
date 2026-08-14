@@ -2776,6 +2776,7 @@
   "workspace.usage.skyline.title": "用量天际线",
   "workspace.usage.skyline.total": "总计",
   "workspace.usage.skyline.view": "用量可视化",
+  "workspace.usage.skyline.windowSubtitle": "最近 30 天，在最近 53 周中高亮",
   "workspace.usage.skyline.webSearches": "{{count}} 次联网搜索",
   "workspace.usage.skyline.webSearches_one": "{{count}} 次联网搜索",
   "workspace.usage.skyline.webSearches_other": "{{count}} 次联网搜索",

@@ -2778,6 +2778,7 @@
   "workspace.usage.skyline.title": "Usage skyline",
   "workspace.usage.skyline.total": "Total",
   "workspace.usage.skyline.view": "Usage visualization",
+  "workspace.usage.skyline.windowSubtitle": "Last 30 days, lit inside the last 53 weeks",
   "workspace.usage.skyline.webSearches": "{{count}} web searches",
   "workspace.usage.skyline.webSearches_one": "{{count}} web search",
   "workspace.usage.skyline.webSearches_other": "{{count}} web searches",

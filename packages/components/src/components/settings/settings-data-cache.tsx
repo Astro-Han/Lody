@@ -22,6 +22,14 @@ export type SettingsUsageTimelineData = {
   totals: {
     tokens: number;
     costUSD: number;
+    /** Token-type split of the range. Absent when the deployment does not report it. */
+    breakdown?: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadInputTokens: number;
+      cacheCreationInputTokens: number;
+      reasoningOutputTokens: number;
+    };
   };
   users?: Record<
     string,

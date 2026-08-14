@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -267,15 +266,19 @@ const DAY_MS = 24 * HOUR_MS;
 
 /**
  * The range panel keeps its blue deliberately quiet: even the densest hour stops
- * short of the full-saturation chart blue, so a busy week reads as texture rather
+ * short of the full-saturation chart blue, so a busy week reads as light rather
  * than a solid slab. The year heatmap above still uses the full ramp — it has far
  * more empty space to carry it.
  */
-const RANGE_HEAT_FLOOR = 0.13;
-const RANGE_HEAT_CEILING = 0.8;
+const RANGE_HEAT_FLOOR = 0.18;
+const RANGE_HEAT_CEILING = 0.92;
 const rangeHeatColor = (intensity: number) =>
   heatColor(RANGE_HEAT_FLOOR + (RANGE_HEAT_CEILING - RANGE_HEAT_FLOOR) * intensity);
-const RANGE_EMPTY_COLOR = 'hsl(var(--muted-foreground) / 0.1)';
+const RANGE_EMPTY_COLOR = 'hsl(var(--muted-foreground) / 0.11)';
+/** Halo behind a busy hour. Light, never an outline — the shapes stay soft. */
+const RANGE_GLOW_COLOR = heatColor(0.3);
+/** Above this share of the local peak an hour earns its halo. */
+const RANGE_GLOW_THRESHOLD = 0.5;
 
 /**
  * Percentile-anchored so one spike hour cannot flatten a whole week; the gamma
@@ -288,24 +291,26 @@ function createRangeIntensity(values: number[]): (value: number) => number {
     value > 0 && reference > 0 ? Math.min(1, value / reference) ** 0.62 : 0;
 }
 
-/** Per-column delay of the reveal sweep; the widest range (24 columns) lands in ~0.9s. */
-const RANGE_SWEEP_STEP_S = 0.026;
+/** Per-track delay of the reveal sweep; the widest range (24 columns) lands in ~0.8s. */
+const RANGE_SWEEP_STEP_S = 0.022;
 const RANGE_SWEEP_EASE = [0.22, 1, 0.36, 1] as const;
 
 /**
- * One column of the matrix. The sweep — a blurred slide that resolves left to
- * right — is what makes 24h, 7d, and 30d read as the same object changing shape
- * rather than three separate charts. Motion lives on the column, not on each of
- * the 168 cells, so the blur stays cheap.
+ * One track of the matrix — an hour column in 24h, a day row in 7d. The sweep is
+ * a blurred slide that resolves in order, which is what makes the ranges read as
+ * one object changing shape rather than three separate charts. Motion lives on
+ * the track, not on each of the 168 cells, so the blur stays cheap.
  */
-function HeatColumn({
+function RangeSweep({
   index,
   reduced,
+  axis = 'column',
   className,
   children,
 }: {
   index: number;
   reduced: boolean;
+  axis?: 'column' | 'row';
   className?: string;
   children: ReactNode;
 }) {
@@ -314,13 +319,17 @@ function HeatColumn({
       // Presentational: the wrapper only carries the sweep, so the grid still
       // sees its cells directly.
       role="presentation"
-      className={cn('flex min-w-0 flex-col', className)}
-      initial={reduced ? false : { opacity: 0, y: 5, filter: 'blur(5px)' }}
-      animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+      className={cn('min-w-0', className)}
+      initial={
+        reduced
+          ? false
+          : { opacity: 0, filter: 'blur(5px)', ...(axis === 'column' ? { y: 6 } : { x: -8 }) }
+      }
+      animate={{ opacity: 1, x: 0, y: 0, filter: 'blur(0px)' }}
       transition={
         reduced
           ? { duration: 0 }
-          : { duration: 0.34, delay: index * RANGE_SWEEP_STEP_S, ease: RANGE_SWEEP_EASE }
+          : { duration: 0.36, delay: index * RANGE_SWEEP_STEP_S, ease: RANGE_SWEEP_EASE }
       }
     >
       {children}
@@ -328,38 +337,38 @@ function HeatColumn({
   );
 }
 
-function HeatCell({
-  intensity,
-  label,
-  className,
-  style,
-}: {
-  intensity: number;
-  label: string;
-  className?: string;
-  style?: CSSProperties;
-}) {
-  return (
-    <span
-      role="gridcell"
-      title={label}
-      aria-label={label}
-      className={cn('block transition-colors duration-200', className)}
-      style={{
-        backgroundColor: intensity > 0 ? rangeHeatColor(intensity) : RANGE_EMPTY_COLOR,
-        ...style,
-      }}
-    />
-  );
-}
-
-/** Hour rows are labelled every three hours; a label on all 24 becomes noise. */
+/** Hours are labelled every three; a label on all 24 becomes noise. */
 const HOUR_LABEL_STEP = 3;
+/** 24 hour tracks, shared by the 24h bars, the 7d dot rows, and the hour axis. */
+const HOUR_COLUMNS_CLASS = 'grid grid-cols-[repeat(24,minmax(0,1fr))] gap-[3px]';
 
 function hourLabel(hour: number): string {
   return `${String(hour).padStart(2, '0')}:00`;
 }
 
+function HourAxis() {
+  return (
+    <div aria-hidden="true" className={cn(HOUR_COLUMNS_CLASS, 'mt-1.5')}>
+      {Array.from({ length: 24 }, (_, hour) => (
+        <span
+          key={hour}
+          className="text-center text-[9px] leading-none tabular-nums text-muted-foreground/60"
+        >
+          {hour % HOUR_LABEL_STEP === 0 ? String(hour).padStart(2, '0') : ''}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Tallest an hour bar gets; the 7d rows below are sized to land near the same block. */
+const DAY_BAR_TRACK_PX = 148;
+
+/**
+ * 24h: one soft capsule per hour. Height carries magnitude, the fill's light
+ * carries share of the peak, and a blurred twin behind the busy hours keeps the
+ * row reading as light on glass instead of a bar chart.
+ */
 function UsageDayMatrix({
   buckets,
   metric,
@@ -376,38 +385,64 @@ function UsageDayMatrix({
     0
   );
   return (
-    <div className="flex items-end gap-[3px]">
-      {buckets.map((bucket, index) => {
-        const value = metric === 'tokens' ? bucket.tokens : bucket.costUSD;
-        const intensity = intensityOf(value);
-        const label = `${bucket.bucketLabel} · ${formatMetric(value, metric)}`;
-        return (
-          <HeatColumn key={bucket.bucketStartMs} index={index} reduced={reduced} className="flex-1">
-            {/* Height carries magnitude, colour carries share of the peak: 24 cells
-                is few enough that a bar column beats a flat row of squares. */}
-            <span
-              className="relative flex h-16 w-full items-end overflow-hidden rounded-[3px]"
-              style={{ backgroundColor: RANGE_EMPTY_COLOR }}
-            >
-              <HeatCell
-                intensity={intensity}
-                label={label}
-                className="w-full rounded-[3px]"
-                style={{
-                  height: `${value > 0 && maxValue > 0 ? Math.max(6, (value / maxValue) * 100) : 0}%`,
-                }}
-              />
-            </span>
-            <span className="mt-1 h-3 text-center text-[9px] leading-3 tabular-nums text-muted-foreground/70">
-              {index % HOUR_LABEL_STEP === 0 ? bucket.bucketLabel.replace(':00', '') : ''}
-            </span>
-          </HeatColumn>
-        );
-      })}
+    <div>
+      <div className={HOUR_COLUMNS_CLASS} role="row">
+        {buckets.map((bucket, index) => {
+          const value = metric === 'tokens' ? bucket.tokens : bucket.costUSD;
+          const intensity = intensityOf(value);
+          const height =
+            value > 0 && maxValue > 0 ? Math.max(7, (value / maxValue) * 100) : 0;
+          const label = `${bucket.bucketLabel} · ${formatMetric(value, metric)}`;
+          return (
+            <RangeSweep key={bucket.bucketStartMs} index={index} reduced={reduced}>
+              <span
+                role="gridcell"
+                title={label}
+                aria-label={label}
+                className="relative flex w-full items-end rounded-full"
+                style={{ height: DAY_BAR_TRACK_PX, backgroundColor: RANGE_EMPTY_COLOR }}
+              >
+                {intensity > 0 ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-x-0 bottom-0 rounded-full opacity-70 blur-[7px]"
+                    style={{ height: `${height}%`, backgroundColor: rangeHeatColor(intensity) }}
+                  />
+                ) : null}
+                <span
+                  aria-hidden="true"
+                  className="relative w-full rounded-full transition-[height,background-image] duration-300 motion-reduce:transition-none"
+                  style={{
+                    height: `${height}%`,
+                    backgroundImage: `linear-gradient(to top, ${rangeHeatColor(
+                      intensity * 0.45
+                    )}, ${rangeHeatColor(intensity)})`,
+                    boxShadow:
+                      intensity > RANGE_GLOW_THRESHOLD
+                        ? `0 0 12px ${RANGE_GLOW_COLOR}`
+                        : undefined,
+                  }}
+                />
+              </span>
+            </RangeSweep>
+          );
+        })}
+      </div>
+      <HourAxis />
     </div>
   );
 }
 
+/** Row pitch of the 7d grid, chosen so seven days land near the 24h bar block. */
+const WEEK_ROW_PX = 18;
+const WEEK_DOT_MIN_PX = 5;
+const WEEK_DOT_MAX_PX = 13;
+
+/**
+ * 7d: the same 24 hour tracks as the 24h view, stacked seven deep. Dots rather
+ * than tiles — a circle that grows and brightens with its hour keeps a quiet
+ * week readable as texture, where a full-bleed grid turns into a wall.
+ */
 function UsageWeekMatrix({
   timeline,
   metric,
@@ -434,122 +469,66 @@ function UsageWeekMatrix({
   }, [metric, timeline.buckets]);
 
   return (
-    <div className="flex gap-1.5">
-      {/* Hour gutter, outside the columns so the sweep cannot drag the labels. */}
-      <div aria-hidden="true" className="flex w-7 shrink-0 flex-col">
-        <span className="h-4" />
-        <div className="flex flex-1 flex-col gap-[2px]">
-          {Array.from({ length: 24 }, (_, hour) => (
-            <span
-              key={hour}
-              className="flex h-2 items-center justify-end text-[8px] leading-none tabular-nums text-muted-foreground/70"
-            >
-              {hour % HOUR_LABEL_STEP === 0 ? hourLabel(hour).slice(0, 2) : ''}
+    <div className="flex gap-2">
+      {/* Day gutter, outside the rows so the sweep cannot drag the labels. */}
+      <div aria-hidden="true" className="flex shrink-0 flex-col gap-[3px]">
+        {dayStarts.map((dayStartMs) => (
+          <span
+            key={dayStartMs}
+            className="flex items-center justify-end gap-1 text-[10px] leading-none text-muted-foreground"
+            style={{ height: WEEK_ROW_PX }}
+          >
+            <span>{weekdayFormat.format(new Date(dayStartMs))}</span>
+            <span className="tabular-nums text-muted-foreground/55">
+              {dayOfMonthFormat.format(new Date(dayStartMs))}
             </span>
-          ))}
-        </div>
-      </div>
-      <div className="grid min-w-0 flex-1 grid-cols-7 gap-[3px]">
-        {dayStarts.map((dayStartMs, dayIndex) => (
-          <HeatColumn key={dayStartMs} index={dayIndex} reduced={reduced}>
-            <span className="flex h-4 items-center justify-center gap-1 text-[10px] font-medium leading-none text-muted-foreground">
-              <span className="truncate">{weekdayFormat.format(new Date(dayStartMs))}</span>
-              <span className="tabular-nums text-muted-foreground/55">
-                {dayOfMonthFormat.format(new Date(dayStartMs))}
-              </span>
-            </span>
-            <div className="flex flex-col gap-[2px]">
-              {Array.from({ length: 24 }, (_, hour) => {
-                const value = valuesByBucket.get(dayStartMs + hour * HOUR_MS) ?? 0;
-                return (
-                  <HeatCell
-                    key={hour}
-                    intensity={intensityOf(value)}
-                    label={`${weekdayFormat.format(new Date(dayStartMs))} ${hourLabel(hour)} · ${formatMetric(value, metric)}`}
-                    className="h-2 w-full rounded-[2px]"
-                  />
-                );
-              })}
-            </div>
-          </HeatColumn>
+          </span>
         ))}
       </div>
-    </div>
-  );
-}
-
-function UsageMonthMatrix({
-  buckets,
-  metric,
-  intensityOf,
-  reduced,
-  weekdayFormat,
-  dayOfMonthFormat,
-}: {
-  buckets: SettingsUsageTimelineBucket[];
-  metric: UsageCalendarMetric;
-  intensityOf: (value: number) => number;
-  reduced: boolean;
-  weekdayFormat: Intl.DateTimeFormat;
-  dayOfMonthFormat: Intl.DateTimeFormat;
-}) {
-  // Calendar columns, so a weekday rhythm in the month is visible at a glance.
-  // Leading blanks keep every row a real week; without them the first partial
-  // week would shift each column against its neighbours.
-  const { columns, rows } = useMemo(() => {
-    const leading = buckets[0] ? new Date(buckets[0].bucketStartMs).getUTCDay() : 0;
-    const weeks = Math.ceil((leading + buckets.length) / 7);
-    const byWeekday = Array.from(
-      { length: 7 },
-      () => Array.from({ length: weeks }, () => undefined) as Array<SettingsUsageTimelineBucket | undefined>
-    );
-    for (const [index, bucket] of buckets.entries()) {
-      const slot = leading + index;
-      byWeekday[slot % 7]![Math.floor(slot / 7)] = bucket;
-    }
-    return { columns: byWeekday, rows: weeks };
-  }, [buckets]);
-
-  return (
-    <div className="grid grid-cols-7 gap-[3px]">
-      {columns.map((column, weekday) => {
-        const sample = column.find(Boolean);
-        return (
-          <HeatColumn key={weekday} index={weekday} reduced={reduced}>
-            <span className="flex h-4 items-center justify-center text-[10px] font-medium leading-none text-muted-foreground">
-              {sample ? weekdayFormat.format(new Date(sample.bucketStartMs)) : ''}
-            </span>
-            <div className="flex flex-col gap-[3px]">
-              {Array.from({ length: rows }, (_, row) => {
-                const bucket = column[row];
-                if (!bucket) return <span key={row} className="h-7" />;
-                const value = metric === 'tokens' ? bucket.tokens : bucket.costUSD;
-                const intensity = intensityOf(value);
-                return (
-                  <span key={bucket.bucketStartMs} className="relative block">
-                    <HeatCell
-                      intensity={intensity}
-                      label={`${bucket.bucketLabel} · ${formatMetric(value, metric)}`}
-                      className="h-7 w-full rounded-[4px]"
-                    />
-                    {/* The date rides inside the cell: 30 separate captions below the
-                        grid would double its height for the same information. */}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-col gap-[3px]">
+          {dayStarts.map((dayStartMs, dayIndex) => (
+            <RangeSweep key={dayStartMs} index={dayIndex} reduced={reduced} axis="row">
+              <div className={HOUR_COLUMNS_CLASS} role="row">
+                {Array.from({ length: 24 }, (_, hour) => {
+                  const value = valuesByBucket.get(dayStartMs + hour * HOUR_MS) ?? 0;
+                  const intensity = intensityOf(value);
+                  const size =
+                    intensity > 0
+                      ? WEEK_DOT_MIN_PX + (WEEK_DOT_MAX_PX - WEEK_DOT_MIN_PX) * intensity
+                      : WEEK_DOT_MIN_PX - 1;
+                  return (
                     <span
-                      aria-hidden="true"
-                      className={cn(
-                        'pointer-events-none absolute inset-0 flex items-center justify-center text-[9px] font-medium leading-none tabular-nums',
-                        intensity > 0.55 ? 'text-background/85' : 'text-muted-foreground/70'
-                      )}
+                      key={hour}
+                      role="gridcell"
+                      title={`${weekdayFormat.format(new Date(dayStartMs))} ${hourLabel(hour)} · ${formatMetric(value, metric)}`}
+                      aria-label={`${weekdayFormat.format(new Date(dayStartMs))} ${hourLabel(hour)} · ${formatMetric(value, metric)}`}
+                      className="flex items-center justify-center"
+                      style={{ height: WEEK_ROW_PX }}
                     >
-                      {dayOfMonthFormat.format(new Date(bucket.bucketStartMs))}
+                      <span
+                        aria-hidden="true"
+                        className="block rounded-full transition-[width,height,background-color] duration-300 motion-reduce:transition-none"
+                        style={{
+                          width: size,
+                          height: size,
+                          backgroundColor:
+                            intensity > 0 ? rangeHeatColor(intensity) : RANGE_EMPTY_COLOR,
+                          boxShadow:
+                            intensity > RANGE_GLOW_THRESHOLD
+                              ? `0 0 10px ${RANGE_GLOW_COLOR}`
+                              : undefined,
+                        }}
+                      />
                     </span>
-                  </span>
-                );
-              })}
-            </div>
-          </HeatColumn>
-        );
-      })}
+                  );
+                })}
+              </div>
+            </RangeSweep>
+          ))}
+        </div>
+        <HourAxis />
+      </div>
     </div>
   );
 }
@@ -597,8 +576,8 @@ function createUsageCompositionSegments(
 }
 
 /**
- * The rings this replaced spent a 13rem square on two numbers. A pair of 6px
- * rules carries the same shares inside the panel's own text rhythm.
+ * A pair of 6px rules carries the by-model and by-member shares inside the
+ * panel's own text rhythm, under whichever matrix is on screen.
  */
 function UsageCompositionBar({
   label,
@@ -648,34 +627,17 @@ function UsageCompositionBar({
   );
 }
 
-/**
- * The single range view. 24h, 7d, and 30d share one frame — total, span, peak,
- * legend, and composition rules stay put while only the matrix inside changes
- * shape, so switching ranges reads as one object deforming.
- */
-function UsageRangePanel({
+/** By-model and by-member rules, shared by every range that has a timeline. */
+function UsageCompositionSummary({
   timeline,
-  metric,
+  reduced,
+  className,
 }: {
   timeline: SettingsUsageTimelineData;
-  metric: UsageCalendarMetric;
+  reduced: boolean;
+  className?: string;
 }) {
   const { t } = useTranslation();
-  const formats = useCalendarFormats();
-  const reduced = useReducedMotion() ?? false;
-
-  const values = useMemo(
-    () => timeline.buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD)),
-    [metric, timeline.buckets]
-  );
-  const intensityOf = useMemo(() => createRangeIntensity(values), [values]);
-  const peakIndex = values.reduce(
-    (peak, value, index) => (value > (values[peak] ?? 0) ? index : peak),
-    0
-  );
-  const peakBucket = timeline.buckets[peakIndex];
-  const activeCount = values.filter((value) => value > 0).length;
-
   const modelSegments = useMemo(
     () =>
       createUsageCompositionSegments(
@@ -708,6 +670,257 @@ function UsageRangePanel({
     [t, timeline.buckets, timeline.users]
   );
 
+  return (
+    <div
+      className={cn(
+        'grid gap-x-6 gap-y-3 border-t border-border/50 pt-3 sm:grid-cols-2',
+        className
+      )}
+    >
+      <UsageCompositionBar
+        label={t('workspace.usage.byModel')}
+        segments={modelSegments}
+        colors={MODEL_SERIES_COLORS}
+        reduced={reduced}
+      />
+      <UsageCompositionBar
+        label={t('workspace.usage.byUser')}
+        segments={memberSegments}
+        colors={MEMBER_SERIES_COLORS}
+        reduced={reduced}
+      />
+    </div>
+  );
+}
+
+type UsageRingSegment = {
+  id: string;
+  label: string;
+  value: number;
+  share: number;
+  color: string;
+};
+
+/**
+ * Ring hues come from the chart palette so they follow the theme; three.js is
+ * the only place in this file that needs literal colours.
+ */
+const RING_COLORS = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-2))',
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))',
+  'hsl(var(--chart-5))',
+] as const;
+
+const RING_VIEWBOX = 168;
+const RING_OUTER_RADIUS = 73;
+/** Tracks touch exactly — the stroke is the radius step, so no gap opens up. */
+const ringStroke = (count: number) => Math.min(15, Math.max(9, Math.round(44 / Math.max(1, count))));
+
+/**
+ * Which composition the rings show. The token-type split is the intended one;
+ * it is optional on the timeline contract, so when the range carries no
+ * breakdown the rings show the model split and the caption says so. An empty
+ * ring stack would read as a broken panel.
+ */
+function useUsageRingComposition(timeline: SettingsUsageTimelineData): {
+  caption: string;
+  segments: UsageRingSegment[];
+} {
+  const { t } = useTranslation();
+  return useMemo(() => {
+    const breakdown = timeline.totals.breakdown;
+    const typeRows = breakdown
+      ? [
+          {
+            id: 'cache',
+            label: t('workspace.usage.breakdown.cache'),
+            value: breakdown.cacheReadInputTokens + breakdown.cacheCreationInputTokens,
+          },
+          {
+            id: 'input',
+            label: t('workspace.usage.breakdown.input'),
+            value: breakdown.inputTokens,
+          },
+          {
+            id: 'output',
+            label: t('workspace.usage.breakdown.output'),
+            value: breakdown.outputTokens,
+          },
+          {
+            id: 'reasoning',
+            label: t('workspace.usage.breakdown.reasoning'),
+            value: breakdown.reasoningOutputTokens,
+          },
+        ].filter((row) => row.value > 0)
+      : [];
+    const typeTotal = typeRows.reduce((sum, row) => sum + row.value, 0);
+    if (typeTotal > 0) {
+      return {
+        caption: t('workspace.usage.breakdown.title'),
+        segments: typeRows.map((row, index) => ({
+          ...row,
+          share: row.value / typeTotal,
+          color: RING_COLORS[index % RING_COLORS.length]!,
+        })),
+      };
+    }
+
+    return {
+      caption: t('workspace.usage.byModel'),
+      segments: createUsageCompositionSegments(
+        timeline.buckets.flatMap((bucket) =>
+          bucket.byModel.map((row) => ({
+            id: row.modelId,
+            label: stripRecommended(row.modelId),
+            tokens: row.tokens,
+          }))
+        ),
+        t('workspace.usage.skyline.other')
+      ).map((segment, index) => ({
+        id: segment.id,
+        label: segment.label,
+        value: segment.tokens,
+        share: segment.share,
+        color: RING_COLORS[index % RING_COLORS.length]!,
+      })),
+    };
+  }, [t, timeline.buckets, timeline.totals.breakdown]);
+}
+
+/**
+ * Concentric activity rings. Each composition slice owns one continuous track —
+ * a full circle of its own colour at low alpha with the slice's share drawn over
+ * it — so the stack reads as one dial rather than a stack of gauges. The total
+ * sits in the middle, which is the number the panel is really about.
+ */
+function UsageTokenRings({
+  segments,
+  caption,
+  total,
+  totalLabel,
+  metric,
+  reduced,
+}: {
+  segments: UsageRingSegment[];
+  caption: string;
+  total: number;
+  totalLabel: string;
+  metric: UsageCalendarMetric;
+  reduced: boolean;
+}) {
+  const stroke = ringStroke(segments.length);
+  const center = RING_VIEWBOX / 2;
+  return (
+    <div className="flex min-w-0 flex-col items-center">
+      <div className="relative w-[9.5rem] max-w-full sm:w-[10.5rem]">
+        <svg
+          viewBox={`0 0 ${RING_VIEWBOX} ${RING_VIEWBOX}`}
+          role="img"
+          aria-label={`${caption}: ${segments
+            .map((segment) => `${segment.label} ${Math.round(segment.share * 100)}%`)
+            .join(', ')}`}
+          className="w-full -rotate-90"
+        >
+          {segments.map((segment, index) => {
+            const radius = RING_OUTER_RADIUS - index * stroke;
+            return (
+              <g key={segment.id}>
+                <circle
+                  cx={center}
+                  cy={center}
+                  r={radius}
+                  fill="none"
+                  stroke={segment.color}
+                  strokeOpacity={0.15}
+                  strokeWidth={stroke}
+                />
+                <motion.circle
+                  cx={center}
+                  cy={center}
+                  r={radius}
+                  fill="none"
+                  stroke={segment.color}
+                  strokeWidth={stroke}
+                  strokeLinecap="round"
+                  initial={reduced ? false : { pathLength: 0 }}
+                  animate={{ pathLength: Math.max(0.008, segment.share) }}
+                  transition={
+                    reduced
+                      ? { duration: 0 }
+                      : { duration: 0.85, delay: 0.06 * index, ease: RANGE_SWEEP_EASE }
+                  }
+                />
+              </g>
+            );
+          })}
+        </svg>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-10 text-center">
+          <span className="w-full truncate text-[15px] font-semibold leading-none tabular-nums tracking-tight text-foreground sm:text-base">
+            {metric === 'tokens' ? (
+              <NumberFlow value={total} format={{ notation: 'compact', maximumFractionDigits: 1 }} />
+            ) : (
+              formatCost(total)
+            )}
+          </span>
+          <span className="mt-1 w-full truncate text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            {totalLabel}
+          </span>
+        </div>
+      </div>
+
+      <p className="mt-3 w-full text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">
+        {caption}
+      </p>
+      <ul className="mt-1.5 grid w-full grid-cols-2 gap-x-3 gap-y-1">
+        {segments.map((segment) => (
+          <li key={segment.id} className="flex min-w-0 items-center gap-1 text-[10px]">
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: segment.color }}
+            />
+            <span className="truncate text-muted-foreground">{segment.label}</span>
+            <span className="ml-auto shrink-0 tabular-nums text-foreground/70">
+              {Math.round(segment.share * 100)}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The hourly range view. 24h and 7d share one frame — rings on the left, the
+ * hour tracks on the right, composition rules underneath — so switching between
+ * them only deforms the matrix. 30d and all-time hand off to the year skyline.
+ */
+function UsageRangePanel({
+  timeline,
+  metric,
+}: {
+  timeline: SettingsUsageTimelineData;
+  metric: UsageCalendarMetric;
+}) {
+  const { t } = useTranslation();
+  const formats = useCalendarFormats();
+  const reduced = useReducedMotion() ?? false;
+
+  const values = useMemo(
+    () => timeline.buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD)),
+    [metric, timeline.buckets]
+  );
+  const intensityOf = useMemo(() => createRangeIntensity(values), [values]);
+  const peakIndex = values.reduce(
+    (peak, value, index) => (value > (values[peak] ?? 0) ? index : peak),
+    0
+  );
+  const peakBucket = timeline.buckets[peakIndex];
+  const activeCount = values.filter((value) => value > 0).length;
+  const rings = useUsageRingComposition(timeline);
+
   const spanLabel =
     timeline.range === 'day'
       ? formats.day.format(new Date(timeline.startMs))
@@ -717,30 +930,13 @@ function UsageRangePanel({
 
   return (
     <div className="min-w-0">
-      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0">
-          <p className="flex items-baseline gap-1.5">
-            <span className="text-2xl font-semibold leading-none tabular-nums tracking-tight text-foreground">
-              {metric === 'tokens' ? (
-                <NumberFlow
-                  value={timeline.totals.tokens}
-                  format={{ notation: 'compact', maximumFractionDigits: 1 }}
-                />
-              ) : (
-                formatCost(timeline.totals.costUSD)
-              )}
-            </span>
-            {metric === 'tokens' ? (
-              <span className="text-xs text-muted-foreground">{t('workspace.usage.tokens')}</span>
-            ) : null}
-          </p>
-          <p className="mt-1 truncate text-[11px] tabular-nums text-muted-foreground">
-            {spanLabel}
-            <span className="text-muted-foreground/60">
-              {` · ${t('workspace.usage.skyline.activeIntervals')} ${activeCount}/${values.length}`}
-            </span>
-          </p>
-        </div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="min-w-0 truncate text-[11px] tabular-nums text-muted-foreground">
+          {spanLabel}
+          <span className="text-muted-foreground/60">
+            {` · ${t('workspace.usage.skyline.activeIntervals')} ${activeCount}/${values.length}`}
+          </span>
+        </p>
         <div className="flex shrink-0 items-center gap-3">
           {peakBucket && (values[peakIndex] ?? 0) > 0 ? (
             <p className="text-[11px] tabular-nums text-muted-foreground">
@@ -755,65 +951,54 @@ function UsageRangePanel({
         </div>
       </div>
 
-      {/* The frame keeps its height across ranges so the panel below it does not
-          jump while a range animates in. */}
-      <div
-        role="grid"
-        aria-label={t('workspace.usage.skyline.heatmap')}
-        className="relative mt-3 min-h-[8.5rem]"
-      >
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={timeline.range}
-            initial={reduced ? false : { opacity: 0, filter: 'blur(6px)' }}
-            animate={{ opacity: 1, filter: 'blur(0px)' }}
-            exit={reduced ? { opacity: 0 } : { opacity: 0, filter: 'blur(6px)' }}
-            transition={{ duration: reduced ? 0 : 0.2, ease: 'easeOut' }}
-          >
-            {timeline.range === 'week' ? (
-              <UsageWeekMatrix
-                timeline={timeline}
-                metric={metric}
-                intensityOf={intensityOf}
-                reduced={reduced}
-                weekdayFormat={formats.weekday}
-                dayOfMonthFormat={formats.dayOfMonth}
-              />
-            ) : timeline.range === 'day' ? (
-              <UsageDayMatrix
-                buckets={timeline.buckets}
-                metric={metric}
-                intensityOf={intensityOf}
-                reduced={reduced}
-              />
-            ) : (
-              <UsageMonthMatrix
-                buckets={timeline.buckets}
-                metric={metric}
-                intensityOf={intensityOf}
-                reduced={reduced}
-                weekdayFormat={formats.weekday}
-                dayOfMonthFormat={formats.dayOfMonth}
-              />
-            )}
-          </motion.div>
-        </AnimatePresence>
+      <div className="mt-3 grid items-center gap-x-6 gap-y-5 sm:grid-cols-[minmax(0,10.5rem)_minmax(0,1fr)]">
+        <UsageTokenRings
+          segments={rings.segments}
+          caption={rings.caption}
+          total={metric === 'tokens' ? timeline.totals.tokens : timeline.totals.costUSD}
+          totalLabel={metric === 'tokens' ? t('workspace.usage.tokens') : t('workspace.usage.cost')}
+          metric={metric}
+          reduced={reduced}
+        />
+
+        {/* The frame keeps its height across ranges so the panel below it does
+            not jump while a range animates in. */}
+        <div
+          role="grid"
+          aria-label={t('workspace.usage.skyline.heatmap')}
+          className="relative min-h-[10.5rem] min-w-0"
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={timeline.range}
+              initial={reduced ? false : { opacity: 0, filter: 'blur(6px)' }}
+              animate={{ opacity: 1, filter: 'blur(0px)' }}
+              exit={reduced ? { opacity: 0 } : { opacity: 0, filter: 'blur(6px)' }}
+              transition={{ duration: reduced ? 0 : 0.2, ease: 'easeOut' }}
+            >
+              {timeline.range === 'week' ? (
+                <UsageWeekMatrix
+                  timeline={timeline}
+                  metric={metric}
+                  intensityOf={intensityOf}
+                  reduced={reduced}
+                  weekdayFormat={formats.weekday}
+                  dayOfMonthFormat={formats.dayOfMonth}
+                />
+              ) : (
+                <UsageDayMatrix
+                  buckets={timeline.buckets}
+                  metric={metric}
+                  intensityOf={intensityOf}
+                  reduced={reduced}
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
       </div>
 
-      <div className="mt-4 grid gap-x-6 gap-y-3 border-t border-border/50 pt-3 sm:grid-cols-2">
-        <UsageCompositionBar
-          label={t('workspace.usage.byModel')}
-          segments={modelSegments}
-          colors={MODEL_SERIES_COLORS}
-          reduced={reduced}
-        />
-        <UsageCompositionBar
-          label={t('workspace.usage.byUser')}
-          segments={memberSegments}
-          colors={MEMBER_SERIES_COLORS}
-          reduced={reduced}
-        />
-      </div>
+      <UsageCompositionSummary timeline={timeline} reduced={reduced} className="mt-4" />
     </div>
   );
 }
@@ -829,16 +1014,25 @@ type HeatmapTooltip = { left: number; top: number };
 /** A clicked day plus where its caret should sit, in heatmap-root coordinates. */
 export type UsageSelectedDay = { dayStartMs: number; anchorX: number };
 
+/** Opacity of a day that sits outside the selected window; it stays as context. */
+const OUT_OF_WINDOW_OPACITY = 0.3;
+
 function UsageHeatmap({
   model,
   metric,
   selectedDayMs,
   onSelectDay,
+  windowStartMs,
 }: {
   model: UsageCalendarModel;
   metric: UsageCalendarMetric;
   selectedDayMs: number | null;
   onSelectDay: (day: UsageSelectedDay | null) => void;
+  /**
+   * First day of the selected range. Earlier days stay on screen but recede, so
+   * 30d and all-time are the same skyline with a different day lit.
+   */
+  windowStartMs?: number;
 }) {
   const { t } = useTranslation();
   const formats = useCalendarFormats();
@@ -1029,6 +1223,8 @@ function UsageHeatmap({
             >
               {model.cells.map((cell, index) => {
                 const intensity = cell.isFuture ? 0 : scale.intensity(cell.value);
+                const outsideWindow =
+                  windowStartMs !== undefined && cell.dayStartMs < windowStartMs;
                 return (
                   <button
                     key={cell.dayStartMs}
@@ -1042,7 +1238,7 @@ function UsageHeatmap({
                     aria-selected={index === detailIndex}
                     className={cn(
                       'animate-usage-heatmap-cell aspect-square w-full rounded-[32%] outline-none',
-                      'transition-[filter] duration-150',
+                      'transition-[filter,opacity] duration-300 motion-reduce:transition-none',
                       !cell.isFuture &&
                         'hover:brightness-110 hover:ring-1 hover:ring-foreground/40',
                       'focus-visible:ring-2 focus-visible:ring-ring',
@@ -1060,6 +1256,7 @@ function UsageHeatmap({
                         : intensity > 0
                           ? heatColor(intensity)
                           : EMPTY_DAY_COLOR,
+                      opacity: outsideWindow ? OUT_OF_WINDOW_OPACITY : 1,
                       animationDelay: `${cell.column * CELL_REVEAL_STAGGER_MS}ms`,
                     }}
                     onClick={() => toggleDay(index)}
@@ -1856,12 +2053,20 @@ export function UsageCalendarVisualization({
   const tokenModel = useMemo(() => createUsageCalendarModel(calendar, 'tokens'), [calendar]);
   const costModel = useMemo(() => createUsageCalendarModel(calendar, 'costUSD'), [calendar]);
   const model = metric === 'tokens' ? tokenModel : costModel;
+  const reduced = useReducedMotion() ?? false;
+  /**
+   * 24h and 7d get the hourly range panel. 30d is the widest range and stays on
+   * the year skyline with its window lit, so 30d and all-time are one view.
+   */
+  const hourlyTimeline =
+    timeline && (timeline.range === 'day' || timeline.range === 'week') ? timeline : null;
+  const windowTimeline = timeline && timeline.range === 'month' ? timeline : null;
   const skylineModel = useMemo(
     () =>
-      timeline && timeline.range !== 'total'
-        ? createTimelineSkylineModel(timeline, metric)
+      hourlyTimeline
+        ? createTimelineSkylineModel(hourlyTimeline, metric)
         : createCalendarSkylineRenderModel(model),
-    [metric, model, timeline]
+    [hourlyTimeline, metric, model]
   );
   const ascii = useMemo(() => createUsageSkylineAscii(tokenModel), [tokenModel]);
   const stem = fileStem(workspaceName || 'lody-usage');
@@ -1884,9 +2089,10 @@ export function UsageCalendarVisualization({
     [onSelectedDayChange]
   );
 
+  // The hourly ranges have no day grid to keep a selection against.
   useEffect(() => {
-    if (timeline && timeline.range !== 'total' && selectedDay) selectDay(null);
-  }, [selectDay, selectedDay, timeline]);
+    if (hourlyTimeline && selectedDay) selectDay(null);
+  }, [hourlyTimeline, selectDay, selectedDay]);
 
   const copyAscii = async () => {
     try {
@@ -1979,9 +2185,11 @@ export function UsageCalendarVisualization({
             {t('workspace.usage.skyline.title')}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {timeline && timeline.range !== 'total'
-              ? t(`workspace.usage.window.${timeline.range}.long`)
-              : t('workspace.usage.skyline.subtitle')}
+            {hourlyTimeline
+              ? t(`workspace.usage.window.${hourlyTimeline.range}.long`)
+              : windowTimeline
+                ? t('workspace.usage.skyline.windowSubtitle')
+                : t('workspace.usage.skyline.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -2057,16 +2265,50 @@ export function UsageCalendarVisualization({
       </header>
 
       <div className="p-4">
-        {timeline && timeline.range !== 'total' ? (
-          <UsageRangePanel timeline={timeline} metric={metric} />
-        ) : (
-          <UsageHeatmap
-            model={model}
-            metric={metric}
-            selectedDayMs={selectedDay?.dayStartMs ?? null}
-            onSelectDay={selectDay}
-          />
-        )}
+        {/* One key for both skyline ranges: 30d and all-time never unmount each
+            other, so widening the window only relights days in place. The hourly
+            panel is a different object, so it blurs across. */}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={hourlyTimeline ? 'hourly' : 'skyline'}
+            initial={reduced ? false : { opacity: 0, filter: 'blur(8px)', y: 6 }}
+            animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, filter: 'blur(8px)', y: -6 }}
+            transition={{ duration: reduced ? 0 : 0.24, ease: 'easeOut' }}
+          >
+            {hourlyTimeline ? (
+              <UsageRangePanel timeline={hourlyTimeline} metric={metric} />
+            ) : (
+              <>
+                <UsageHeatmap
+                  model={model}
+                  metric={metric}
+                  selectedDayMs={selectedDay?.dayStartMs ?? null}
+                  onSelectDay={selectDay}
+                  windowStartMs={windowTimeline?.startMs}
+                />
+                <AnimatePresence initial={false}>
+                  {windowTimeline ? (
+                    <motion.div
+                      key="window-composition"
+                      className="overflow-hidden"
+                      initial={reduced ? false : { opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={reduced ? { opacity: 0 } : { opacity: 0, height: 0 }}
+                      transition={{ duration: reduced ? 0 : 0.28, ease: 'easeOut' }}
+                    >
+                      <UsageCompositionSummary
+                        timeline={windowTimeline}
+                        reduced={reduced}
+                        className="mt-4"
+                      />
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </>
+            )}
+          </motion.div>
+        </AnimatePresence>
         {/* Expanding a row height needs a definite value; the 0fr -> 1fr grid
             track does it without measuring the panel. */}
         <div
@@ -2110,7 +2352,7 @@ export function UsageCalendarVisualization({
             'group-hover:scale-[1.06] group-hover:opacity-35',
             'motion-reduce:transition-none motion-reduce:group-hover:scale-100'
           )}
-          framing={timeline && timeline.range !== 'total' ? 0.85 : 0.4}
+          framing={hourlyTimeline ? 0.85 : 0.4}
         />
         <div className="relative">
           {timeline ? (

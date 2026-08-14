@@ -192,7 +192,19 @@ function buildTimeline(
     startMs: timelineStartMs,
     endMs: hourlyRange ? timelineStartMs + days.length * DAY_MS : calendar.endMs,
     bucketSizeMs: hourlyRange ? HOUR_MS : DAY_MS,
-    totals: { tokens, costUSD: buckets.reduce((sum, bucket) => sum + bucket.costUSD, 0) },
+    totals: {
+      tokens,
+      costUSD: buckets.reduce((sum, bucket) => sum + bucket.costUSD, 0),
+      // Token-type split the activity rings read; the shape mirrors a cache-heavy
+      // agent workload.
+      breakdown: {
+        cacheReadInputTokens: Math.round(tokens * 0.52),
+        cacheCreationInputTokens: Math.round(tokens * 0.11),
+        inputTokens: Math.round(tokens * 0.16),
+        outputTokens: Math.round(tokens * 0.15),
+        reasoningOutputTokens: Math.round(tokens * 0.06),
+      },
+    },
     users: {
       u1: { name: 'Ada Lovelace' },
       u2: { name: 'Grace Hopper' },
@@ -206,17 +218,25 @@ function buildTimeline(
 function Harness({
   shape = 'default',
   range = 'total',
+  tokenBreakdown = true,
 }: {
   shape?: Shape;
   range?: SettingsUsageRange;
+  /** Off mirrors a deployment whose timeline reports no token-type split. */
+  tokenBreakdown?: boolean;
 }) {
   const [selectedDayMs, setSelectedDayMs] = useState<number | null>(null);
   const calendar = buildCalendar(shape);
+  const timeline = buildTimeline(calendar, range);
   return (
     <div className="mx-auto max-w-5xl p-6">
       <UsageCalendarVisualization
         calendar={calendar}
-        timeline={buildTimeline(calendar, range)}
+        timeline={
+          tokenBreakdown
+            ? timeline
+            : { ...timeline, totals: { tokens: timeline.totals.tokens, costUSD: timeline.totals.costUSD } }
+        }
         workspaceName="Acme Robotics"
         dayDetail={selectedDayMs === null ? undefined : buildDayDetail(selectedDayMs)}
         onSelectedDayChange={setSelectedDayMs}
@@ -242,3 +262,7 @@ export const LargeTotal: Story = { args: { shape: 'largeTotal' } };
 export const Last24Hours: Story = { args: { range: 'day' } };
 export const Last7Days: Story = { args: { range: 'week' } };
 export const Last30Days: Story = { args: { range: 'month' } };
+/** No token-type split on the timeline: the rings fall back to the model mix. */
+export const Last24HoursWithoutBreakdown: Story = {
+  args: { range: 'day', tokenBreakdown: false },
+};
