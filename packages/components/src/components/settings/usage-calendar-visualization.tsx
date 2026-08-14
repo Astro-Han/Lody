@@ -647,8 +647,8 @@ const compositionFill = (index: number) =>
   heatColor(COMPOSITION_ALPHAS[index % COMPOSITION_ALPHAS.length]!);
 
 const RING_SEGMENT_LIMIT = 5;
-const MODEL_RING_COLORS = ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#93c5fd'] as const;
-const MEMBER_RING_COLORS = ['#c084fc', '#a855f7', '#9333ea', '#7e22ce', '#d8b4fe'] as const;
+const MODEL_RING_COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'] as const;
+const MEMBER_RING_COLORS = ['#7c3aed', '#9333ea', '#a855f7', '#c084fc', '#e9d5ff'] as const;
 
 type UsageCompositionSegment = {
   id: string;
@@ -715,7 +715,7 @@ function CompositionRing({
       />
       {segments.map((segment, index) => {
         const segmentLength = segment.share * circumference;
-        const gap = segments.length > 1 ? Math.min(2.5, segmentLength * 0.16) : 0;
+        const gap = segments.length > 1 ? Math.min(4, segmentLength * 0.2) : 0;
         const dashLength = Math.max(0, segmentLength - gap);
         const circle = (
           <circle
@@ -726,9 +726,10 @@ function CompositionRing({
             fill="none"
             stroke={colors[index % colors.length]}
             strokeWidth={strokeWidth}
+            strokeLinecap="round"
             strokeDasharray={`${dashLength} ${circumference - dashLength}`}
             strokeDashoffset={-offset * circumference}
-            className="transition-[stroke-width,opacity] duration-200 hover:opacity-80"
+            className="transition-opacity duration-200 hover:opacity-80"
           >
             <title>{`${segment.label}: ${Math.round(segment.share * 100)}%`}</title>
           </circle>
@@ -820,26 +821,26 @@ function UsageCompositionRings({ timeline }: { timeline: SettingsUsageTimelineDa
           viewBox="0 0 176 176"
           role="img"
           aria-label={`${t('workspace.usage.byModel')}; ${t('workspace.usage.byUser')}`}
-          className="h-full w-full -rotate-90 overflow-visible"
+          className="h-full w-full -rotate-90 overflow-visible drop-shadow-[0_10px_18px_rgba(59,130,246,0.12)]"
         >
           <CompositionRing
             segments={modelSegments}
-            radius={72}
-            strokeWidth={13}
+            radius={64}
+            strokeWidth={10}
             colors={MODEL_RING_COLORS}
           />
           <CompositionRing
             segments={memberSegments}
-            radius={51}
-            strokeWidth={11}
+            radius={43}
+            strokeWidth={8}
             colors={MEMBER_RING_COLORS}
           />
         </svg>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-10 text-center">
-          <span className="max-w-full truncate text-lg font-semibold leading-none tabular-nums text-foreground">
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-8 text-center">
+          <span className="max-w-full truncate text-base font-semibold leading-none tabular-nums tracking-tight text-foreground">
             {formatTokens(timeline.totals.tokens)}
           </span>
-          <span className="mt-1 text-[10px] text-muted-foreground">
+          <span className="mt-1 text-[10px] font-medium text-muted-foreground">
             {t('workspace.usage.tokens')}
           </span>
         </div>
@@ -1758,7 +1759,7 @@ export function UsageCalendarVisualization({
       <div
         className={cn(
           'group relative overflow-hidden border-t border-border/60 bg-muted/25 px-4 py-4 sm:px-5',
-          timeline ? 'min-h-56' : 'min-h-32 sm:min-h-36'
+          timeline ? 'min-h-48' : 'min-h-32 sm:min-h-36'
         )}
       >
         <IsometricView
