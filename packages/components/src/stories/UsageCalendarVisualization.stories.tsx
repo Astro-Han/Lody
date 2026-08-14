@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { userEvent, within } from 'storybook/test';
 import { UsageCalendarVisualization } from '@/components/settings/usage-calendar-visualization';
 import { useState } from 'react';
 import type {
@@ -148,14 +149,15 @@ function buildTimeline(
     ? activeDays.slice(-(range === 'day' ? 1 : 7))
     : activeDays.slice(-RANGE_BUCKETS[range]);
   const timelineStartMs = days[0]?.dayStartMs ?? calendar.startMs;
-  const buckets = (hourlyRange
-    ? days.flatMap((day, dayIndex) =>
-        splitTokens(
-          day.tokens,
-          Array.from({ length: 24 }, (_, hour) => 8 + Math.round(wave(dayIndex * 29 + hour) * 32))
-        ).map((tokens, hour) => ({ tokens, day, hour }))
-      )
-    : days.map((day) => ({ tokens: day.tokens, day, hour: null }))
+  const buckets = (
+    hourlyRange
+      ? days.flatMap((day, dayIndex) =>
+          splitTokens(
+            day.tokens,
+            Array.from({ length: 24 }, (_, hour) => 8 + Math.round(wave(dayIndex * 29 + hour) * 32))
+          ).map((tokens, hour) => ({ tokens, day, hour }))
+        )
+      : days.map((day) => ({ tokens: day.tokens, day, hour: null }))
   ).map(({ tokens, day, hour }) => {
     const modelTokens = splitTokens(tokens, [46, 27, 17, 7, 3]);
     const memberTokens = splitTokens(tokens, [52, 31, 12, 5]);
@@ -163,8 +165,7 @@ function buildTimeline(
     const costUSD = day.tokens > 0 ? day.costUSD * (tokens / day.tokens) : 0;
     return {
       bucketStartMs,
-      bucketLabel:
-        hour === null ? day.date : `${String(hour).padStart(2, '0')}:00`,
+      bucketLabel: hour === null ? day.date : `${String(hour).padStart(2, '0')}:00`,
       tokens,
       costUSD,
       byModel: [
@@ -235,7 +236,10 @@ function Harness({
         timeline={
           tokenBreakdown
             ? timeline
-            : { ...timeline, totals: { tokens: timeline.totals.tokens, costUSD: timeline.totals.costUSD } }
+            : {
+                ...timeline,
+                totals: { tokens: timeline.totals.tokens, costUSD: timeline.totals.costUSD },
+              }
         }
         workspaceName="Acme Robotics"
         dayDetail={selectedDayMs === null ? undefined : buildDayDetail(selectedDayMs)}
@@ -248,6 +252,20 @@ function Harness({
 const meta: Meta<typeof Harness> = {
   title: 'Settings/UsageCalendarVisualization',
   component: Harness,
+  argTypes: {
+    range: {
+      control: {
+        type: 'select',
+        labels: {
+          day: 'Last 24 hours',
+          week: 'Last 7 days',
+          month: 'Last 30 days',
+          total: 'All time',
+        },
+      },
+      options: ['day', 'week', 'month', 'total'],
+    },
+  },
   parameters: { layout: 'fullscreen' },
 };
 export default meta;
@@ -262,6 +280,20 @@ export const LargeTotal: Story = { args: { shape: 'largeTotal' } };
 export const Last24Hours: Story = { args: { range: 'day' } };
 export const Last7Days: Story = { args: { range: 'week' } };
 export const Last30Days: Story = { args: { range: 'month' } };
+/** Clicking an hour bar opens the breakdown of the day it belongs to. */
+export const Last24HoursDaySelected: Story = {
+  args: { range: 'day' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getAllByRole('gridcell')[10]!);
+  },
+};
+/** Clicking an hour dot opens that day's breakdown. */
+export const Last7DaysDaySelected: Story = {
+  args: { range: 'week' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getAllByRole('gridcell')[2 * 24 + 10]!);
+  },
+};
 /** No token-type split on the timeline: the rings fall back to the model mix. */
 export const Last24HoursWithoutBreakdown: Story = {
   args: { range: 'day', tokenBreakdown: false },
