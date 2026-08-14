@@ -784,9 +784,9 @@ function UsageCompositionRings({
   return (
     <div
       key={timeline.range}
-      className="animate-in fade-in-0 slide-in-from-left-4 grid items-center gap-5 duration-500 motion-reduce:animate-none sm:grid-cols-[11rem_minmax(0,1fr)]"
+      className="animate-in fade-in-0 slide-in-from-left-4 grid items-center gap-5 duration-500 motion-reduce:animate-none sm:grid-cols-[13rem_minmax(0,1fr)]"
     >
-      <div className="relative mx-auto h-44 w-44 shrink-0">
+      <div className="relative mx-auto h-52 w-52 shrink-0">
         <svg
           viewBox="0 0 176 176"
           role="img"
@@ -795,14 +795,14 @@ function UsageCompositionRings({
         >
           <CompositionRing
             segments={modelSegments}
-            radius={64}
-            strokeWidth={10}
+            radius={70}
+            strokeWidth={14}
             colors={MODEL_RING_COLORS}
           />
           <CompositionRing
             segments={memberSegments}
-            radius={43}
-            strokeWidth={8}
+            radius={56}
+            strokeWidth={14}
             colors={MEMBER_RING_COLORS}
           />
         </svg>
