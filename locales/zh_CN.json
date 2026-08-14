@@ -2759,6 +2759,7 @@
   "workspace.usage.skyline.downloadStl": "下载 STL 天际线",
   "workspace.usage.skyline.future": "未来",
   "workspace.usage.skyline.heatmap": "用量热力图",
+  "workspace.usage.skyline.hourlyUsage": "每小时用量",
   "workspace.usage.skyline.isometric": "等距用量天际线",
   "workspace.usage.skyline.less": "少",
   "workspace.usage.skyline.longestStreak": "最长连续",

@@ -2761,6 +2761,7 @@
   "workspace.usage.skyline.downloadStl": "Download STL skyline",
   "workspace.usage.skyline.future": "Future",
   "workspace.usage.skyline.heatmap": "Usage heatmap",
+  "workspace.usage.skyline.hourlyUsage": "Hourly usage",
   "workspace.usage.skyline.isometric": "Isometric usage skyline",
   "workspace.usage.skyline.less": "Less",
   "workspace.usage.skyline.longestStreak": "Longest streak",

@@ -35,6 +35,7 @@ import { stripRecommended } from '@/components/shared/acp-selector-options';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
+  SettingsUsageTimelineBucket,
   SettingsUsageTimelineData,
 } from './settings-data-cache';
 import {
@@ -253,36 +254,31 @@ function HeatLegend() {
   );
 }
 
-function UsageTimelineHeatmap({
-  timeline,
+function UsageDayHourlyHeatmap({
+  buckets,
   metric,
 }: {
-  timeline: SettingsUsageTimelineData;
+  buckets: SettingsUsageTimelineBucket[];
   metric: UsageCalendarMetric;
 }) {
   const { t } = useTranslation();
   const values = useMemo(
-    () => timeline.buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD)),
-    [metric, timeline.buckets]
+    () => buckets.map((bucket) => (metric === 'tokens' ? bucket.tokens : bucket.costUSD)),
+    [buckets, metric]
   );
   const referenceValue = useMemo(() => {
     const active = values.filter((value) => value > 0).sort((a, b) => a - b);
     return active[Math.min(active.length - 1, Math.ceil((active.length - 1) * 0.9))] ?? 0;
   }, [values]);
-  const showEveryLabel = timeline.range === 'day' || timeline.range === 'week';
-
   return (
-    <div
-      key={timeline.range}
-      className="animate-in fade-in-0 space-y-3 duration-300 motion-reduce:animate-none"
-    >
+    <div className="animate-in fade-in-0 space-y-3 duration-300 motion-reduce:animate-none">
       <div
         role="grid"
         aria-label={t('workspace.usage.skyline.heatmap')}
         className="grid gap-1.5"
         style={{ gridTemplateColumns: `repeat(${Math.max(1, values.length)}, minmax(0, 1fr))` }}
       >
-        {timeline.buckets.map((bucket, index) => {
+        {buckets.map((bucket, index) => {
           const value = values[index] ?? 0;
           const intensity =
             value > 0 && referenceValue > 0
@@ -301,19 +297,14 @@ function UsageTimelineHeatmap({
                   animationDelay: `${index * CELL_REVEAL_STAGGER_MS}ms`,
                 }}
               />
-              {showEveryLabel ? (
-                <span className="mt-1 block truncate text-[9px] tabular-nums text-muted-foreground">
-                  {bucket.bucketLabel}
-                </span>
-              ) : null}
+              <span className="mt-1 block truncate text-[9px] tabular-nums text-muted-foreground">
+                {bucket.bucketLabel}
+              </span>
             </div>
           );
         })}
       </div>
-      <div className="flex items-center justify-between gap-4">
-        <p className="truncate text-xs text-muted-foreground">
-          {t(`workspace.usage.window.${timeline.range}.long`)}
-        </p>
+      <div className="flex justify-end">
         <HeatLegend />
       </div>
     </div>
@@ -937,6 +928,14 @@ function UsageDayDetailPanel({
         >
           <X className="h-3.5 w-3.5" />
         </Button>
+        {day?.hourlyBuckets && day.hourlyBuckets.length > 0 ? (
+          <div className="mb-5">
+            <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+              {t('workspace.usage.skyline.hourlyUsage')}
+            </p>
+            <UsageDayHourlyHeatmap buckets={day.hourlyBuckets} metric="tokens" />
+          </div>
+        ) : null}
         <div className="grid gap-x-6 gap-y-4 lg:grid-cols-[minmax(0,13rem)_1fr]">
           <div className="min-w-0">
             <p className="text-[11px] font-medium text-muted-foreground">
@@ -1560,10 +1559,6 @@ export function UsageCalendarVisualization({
     [onSelectedDayChange]
   );
 
-  useEffect(() => {
-    if (timeline && timeline.range !== 'total' && selectedDay) selectDay(null);
-  }, [selectDay, selectedDay, timeline]);
-
   const copyAscii = async () => {
     try {
       await navigator.clipboard.writeText(ascii);
@@ -1733,16 +1728,12 @@ export function UsageCalendarVisualization({
       </header>
 
       <div className="p-4">
-        {timeline && timeline.range !== 'total' ? (
-          <UsageTimelineHeatmap timeline={timeline} metric={metric} />
-        ) : (
-          <UsageHeatmap
-            model={model}
-            metric={metric}
-            selectedDayMs={selectedDay?.dayStartMs ?? null}
-            onSelectDay={selectDay}
-          />
-        )}
+        <UsageHeatmap
+          model={model}
+          metric={metric}
+          selectedDayMs={selectedDay?.dayStartMs ?? null}
+          onSelectDay={selectDay}
+        />
         {/* Expanding a row height needs a definite value; the 0fr -> 1fr grid
             track does it without measuring the panel. */}
         <div

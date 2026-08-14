@@ -57,7 +57,6 @@ describe('fetchWorkspaceUsageBundle', () => {
       workspaceId: 'workspace-1',
       cliToken: 'cli-token',
       range: 'day',
-      granularity: 'hour',
     });
     expect(queryMock).toHaveBeenNthCalledWith(5, 'usage.getWorkspaceUsageTimelineFromCliToken', {
       workspaceId: 'workspace-1',

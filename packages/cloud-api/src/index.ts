@@ -74,8 +74,8 @@ export type OperationGitHubTokenResult =
   | { success: false; errorCode: GitHubTokenErrorCode; errorMessage: string };
 
 export type UsageRange = 'month' | 'day' | 'week' | 'total';
-/** Requested timeline bucket size. The server validates which sizes each range supports. */
-export type UsageTimelineGranularity = 'hour' | 'day';
+/** Requested usage-detail bucket size. The server validates supported sizes. */
+export type UsageDetailGranularity = 'hour';
 export type UsageSummary = {
   workspaceId: string;
   range: UsageRange;
@@ -88,6 +88,15 @@ export type UsageSummary = {
   }>;
 };
 
+export type UsageTimelineBucket = {
+  bucketStartMs: number;
+  bucketLabel: string;
+  tokens: number;
+  costUSD: number;
+  byModel: Array<{ modelId: string; tokens: number; costUSD: number }>;
+  byUser: Array<{ userId: string; tokens: number; costUSD: number }>;
+};
+
 export type UsageTimeline = {
   workspaceId: string;
   range: UsageRange;
@@ -96,14 +105,7 @@ export type UsageTimeline = {
   bucketSizeMs: number;
   totals: { tokens: number; costUSD: number };
   users: Record<string, { name?: string; email?: string; image?: string | null }>;
-  buckets: Array<{
-    bucketStartMs: number;
-    bucketLabel: string;
-    tokens: number;
-    costUSD: number;
-    byModel: Array<{ modelId: string; tokens: number; costUSD: number }>;
-    byUser: Array<{ userId: string; tokens: number; costUSD: number }>;
-  }>;
+  buckets: UsageTimelineBucket[];
 };
 
 export type UsageCalendar = {
@@ -137,6 +139,8 @@ export type UsageDay = {
   byModel: Array<{ modelId: string; tokens: number; costUSD: number }>;
   byUser: Array<{ userId: string; tokens: number; costUSD: number }>;
   users: Record<string, { name?: string; email?: string; image?: string | null }>;
+  /** Present when the caller requests hourly detail for this one calendar day. */
+  hourlyBuckets?: UsageTimelineBucket[];
 };
 
 type CheckoutUrls = {
@@ -534,12 +538,12 @@ export type CloudApi = {
   };
   usage: {
     getWorkspaceUsageSummary: Query<{ workspaceId: string; range: UsageRange }, UsageSummary>;
-    getWorkspaceUsageTimeline: Query<
-      { workspaceId: string; range: UsageRange; granularity?: UsageTimelineGranularity },
-      UsageTimeline
-    >;
+    getWorkspaceUsageTimeline: Query<{ workspaceId: string; range: UsageRange }, UsageTimeline>;
     getWorkspaceUsageCalendar: Query<{ workspaceId: string }, UsageCalendar>;
-    getWorkspaceUsageDay: Query<{ workspaceId: string; dayStartMs: number }, UsageDay>;
+    getWorkspaceUsageDay: Query<
+      { workspaceId: string; dayStartMs: number; granularity?: UsageDetailGranularity },
+      UsageDay
+    >;
     getWorkspaceUsageSummaryBundleFromCliToken: Query<
       { workspaceId: string; cliToken: string },
       {
@@ -552,12 +556,7 @@ export type CloudApi = {
       }
     >;
     getWorkspaceUsageTimelineFromCliToken: Query<
-      {
-        workspaceId: string;
-        cliToken: string;
-        range: UsageRange;
-        granularity?: UsageTimelineGranularity;
-      },
+      { workspaceId: string; cliToken: string; range: UsageRange },
       UsageTimeline
     >;
     upsertSessionUsageFromCli: Mutation<
