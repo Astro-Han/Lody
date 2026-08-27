@@ -14,6 +14,7 @@ import {
   getSessionIdFromRoomId,
   AgentConfigId,
   MachineId,
+  ManagedBuiltinAgentType,
   SessionHistoryInput,
   isCodeCollabFileIndexFlockDocId,
   isCodeCollabFileIndexSignalFlockDocId,
@@ -94,6 +95,7 @@ import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-bind
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   listMergedAgentConfigs,
+  readMachineBuiltinAgentOptOuts,
   readMergedAgentConfigById,
   upsertMachineAgentConfig,
 } from '@/lib/agent-config-machine-flock';
@@ -1325,6 +1327,11 @@ export class LoroDocumentManager {
       }
     }
     return false;
+  }
+
+  /** 本机被用户主动删掉、不该在启动时自动补回来的托管内置 provider 类型。 */
+  async getBuiltinAgentOptOuts(machineId: MachineId): Promise<Set<ManagedBuiltinAgentType>> {
+    return await readMachineBuiltinAgentOptOuts(this.repo, this.workspaceId, machineId);
   }
 
   async getAgentConfigById(

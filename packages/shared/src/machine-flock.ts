@@ -5,10 +5,12 @@ import {
   isBuiltinRuntimeOverrides,
   isBuiltinAgentType,
   isCustomAcpLaunchSpec,
+  isManagedBuiltinAgentType,
   type AcpCapabilityCacheEntry,
   type AgentConfigCliType,
   type AgentType,
   type CliType,
+  type ManagedBuiltinAgentType,
 } from './ai';
 import type { AgentConfigId, MachineId, SessionId, WorkspaceId } from './ids';
 import type {
@@ -202,6 +204,21 @@ export type ProviderSetupCancellation = {
   cancelledAt: number;
 };
 
+/**
+ * 用户在本机主动删掉某个托管内置 provider 的记录。
+ *
+ * 启动时的内置 provider 自动注册只知道「列表里现在有没有」，区分不了「从没建过」
+ * 和「用户刚删掉」。没有这条记录，删掉的 Kimi/Grok/Claude/Codex 下次启动就会被
+ * 重新补回来。用户重新添加同类型 provider 时这条记录必须清掉——显式添加就是收回
+ * 之前的删除意图。
+ */
+export type BuiltinAgentOptOut = {
+  v: 1;
+  agentType: ManagedBuiltinAgentType;
+  machineId: MachineId;
+  removedAt: number;
+};
+
 export type MachineFlockDotlodyPathKey = ['dotlodyPath'];
 export type MachineFlockArchiveSessionCommandKey = ['cmd', 'archiveSession', SessionId];
 export type MachineFlockDeleteSessionCommandKey = ['cmd', 'deleteSession', SessionId];
@@ -217,6 +234,7 @@ export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellati
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
 export type MachineFlockRateLimitKey = ['rateLimit', CliType, string];
+export type MachineFlockBuiltinAgentOptOutKey = ['builtinAgentOptOut', ManagedBuiltinAgentType];
 /** @deprecated Compatibility read/cleanup only. New writers must not store launch config per session. */
 export type MachineFlockSessionLaunchConfigKey = ['sessionLaunchConfig', SessionId];
 
@@ -232,6 +250,7 @@ export type MachineFlockKey =
   | MachineFlockAgentConfigIndexKey
   | MachineFlockAcpCapabilityKey
   | MachineFlockRateLimitKey
+  | MachineFlockBuiltinAgentOptOutKey
   | MachineFlockSessionLaunchConfigKey;
 
 export type ParsedMachineFlockKey =
@@ -278,6 +297,11 @@ export type ParsedMachineFlockKey =
       key: MachineFlockRateLimitKey;
       cliType: CliType;
       limitId: string;
+    }
+  | {
+      kind: 'builtinAgentOptOut';
+      key: MachineFlockBuiltinAgentOptOutKey;
+      agentType: ManagedBuiltinAgentType;
     }
   | {
       kind: 'sessionLaunchConfig';
@@ -327,6 +351,10 @@ export const machineFlockKeys = {
     'rateLimit',
     cliType,
     limitId,
+  ],
+  builtinAgentOptOut: (agentType: ManagedBuiltinAgentType): MachineFlockBuiltinAgentOptOutKey => [
+    'builtinAgentOptOut',
+    agentType,
   ],
   /** @deprecated Compatibility read/cleanup only. New writers must not store launch config per session. */
   sessionLaunchConfig: (sessionId: SessionId): MachineFlockSessionLaunchConfigKey => [
@@ -447,6 +475,19 @@ export const parseMachineFlockKey = (
     };
   }
 
+  if (
+    key.length === 2 &&
+    key[0] === 'builtinAgentOptOut' &&
+    typeof key[1] === 'string' &&
+    isManagedBuiltinAgentType(key[1])
+  ) {
+    return {
+      kind: 'builtinAgentOptOut',
+      key: machineFlockKeys.builtinAgentOptOut(key[1]),
+      agentType: key[1],
+    };
+  }
+
   if (key.length === 2 && key[0] === 'sessionLaunchConfig' && isNonEmptyString(key[1])) {
     const sessionId = key[1] as SessionId;
     return {
@@ -477,6 +518,7 @@ export type MachineFlockRow =
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
   | { key: MachineFlockRateLimitKey; value: RateLimit }
+  | { key: MachineFlockBuiltinAgentOptOutKey; value: BuiltinAgentOptOut }
   | { key: MachineFlockSessionLaunchConfigKey; value: SessionLaunchConfig };
 
 export type MachineFlockRowId = string & { __brand: 'MachineFlockRowId' };
@@ -518,6 +560,7 @@ export type MachineFlockRowFamily =
   | 'agentConfigIndex'
   | 'acpCapability'
   | 'rateLimit'
+  | 'builtinAgentOptOut'
   | 'sessionLaunchConfig';
 
 const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly unknown[]> = {
@@ -532,6 +575,7 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
   rateLimit: ['rateLimit'],
+  builtinAgentOptOut: ['builtinAgentOptOut'],
   sessionLaunchConfig: ['sessionLaunchConfig'],
 };
 
@@ -617,6 +661,11 @@ const isMachineFlockProviderSetupCancellationRow = (
 const isMachineFlockRateLimitRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockRateLimitKey }> => row.key[0] === 'rateLimit';
+
+const isMachineFlockBuiltinAgentOptOutRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockBuiltinAgentOptOutKey }> =>
+  row.key[0] === 'builtinAgentOptOut';
 
 const isMachineFlockSessionLaunchConfigRow = (
   row: MachineFlockRow
@@ -752,6 +801,20 @@ export function getMachineFlockRateLimits(rows: MachineFlockRowMap): Record<stri
     rateLimits[getMachineFlockRateLimitEntryKey(row.key[1], row.key[2])] = row.value;
   }
   return rateLimits;
+}
+
+/** 本机被用户主动删掉、因而不该自动补回来的托管内置 provider 类型。 */
+export function getMachineFlockBuiltinAgentOptOuts(
+  rows: MachineFlockRowMap
+): Set<ManagedBuiltinAgentType> {
+  const optedOut = new Set<ManagedBuiltinAgentType>();
+  for (const row of Object.values(rows)) {
+    if (!isMachineFlockBuiltinAgentOptOutRow(row)) {
+      continue;
+    }
+    optedOut.add(row.key[1]);
+  }
+  return optedOut;
 }
 
 export function getMachineFlockSessionLaunchConfig(
@@ -941,6 +1004,12 @@ export function parseMachineFlockRow(
       return isAcpCapabilityCacheEntry(value) ? { key: parsedKey.key, value } : undefined;
     case 'rateLimit':
       return isRecord(value) ? { key: parsedKey.key, value: value as RateLimit } : undefined;
+    case 'builtinAgentOptOut': {
+      const optOut = normalizeBuiltinAgentOptOut(value);
+      return optOut && optOut.agentType === parsedKey.agentType
+        ? { key: parsedKey.key, value: optOut }
+        : undefined;
+    }
     case 'sessionLaunchConfig': {
       const config = normalizeSessionLaunchConfig(value);
       return config ? { key: parsedKey.key, value: config } : undefined;
@@ -1310,6 +1379,26 @@ const normalizeProviderSetupCancellation = (
     id: value.id as AgentConfigId,
     machineId: value.machineId as MachineId,
     cancelledAt: value.cancelledAt,
+  };
+};
+
+const normalizeBuiltinAgentOptOut = (value: unknown): BuiltinAgentOptOut | undefined => {
+  if (
+    !isRecord(value) ||
+    value.v !== 1 ||
+    typeof value.agentType !== 'string' ||
+    !isManagedBuiltinAgentType(value.agentType) ||
+    !isNonEmptyString(value.machineId) ||
+    typeof value.removedAt !== 'number' ||
+    !Number.isFinite(value.removedAt)
+  ) {
+    return undefined;
+  }
+  return {
+    v: 1,
+    agentType: value.agentType,
+    machineId: value.machineId as MachineId,
+    removedAt: value.removedAt,
   };
 };
 

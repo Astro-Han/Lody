@@ -8,6 +8,7 @@ import {
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
+  getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockDotlodyPath,
@@ -555,6 +556,58 @@ describe('machine Flock helpers', () => {
       })
     ).toEqual({
       [getRateLimitEntryKey('codex', 'codex_bengalfox')]: row.value,
+    });
+  });
+
+  describe('builtin agent opt-out rows', () => {
+    const machineId = 'machine-1' as MachineId;
+
+    it('round-trips a removal through the flock', () => {
+      const flock = new FakeMachineFlock();
+      const key = machineFlockKeys.builtinAgentOptOut('kimi');
+
+      expect(
+        writeMachineFlockRowToFlock(flock, {
+          key,
+          value: { v: 1, agentType: 'kimi', machineId, removedAt: 1700 },
+        })
+      ).toBe(true);
+
+      expect(
+        getMachineFlockBuiltinAgentOptOuts(
+          readMachineFlockRowsFromFlock(flock, { families: ['builtinAgentOptOut'] })
+        )
+      ).toEqual(new Set(['kimi']));
+
+      expect(deleteMachineFlockRowFromFlock(flock, key)).toBe(true);
+      expect(
+        getMachineFlockBuiltinAgentOptOuts(
+          readMachineFlockRowsFromFlock(flock, { families: ['builtinAgentOptOut'] })
+        )
+      ).toEqual(new Set());
+    });
+
+    it('rejects a row whose agentType does not match its key', () => {
+      const flock = new FakeMachineFlock();
+
+      expect(
+        writeMachineFlockRowToFlock(flock, {
+          key: machineFlockKeys.builtinAgentOptOut('kimi'),
+          // 值里的 agentType 与 key 不一致,写入必须失败——否则跳过逻辑会按 key 生效,
+          // 却对着一条内容对不上的记录。
+          value: { v: 1, agentType: 'codex', machineId, removedAt: 1700 },
+        } as never)
+      ).toBe(false);
+    });
+
+    it('rejects an agentType that has no managed runtime', () => {
+      // deepseek 是内置 provider,但不参与启动自动注册,不该有删除意图记录。
+      expect(parseMachineFlockKey(['builtinAgentOptOut', 'deepseek'])).toBeUndefined();
+      expect(parseMachineFlockKey(['builtinAgentOptOut', 'kimi'])).toEqual({
+        kind: 'builtinAgentOptOut',
+        key: machineFlockKeys.builtinAgentOptOut('kimi'),
+        agentType: 'kimi',
+      });
     });
   });
 });

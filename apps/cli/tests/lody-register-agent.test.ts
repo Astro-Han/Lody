@@ -146,6 +146,7 @@ describe('Lody.registerAgent', () => {
       onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => await waitForInitialMetaSync),
       syncMachineFlockDoc,
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig,
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -199,6 +200,7 @@ describe('Lody.registerAgent', () => {
       onStreamsOnline: vi.fn(() => () => {}),
       waitForInitialMetaSync: vi.fn(async () => false),
       syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig: vi.fn(async () => false),
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -246,6 +248,7 @@ describe('Lody.registerAgent', () => {
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc,
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig,
       createAgentConfig,
       getAcpCapabilities: vi.fn(async () => ({
@@ -323,6 +326,7 @@ describe('Lody.registerAgent', () => {
       hasCompletedInitialMetaSync: vi.fn(() => true),
       waitForInitialMetaSync: vi.fn(async () => true),
       syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
       hasAgentConfig: vi.fn(async () => true),
       createAgentConfig: vi.fn(async () => 'agent-config-id'),
       getAcpCapabilities,
@@ -349,5 +353,51 @@ describe('Lody.registerAgent', () => {
     expect(mocks.fetchAcpCapabilities).not.toHaveBeenCalled();
     expect(getAcpCapabilities).not.toHaveBeenCalled();
     expect(updateAcpCapabilities).not.toHaveBeenCalled();
+  });
+
+  // 用户在本机删掉的内置 provider 不应被下次启动的自动注册补回来。列表里没有它,
+  // 但那是删除的结果,不是「没建过」。
+  it('does not recreate a builtin agent the user removed on this machine', async () => {
+    const hasAgentConfig = vi.fn(async () => false);
+    const createAgentConfig = vi.fn(async () => 'agent-config-id');
+    const documentManager = {
+      hasCompletedInitialMetaSync: vi.fn(() => true),
+      waitForInitialMetaSync: vi.fn(async () => true),
+      syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set(['kimi'])),
+      hasAgentConfig,
+      createAgentConfig,
+      getAcpCapabilities: vi.fn(async () => null),
+      updateAcpCapabilities: vi.fn(async () => {}),
+      applyTitleGenerationDefaults: vi.fn(async () => {}),
+    } as unknown as LoroDocumentManager;
+
+    const { Lody } = await import('../src/lib/lody');
+    const lody = new Lody(
+      {
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        token: 'token',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        machineName: 'machine-name',
+      },
+      documentManager
+    );
+
+    await lody.registerAgent(['kimi', 'codex']);
+    await flushMicrotasks();
+
+    // 被删过的类型连「有没有」都不必问,更不会被创建。
+    expect(hasAgentConfig).not.toHaveBeenCalledWith('builtin', 'kimi', 'machine-1');
+    expect(createAgentConfig).not.toHaveBeenCalledWith(
+      'builtin',
+      'kimi',
+      'machine-1',
+      expect.anything()
+    );
+    // 没删过的类型照常注册,证明跳过是按类型精确生效,不是整段被跳掉。
+    expect(hasAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1');
+    expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
 });

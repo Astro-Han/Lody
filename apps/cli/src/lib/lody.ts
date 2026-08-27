@@ -221,9 +221,19 @@ export class Lody {
       return false;
     }
 
+    // 「列表里没有」区分不了「从没建过」和「用户刚删掉」。删除意图记在这张单子上,
+    // 不查它就会把用户删掉的 provider 每次启动补回来。
+    const optedOut = await this.documentManager.getBuiltinAgentOptOuts(this.machineId);
+
     for (const cliType of cliTypes) {
       const builtinRuntime = getManagedBuiltinRuntimeByAgentType(cliType);
       if (!builtinRuntime) {
+        continue;
+      }
+      if (optedOut.has(cliType)) {
+        this.logger.debug(
+          `[agent-config] Skipping builtin agent registration for ${cliType} on machine ${this.machineId}; the user removed it on this machine`
+        );
         continue;
       }
       const has = await this.documentManager.hasAgentConfig('builtin', cliType, this.machineId);

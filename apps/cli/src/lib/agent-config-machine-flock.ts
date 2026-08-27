@@ -2,16 +2,20 @@ import {
   deleteMachineFlockRowFromFlock,
   getAgentConfigRoomId,
   getMachineFlockAgentConfigs,
+  getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDocId,
+  getServerNow,
   isAgentConfigDocRoomId,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
+  isManagedBuiltinAgentType,
   MACHINE_DOC_PREFIX,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentConfigCliType,
+  type ManagedBuiltinAgentType,
   type MachineId,
   type WorkspaceId,
   writeMachineFlockRowToFlock,
@@ -21,6 +25,29 @@ import type { LoroRepo } from 'loro-repo';
 export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
 };
+
+/**
+ * 配置指向的托管内置 provider 类型；自定义、registry、DeepSeek 等不参与启动自动注册
+ * 的一律返回 null。
+ */
+function getManagedBuiltinOptOutAgentType(config: AgentConfigMeta): ManagedBuiltinAgentType | null {
+  if (config.cliType !== 'builtin' || !isManagedBuiltinAgentType(config.agentType)) {
+    return null;
+  }
+  return config.agentType;
+}
+
+/** 本机被用户主动删掉、不该在启动时自动补回来的托管内置 provider 类型。 */
+export async function readMachineBuiltinAgentOptOuts(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId
+): Promise<Set<ManagedBuiltinAgentType>> {
+  const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+  return getMachineFlockBuiltinAgentOptOuts(
+    readMachineFlockRowsFromFlock(handle.flock, { families: ['builtinAgentOptOut'] })
+  );
+}
 
 export async function readMachineAgentConfigs(
   repo: LoroRepo,
@@ -107,7 +134,16 @@ export async function upsertMachineAgentConfig(
     key: machineFlockKeys.agentConfig(config.id),
     value: config,
   });
-  if (!changed) {
+  // 显式添加内置 provider 就是收回之前的删除意图,墓碑必须一并清掉,否则本机会一直
+  // 记着「用户不要这个 provider」,而列表里明明有一个。
+  const optOutAgentType = getManagedBuiltinOptOutAgentType(config);
+  const clearedOptOut =
+    optOutAgentType !== null &&
+    deleteMachineFlockRowFromFlock(
+      handle.flock,
+      machineFlockKeys.builtinAgentOptOut(optOutAgentType)
+    );
+  if (!changed && !clearedOptOut) {
     await deleteLoroRepoMetaAgentConfigIfPresent(repo, config.id);
     return;
   }
@@ -133,7 +169,21 @@ export async function deleteMachineAgentConfig(
     handle.flock,
     machineFlockKeys.agentConfig(config.id)
   );
-  if (!changed) {
+  // 删除是硬删,行本身不留痕迹。托管内置 provider 必须单独记一条删除意图,否则下次
+  // 启动的自动注册只会看到「列表里没有」,把它当没建过又补回来。
+  const optOutAgentType = getManagedBuiltinOptOutAgentType(config);
+  const wroteOptOut =
+    optOutAgentType !== null &&
+    writeMachineFlockRowToFlock(handle.flock, {
+      key: machineFlockKeys.builtinAgentOptOut(optOutAgentType),
+      value: {
+        v: 1,
+        agentType: optOutAgentType,
+        machineId: config.machineId,
+        removedAt: getServerNow(),
+      },
+    });
+  if (!changed && !wroteOptOut) {
     await deleteLoroRepoMetaAgentConfigIfPresent(repo, config.id);
     return;
   }
