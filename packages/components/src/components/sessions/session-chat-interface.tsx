@@ -212,6 +212,7 @@ import {
 } from './session-fork-destination-menu';
 import { ReviewAgentSetupDialog } from './auto-review-info';
 import { AutoReviewStatus } from './auto-review-status';
+import { ResendUndeliveredMessageBar } from './resend-undelivered-bar';
 import { useAutoReview } from '@/hooks/use-auto-review';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
@@ -392,6 +393,7 @@ import {
   findLatestCompletedCodexProposedPlan,
   shouldShowCodexProposedPlanDecision,
 } from '@/lib/codex-plan-decision';
+import { resolveUndeliveredUserTurn } from '@/lib/undelivered-user-turn';
 import { resolveModeIdAfterPlanExit } from '@/lib/plan-mode-exit';
 import { planModeExitApprovalCountAtomFamily } from '@/atoms/plan-mode-exit';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
@@ -3887,6 +3889,42 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    // The user turn the missing-history recovery negatively acknowledged
+    // (visible but permanently undispatchable). The resend bar below offers to
+    // resend its content as a NEW message through the ordinary send path — the
+    // old turn itself is never revived.
+    const undeliveredUserTurn = resolveUndeliveredUserTurn(
+      session.lastMissingHistoryUserMsgId,
+      sessionDoc.history ?? []
+    );
+
+    const handleResendUndelivered = useCallback(
+      async (inputBlocks: SessionInputBlock[]): Promise<boolean> => {
+        const accepted = await handleSendMessage(inputBlocks);
+        if (accepted && undeliveredUserTurn) {
+          // Supersede the abandoned delivery attempt. The ordinary send clears
+          // the missing-history marker, and without a terminal status the stale
+          // pending entry would become dispatchable again (duplicating the just
+          // resent content). 'canceled' is the truthful terminal state and also
+          // hides the row's not-delivered label independent of the marker.
+          try {
+            await updateHistoryEntry(undeliveredUserTurn.id, (entry) => ({
+              ...entry,
+              status: 'canceled',
+              read: true,
+            }));
+          } catch (error) {
+            console.warn('Failed to supersede the undelivered user turn', {
+              userTurnId: undeliveredUserTurn.id,
+              error,
+            });
+          }
+        }
+        return accepted;
+      },
+      [handleSendMessage, undeliveredUserTurn, updateHistoryEntry]
+    );
+
     const autoReview = useAutoReview(session?.id, session);
 
     const handleContinueDiscussingProposedPlan = useCallback(() => {
@@ -5686,6 +5724,19 @@ export const SessionChatInterface = memo(
                             })
                           );
                         }}
+                      />
+                    </ConversationColumn>
+                  ) : null}
+
+                  {/* Resend entry for a user turn the missing-history recovery
+                      negatively acknowledged: same content, brand-new turn,
+                      ordinary send path. Sits with the conversation strips
+                      above the composer. */}
+                  {undeliveredUserTurn ? (
+                    <ConversationColumn className="px-3 pb-1.5">
+                      <ResendUndeliveredMessageBar
+                        entry={undeliveredUserTurn}
+                        onResend={handleResendUndelivered}
                       />
                     </ConversationColumn>
                   ) : null}

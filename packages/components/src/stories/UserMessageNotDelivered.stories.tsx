@@ -10,15 +10,16 @@ import {
 
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { MessageRowView } from '@/components/ai-gui/view';
+import { ResendUndeliveredMessageBar } from '@/components/sessions/resend-undelivered-bar';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 
 /**
  * The missing-history negative acknowledgement (`SessionMeta.lastMissingHistoryUserMsgId`)
- * keeps one exact user turn out of every dispatch path. When that entry is
- * visible but still non-terminal, `UserMessageRowView` derives a terminal
- * "Not delivered" state with an explicit "Deliver now" action — display-only,
- * never an automatic re-dispatch. The control story shows the same pending
- * entry without the marker (ordinary sending state).
+ * permanently excludes one exact user turn from every dispatch path. When that
+ * entry is visible but still non-terminal, the row derives a terminal "Not
+ * delivered" label (no row-level action), and recovery lives at the bottom of
+ * the conversation: a resend bar that re-sends the SAME content as a brand-new
+ * message through the ordinary send path. The old turn never revives.
  */
 const meta = {
   title: 'Sessions/UserMessageNotDelivered',
@@ -32,6 +33,7 @@ type Story = StoryObj<typeof meta>;
 
 const sessionId = 'not-delivered-session' as SessionId;
 const missingTurnId = 'user-turn-missing-history';
+const messageText = 'Review the dispatch watcher recovery path and summarize the failure modes.';
 
 const markerMeta = {
   id: sessionId,
@@ -54,6 +56,12 @@ const pendingUserMessage = (id: string, text: string): SessionHistoryParsed =>
     read: false,
     status: 'pending',
     items: [{ type: 'text', text }],
+    inputConfig: {
+      prompt: text,
+      inputBlocks: [{ type: 'text', text }],
+      cliType: 'builtin',
+      agentType: 'codex',
+    },
   }) as unknown as SessionHistoryParsed;
 
 function renderRow(
@@ -75,14 +83,11 @@ function renderRow(
   );
 }
 
-/** Marker names this exact entry: destructive "Not delivered" chip plus the
- * deliver-now action replaces the endless sending indicator. */
+/** Marker names this exact entry: destructive "Not delivered" label replaces
+ * the endless sending indicator. The row itself carries no action. */
 export const NotDelivered: Story = {
   args: {
-    message: pendingUserMessage(
-      missingTurnId,
-      'Review the dispatch watcher recovery path and summarize the failure modes.'
-    ),
+    message: pendingUserMessage(missingTurnId, messageText),
     sessionId,
   },
   render: (args) => renderRow(args, markerMeta),
@@ -92,11 +97,47 @@ export const NotDelivered: Story = {
  * state, so the derivation cannot fire for unrelated messages. */
 export const OrdinaryPending: Story = {
   args: {
-    message: pendingUserMessage(
-      'user-turn-ordinary-pending',
-      'Review the dispatch watcher recovery path and summarize the failure modes.'
-    ),
+    message: pendingUserMessage('user-turn-ordinary-pending', messageText),
     sessionId,
   },
   render: (args) => renderRow(args, undefined),
+};
+
+/** The recovery entry at the bottom of the conversation (above the composer):
+ * resends the undelivered turn's exact content as a NEW message through the
+ * ordinary send path. */
+export const ResendBar: Story = {
+  args: {
+    message: pendingUserMessage(missingTurnId, messageText),
+    sessionId,
+  },
+  render: () => (
+    <div className="w-[720px] max-w-[100vw] bg-background p-3">
+      <ConversationColumn>
+        <ResendUndeliveredMessageBar
+          entry={pendingUserMessage(missingTurnId, messageText)}
+          onResend={async () => true}
+        />
+      </ConversationColumn>
+    </div>
+  ),
+};
+
+/** Click the action to review the resending state: the button disables and
+ * spins while the never-settling resend is in flight. */
+export const ResendBarClickToResend: Story = {
+  args: {
+    message: pendingUserMessage(missingTurnId, messageText),
+    sessionId,
+  },
+  render: () => (
+    <div className="w-[720px] max-w-[100vw] bg-background p-3">
+      <ConversationColumn>
+        <ResendUndeliveredMessageBar
+          entry={pendingUserMessage(missingTurnId, messageText)}
+          onResend={() => new Promise<boolean>(() => {})}
+        />
+      </ConversationColumn>
+    </div>
+  ),
 };

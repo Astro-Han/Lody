@@ -339,14 +339,16 @@ const isConfigOptionValueRecord = (
  * essential: clearing either one after an awaited refresh can overwrite a newer
  * activation or processing claim from another peer.
  * The tradeoff is that a genuinely late History CRDT update after the timeout
- * is never auto-dispatched: the marker stays, and the renderer derives a
- * visible "not delivered" state for that exact entry from the marker plus its
- * non-terminal status (no CLI repair write, no schema change). The only way
- * the turn runs is the user's explicit deliver-now action on that entry — a
- * dispatch-producer write that re-aims `latestUserMsgId` at the exact id and
- * clears the marker, after which ordinary turn selection dispatches it once.
- * That is preferred over an unbounded silent wait, repeated recovery loops,
- * or auto-executing a message the user may already have resent as a new turn.
+ * is never dispatched: the marker is permanent for that exact turn, and the
+ * renderer derives a visible "not delivered" label for it from the marker plus
+ * its non-terminal status (no CLI repair write, no schema change). Recovery is
+ * a fresh send — the conversation's resend entry re-sends the same content as
+ * a brand-new message (new turn id) through the ordinary producer path, whose
+ * ordinary dispatch write clears the marker as a side effect; the resend also
+ * supersedes the abandoned entry to `canceled` so the stale pending copy can
+ * never dispatch once the marker is gone. That is preferred over an unbounded
+ * silent wait, repeated recovery loops, or resurrecting a message the user may
+ * already have resent as a new turn.
  *
  * Sessions without an explicit activation signal stay metadata-only. History is
  * a turn-selection source after activation, not a startup activation index.
@@ -747,18 +749,24 @@ export class SessionDispatchWatcher {
 
   /**
    * Peek the oldest live stashed RPC turn for a session. Entries that expired
-   * or already reached a terminal state (handled/denied while stashed) are
-   * dropped instead of returned, so a denied turn cannot re-enter dispatch
-   * from the stash.
+   * or already reached a terminal state are dropped instead of returned, so a
+   * finished turn cannot re-enter dispatch from the stash. Terminal means:
+   * advanced past by `lastHandledUserMsgId`, recorded terminal in memory
+   * (handled/denied while stashed), or carrying a terminal history status —
+   * e.g. the renderer superseding an undelivered turn to `canceled` when its
+   * content is resent as a new message.
    *
    * An entry whose id matches `lastMissingHistoryUserMsgId` stays stashed but
-   * is never returned: the negative acknowledgement excludes that exact turn
-   * from every turn source until a dispatch producer re-aims
-   * `latestUserMsgId` at it and clears the marker (the explicit deliver-now
-   * write). Only that durable write authorizes re-dispatch — a duplicate RPC
-   * offer alone must not resurrect the turn while the marker stands.
+   * is never returned: the negative acknowledgement is PERMANENT for that
+   * exact turn while it stands, so no turn source may dispatch it — a
+   * duplicate RPC offer must not resurrect the turn. Recovery is a fresh send
+   * with a new turn id (the conversation's resend entry), never a revival.
    */
-  private peekStashedRpcTurn(sessionId: SessionId, meta: SessionMeta): SessionHistoryInput | null {
+  private peekStashedRpcTurn(
+    sessionId: SessionId,
+    meta: SessionMeta,
+    history: SessionHistoryInput[] = []
+  ): SessionHistoryInput | null {
     const stash = this.rpcTurnStash.get(sessionId);
     if (!stash) {
       return null;
@@ -770,7 +778,13 @@ export class SessionDispatchWatcher {
         this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(
           sessionId,
           userTurnId
-        ) !== undefined;
+        ) !== undefined ||
+        history.some(
+          (entry) =>
+            entry.id === userTurnId &&
+            entry.role === 'user' &&
+            (entry.status === 'handled' || entry.status === 'failed' || entry.status === 'canceled')
+        );
       if (stashed.expiresAtMs <= now || isTerminal) {
         stash.delete(userTurnId);
         continue;
@@ -2583,7 +2597,7 @@ export class SessionDispatchWatcher {
       this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
       return promoted;
     }
-    return this.peekStashedRpcTurn(meta.id, meta);
+    return this.peekStashedRpcTurn(meta.id, meta, history);
   }
 
   /**

@@ -87,6 +87,7 @@ import {
   useSessionActions,
   type SessionActions,
 } from '../src/hooks/use-session-actions';
+import { buildResendInputBlocks } from '../src/lib/undelivered-user-turn';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -607,157 +608,6 @@ describe('useSessionActions', () => {
     ).rejects.toThrow('meta write failed');
   });
 
-  const createRedeliverRuntime = (options: {
-    sessionId: SessionId;
-    userTurnId: string;
-    meta: Record<string, unknown>;
-    upsertDocMeta: ReturnType<typeof vi.fn>;
-  }) => {
-    const { sessionId, userTurnId, meta, upsertDocMeta } = options;
-    const history = [
-      {
-        id: userTurnId,
-        role: 'user',
-        userId: 'user-1',
-        timestamp: '2026-07-03T00:00:00.000Z',
-        status: 'pending',
-        read: false,
-        inputConfig: {
-          prompt: 'hello',
-          inputBlocks: [{ type: 'text', text: 'hello' }],
-          cliType: 'builtin',
-          agentType: 'codex',
-        },
-      },
-    ];
-    const requestSessionDispatchTurn = vi.fn(async () => ({
-      type: 'session/dispatch-turn_response' as const,
-      sessionId,
-      userTurnId,
-      accepted: true,
-      disposition: 'accepted' as const,
-    }));
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta: vi.fn(async () => ({ meta })),
-        upsertDocMeta,
-      } as unknown as WorkspaceRuntime['repo'],
-    }) as WorkspaceRuntime & {
-      withSessionStore: WorkspaceRuntime['withSessionStore'];
-      requestSessionDispatchTurn: WorkspaceRuntime['requestSessionDispatchTurn'];
-    };
-    runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
-      fn({
-        getState: vi.fn(() => ({ history })),
-        setState: vi.fn(),
-        waitUntilSynced: vi.fn(async () => undefined),
-      })
-    ) as unknown as WorkspaceRuntime['withSessionStore'];
-    runtime.requestSessionDispatchTurn =
-      requestSessionDispatchTurn as WorkspaceRuntime['requestSessionDispatchTurn'];
-    return { runtime, requestSessionDispatchTurn };
-  };
-
-  it('redelivers a marker-matched turn: re-aims the pointer, clears the exact marker, then fires the RPC', async () => {
-    const sessionId = 'session-redeliver-match' as SessionId;
-    const userTurnId = 'user-turn-redeliver-match';
-    const machineId = 'machine-1' as MachineId;
-    const metaWrite = createDeferred();
-    const upsertDocMeta = vi.fn(() => metaWrite.promise);
-    const { runtime, requestSessionDispatchTurn } = createRedeliverRuntime({
-      sessionId,
-      userTurnId,
-      meta: { machineId, latestUserMsgId: 'user-turn-resent', lastMissingHistoryUserMsgId: userTurnId },
-      upsertDocMeta,
-    });
-    const actions = await renderActions(runtime);
-
-    const redeliverPromise = actions.redeliverSessionUserTurn(sessionId, userTurnId);
-    // The durable producer write is the authorization: the RPC fast path must
-    // not fire before it lands (the watcher refuses a marker-matched turn
-    // until the clear syncs).
-    await vi.waitFor(() => expect(upsertDocMeta).toHaveBeenCalledTimes(1));
-    expect(requestSessionDispatchTurn).not.toHaveBeenCalled();
-
-    metaWrite.resolve();
-    await redeliverPromise;
-
-    const patch = upsertDocMeta.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(patch.latestUserMsgId).toBe(userTurnId);
-    expect('lastMissingHistoryUserMsgId' in patch).toBe(true);
-    expect(patch.lastMissingHistoryUserMsgId).toBeUndefined();
-    expect(requestSessionDispatchTurn).toHaveBeenCalledTimes(1);
-    expect(requestSessionDispatchTurn).toHaveBeenCalledWith(
-      machineId,
-      expect.objectContaining({ sessionId, userTurnId })
-    );
-  });
-
-  it('keeps a missing-history marker that names a different turn when redelivering', async () => {
-    const sessionId = 'session-redeliver-other-marker' as SessionId;
-    const userTurnId = 'user-turn-redeliver-other';
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const { runtime } = createRedeliverRuntime({
-      sessionId,
-      userTurnId,
-      meta: { machineId: 'machine-1', lastMissingHistoryUserMsgId: 'user-turn-still-missing' },
-      upsertDocMeta,
-    });
-    const actions = await renderActions(runtime);
-
-    await actions.redeliverSessionUserTurn(sessionId, userTurnId);
-
-    const patch = upsertDocMeta.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(patch.latestUserMsgId).toBe(userTurnId);
-    expect('lastMissingHistoryUserMsgId' in patch).toBe(false);
-  });
-
-  it('rejects a redelivery when the metadata write fails and never fires the RPC', async () => {
-    const sessionId = 'session-redeliver-write-fails' as SessionId;
-    const userTurnId = 'user-turn-redeliver-write-fails';
-    const upsertDocMeta = vi.fn(async () => {
-      throw new Error('meta write failed');
-    });
-    const { runtime, requestSessionDispatchTurn } = createRedeliverRuntime({
-      sessionId,
-      userTurnId,
-      meta: { machineId: 'machine-1', lastMissingHistoryUserMsgId: userTurnId },
-      upsertDocMeta,
-    });
-    const actions = await renderActions(runtime);
-
-    await expect(actions.redeliverSessionUserTurn(sessionId, userTurnId)).rejects.toThrow(
-      'meta write failed'
-    );
-    expect(requestSessionDispatchTurn).not.toHaveBeenCalled();
-  });
-
-  it('rejects a redelivery for a turn that is not visible in history', async () => {
-    const sessionId = 'session-redeliver-missing-entry' as SessionId;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta: vi.fn(async () => ({ meta: { machineId: 'machine-1' } })),
-        upsertDocMeta,
-      } as unknown as WorkspaceRuntime['repo'],
-    }) as WorkspaceRuntime & {
-      withSessionStore: WorkspaceRuntime['withSessionStore'];
-    };
-    runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
-      fn({
-        getState: vi.fn(() => ({ history: [] })),
-        setState: vi.fn(),
-        waitUntilSynced: vi.fn(async () => undefined),
-      })
-    ) as unknown as WorkspaceRuntime['withSessionStore'];
-    const actions = await renderActions(runtime);
-
-    await expect(
-      actions.redeliverSessionUserTurn(sessionId, 'user-turn-not-in-history')
-    ).rejects.toThrow('not visible');
-    expect(upsertDocMeta).not.toHaveBeenCalled();
-  });
-
   it('authors the pending user turn through the writer seam on send', async () => {
     const sessionId = 'session-append-turn-writer' as SessionId;
     const appendSessionTurn = vi.fn(async () => 'direct' as const);
@@ -788,6 +638,56 @@ describe('useSessionActions', () => {
       expect.objectContaining({ id: entry.id, role: 'user' }),
       undefined
     );
+  });
+
+  it('mints a fresh turn id when identical content is sent again (undelivered-turn resend)', async () => {
+    const sessionId = 'session-resend-new-turn-id' as SessionId;
+    const appendSessionTurn = vi.fn(async () => 'direct' as const);
+    const runtime = createRuntime({
+      writer: {
+        modeForMachine: () => 'direct' as const,
+        modeForSession: async () => 'direct' as const,
+        upsertDocMeta: vi.fn(async () => undefined),
+        appendSessionTurn,
+        appendSessionHistory: vi.fn(async () => undefined),
+      } as unknown as WorkspaceRuntime['writer'],
+    });
+    const actions = await renderActions(runtime);
+
+    // The undelivered entry's exact content, extracted the same way the
+    // composer-area resend bar does it.
+    const inputBlocks = buildResendInputBlocks({
+      items: [{ type: 'text', text: 'same content' }],
+      inputConfig: {
+        prompt: 'same content',
+        inputBlocks: [{ type: 'text', text: 'same content' }],
+      },
+    });
+    const payload = {
+      role: 'user',
+      userId: 'user-1',
+      items: [{ type: 'text', text: 'same content' }],
+      timestamp: '2026-07-05T00:00:00.000Z',
+      status: 'pending',
+      read: false,
+      finished: true,
+      inputConfig: {
+        inputBlocks,
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    } as unknown as Parameters<SessionActions['addSessionHistory']>[1];
+
+    const first = await actions.addSessionHistory(sessionId, payload);
+    const second = await actions.addSessionHistory(sessionId, payload);
+
+    // A resend rides the ordinary send path: identical content, brand-new id.
+    expect(second.id).not.toBe(first.id);
+    expect(appendSessionTurn).toHaveBeenCalledTimes(2);
+    const resentEntry = appendSessionTurn.mock.calls[1]?.[1] as {
+      inputConfig?: { inputBlocks?: unknown };
+    };
+    expect(resentEntry.inputConfig?.inputBlocks).toEqual(inputBlocks);
   });
 
   it('starts a session through one aggregate writer call', async () => {

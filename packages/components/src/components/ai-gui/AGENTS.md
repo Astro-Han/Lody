@@ -199,14 +199,16 @@ context/message-flow.md.
 - `message-send-status-context.tsx` / `message-copy.ts` — send-state + copy helpers.
 - A user entry negatively acknowledged by missing-history recovery
   (`SessionMeta.lastMissingHistoryUserMsgId === message.id`, entry still
-  non-terminal) renders as a terminal "Not delivered" state with a "Deliver now"
-  action, never as an endless sending spinner. The derivation is display-only
-  (meta + entry state, no CLI repair write and no entry status change), and the
-  action is the ONLY re-dispatch entry point: `redeliverSessionUserTurnWithRuntime`
-  (`@/hooks/use-session-actions`) re-aims `latestUserMsgId` and clears the marker
-  only for the exact id. The row deliberately uses that module-level function with
-  `activeWorkspaceRuntimeAtom` + `useStore()` rather than mounting
-  `useSessionActions` per row — Storybook stories render `MessageRowView` without
-  a `PlatformContext`. Never re-dispatch a marker-matched turn automatically.
+  non-terminal) renders as a terminal "Not delivered" label, never as an
+  endless sending spinner — and carries NO row-level action. The derivation is
+  display-only (`src/lib/undelivered-user-turn.ts`, shared with the resend
+  entry): the marker permanently excludes the exact turn, so the old turn
+  never revives. Recovery lives at the bottom of the conversation
+  (`sessions/resend-undelivered-bar.tsx`): resend the SAME content as a
+  brand-new message through the ordinary send path, then supersede the
+  abandoned entry to `canceled` — the ordinary producer write clears the
+  marker, and without the terminal flip the stale pending entry would
+  duplicate-dispatch once the marker is gone. Never add an automatic or
+  old-turn re-dispatch path.
 - File attachment rendering and mobile image-preview invariants:
   [session-files-rendering.md](session-files-rendering.md).
