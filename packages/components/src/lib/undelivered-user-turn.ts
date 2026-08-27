@@ -9,8 +9,9 @@ import {
 /**
  * Missing-history negative acknowledgement (`SessionMeta.lastMissingHistoryUserMsgId`)
  * display derivation. The marker permanently excludes its exact turn from every
- * dispatch path; the UI surfaces that turn as "not delivered" and offers a
- * resend-as-new-message entry instead of ever reviving the old turn.
+ * dispatch path; the row surfaces that turn as a clickable "not delivered"
+ * label whose confirmation dialog resends the same content as a NEW message —
+ * the old turn is never revived.
  */
 
 type UserTurnStatusReadable = Pick<SessionHistoryInput, 'id' | 'role' | 'read' | 'status'>;
@@ -30,22 +31,6 @@ export const isUndeliveredUserTurnEntry = (
     return false;
   }
   return entry.id === missingHistoryUserMsgId && !isSessionHistoryDelivered(entry);
-};
-
-/**
- * Resolve the visible user history entry the missing-history marker
- * negatively acknowledged, or undefined when the entry has not synced into
- * view or already reached a terminal state. This is the display gate for the
- * composer-area resend entry.
- */
-export const resolveUndeliveredUserTurn = <T extends UserTurnStatusReadable>(
-  missingHistoryUserMsgId: string | undefined,
-  history: readonly T[]
-): T | undefined => {
-  if (!missingHistoryUserMsgId) {
-    return undefined;
-  }
-  return history.find((entry) => isUndeliveredUserTurnEntry(missingHistoryUserMsgId, entry));
 };
 
 /**

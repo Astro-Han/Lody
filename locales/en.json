@@ -1874,6 +1874,7 @@
   "sessions.queueReorderError": "Failed to reorder messages",
   "sessions.removeImage": "Remove image",
   "sessions.resendUndelivered.action": "Resend message",
+  "sessions.resendUndelivered.description": "This message never reached the agent, so it did not run. Resend the same content as a new message?",
   "sessions.resendUndelivered.failed": "Failed to resend the message",
   "sessions.resendUndelivered.title": "Message not delivered",
   "sessions.resolveConflicts": "Resolve Conflicts",

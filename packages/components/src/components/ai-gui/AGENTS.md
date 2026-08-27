@@ -200,12 +200,13 @@ context/message-flow.md.
 - A user entry negatively acknowledged by missing-history recovery
   (`SessionMeta.lastMissingHistoryUserMsgId === message.id`, entry still
   non-terminal) renders as a terminal "Not delivered" label, never as an
-  endless sending spinner — and carries NO row-level action. The derivation is
-  display-only (`src/lib/undelivered-user-turn.ts`, shared with the resend
-  entry): the marker permanently excludes the exact turn, so the old turn
-  never revives. Recovery lives at the bottom of the conversation
-  (`sessions/resend-undelivered-bar.tsx`): resend the SAME content as a
-  brand-new message through the ordinary send path, then supersede the
+  endless sending spinner. The derivation is display-only
+  (`src/lib/undelivered-user-turn.ts`): the marker permanently excludes the
+  exact turn, so the old turn never revives. The label is the ONLY recovery
+  entry point: clicking it opens `ResendUndeliveredDialog` (local to
+  `view.tsx`), which resends the SAME content as a brand-new message through
+  the interface's ordinary send path (`onResendUndelivered`, threaded through
+  `SessionChatStream` → `MessageRowView`), then the interface supersedes the
   abandoned entry to `canceled` — the ordinary producer write clears the
   marker, and without the terminal flip the stale pending entry would
   duplicate-dispatch once the marker is gone. Never add an automatic or

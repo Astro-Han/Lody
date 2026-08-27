@@ -4,7 +4,6 @@ import type { SessionInputBlock } from '@lody/shared';
 import {
   buildResendInputBlocks,
   isUndeliveredUserTurnEntry,
-  resolveUndeliveredUserTurn,
 } from '../src/lib/undelivered-user-turn';
 
 const FILE_BLOCK: SessionInputBlock = {
@@ -63,22 +62,6 @@ describe('isUndeliveredUserTurnEntry', () => {
     expect(
       isUndeliveredUserTurnEntry('turn-1', { id: 'turn-1', role: 'user' as const, read: false })
     ).toBe(true);
-  });
-});
-
-describe('resolveUndeliveredUserTurn', () => {
-  it('resolves the named entry only while it is visible and non-terminal', () => {
-    const late = userTurn();
-    const handled = userTurn({ id: 'turn-0', status: 'handled' as const });
-    expect(resolveUndeliveredUserTurn('turn-1', [handled, late])).toBe(late);
-    // Not synced into view yet.
-    expect(resolveUndeliveredUserTurn('turn-1', [])).toBeUndefined();
-    // Already executed.
-    expect(
-      resolveUndeliveredUserTurn('turn-1', [userTurn({ status: 'handled' as const })])
-    ).toBeUndefined();
-    // No marker.
-    expect(resolveUndeliveredUserTurn(undefined, [late])).toBeUndefined();
   });
 });
 
