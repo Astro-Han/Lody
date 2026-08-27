@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyMachineFlockRowEvents,
+  applyProviderSetupCancellationToFlock,
   buildMachineArchiveSessionCommand,
   buildMachineDeleteLocalProjectCommand,
   buildMachineDeleteSessionCommand,
+  deleteAgentConfigFromFlock,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
@@ -25,7 +27,9 @@ import {
   parseMachineFlockKey,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
+  writeAgentConfigToFlock,
   writeMachineFlockRowToFlock,
+  type AgentConfigMeta,
   type MachineFlockKey,
   type MachineFlockWritableFlock,
 } from '../src/machine-flock';
@@ -598,6 +602,104 @@ describe('machine Flock helpers', () => {
           value: { v: 1, agentType: 'codex', machineId, removedAt: 1700 },
         } as never)
       ).toBe(false);
+    });
+
+    const kimi = (id: string): AgentConfigMeta =>
+      ({
+        id: id as AgentConfigId,
+        machineId,
+        name: 'Kimi',
+        cliType: 'builtin',
+        agentType: 'kimi',
+        env: {},
+      }) as AgentConfigMeta;
+    const optOuts = (flock: FakeMachineFlock) =>
+      getMachineFlockBuiltinAgentOptOuts(
+        readMachineFlockRowsFromFlock(flock, { families: ['builtinAgentOptOut'] })
+      );
+
+    it('deleting the last config of a type records the opt-out in one commit', () => {
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('a'));
+      flock.commits = 0;
+
+      expect(deleteAgentConfigFromFlock(flock, kimi('a'), 1700)).toBe(true);
+
+      expect(flock.commits).toBe(1);
+      expect(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))).toEqual({});
+      expect(optOuts(flock)).toEqual(new Set(['kimi']));
+    });
+
+    it('deleting one of several configs of a type does not record an opt-out', () => {
+      // 还剩一个 Kimi，用户没有「删掉 Kimi」，启动也不会补，不该记删除意图。
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('a'));
+      writeAgentConfigToFlock(flock, kimi('b'));
+
+      deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
+
+      expect(optOuts(flock)).toEqual(new Set());
+    });
+
+    it('does not rewrite an existing opt-out on repeated deletes', () => {
+      // 墓碑带时间戳，重写会被当成变更广播给所有 peer；行已不在、墓碑已在时必须无变更。
+      const flock = new FakeMachineFlock();
+      deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
+
+      expect(deleteAgentConfigFromFlock(flock, kimi('a'), 1800)).toBe(false);
+      expect(
+        flock.rows.get(JSON.stringify(machineFlockKeys.builtinAgentOptOut('kimi')))?.value
+      ).toMatchObject({ removedAt: 1700 });
+    });
+
+    it('writing a config of an opted-out type retracts the opt-out in the same commit', () => {
+      const flock = new FakeMachineFlock();
+      deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
+      flock.commits = 0;
+
+      expect(writeAgentConfigToFlock(flock, kimi('b'))).toBe(true);
+
+      expect(flock.commits).toBe(1);
+      expect(optOuts(flock)).toEqual(new Set());
+      expect(
+        Object.keys(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock)))
+      ).toEqual(['b']);
+    });
+
+    it('rewriting an identical config is a no-op', () => {
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('a'));
+
+      expect(writeAgentConfigToFlock(flock, kimi('a'))).toBe(false);
+    });
+
+    it('cancelling a published provider setup records the opt-out', () => {
+      // 取消已发布的 setup 也是在删 provider，不记墓碑的话 CLI 下次启动又补回来。
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('setup-1'));
+
+      applyProviderSetupCancellationToFlock(flock, {
+        v: 1,
+        id: 'setup-1' as AgentConfigId,
+        machineId,
+        cancelledAt: 1700,
+      });
+
+      expect(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))).toEqual({});
+      expect(optOuts(flock)).toEqual(new Set(['kimi']));
+    });
+
+    it('cancelling an unpublished provider setup records no opt-out', () => {
+      // 从没发布过，列表里本来就没有，不存在「删掉」一说。
+      const flock = new FakeMachineFlock();
+      applyProviderSetupCancellationToFlock(flock, {
+        v: 1,
+        id: 'setup-1' as AgentConfigId,
+        machineId,
+        cancelledAt: 1700,
+      });
+
+      expect(optOuts(flock)).toEqual(new Set());
     });
 
     it('rejects an agentType that has no managed runtime', () => {

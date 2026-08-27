@@ -770,8 +770,8 @@ export function applyProviderSetupCancellationToFlock(
     prefixes: [
       machineFlockKeys.providerSetupCancellation(cancellation.id),
       machineFlockKeys.providerSetup(cancellation.id),
-      machineFlockKeys.agentConfig(cancellation.id),
     ],
+    families: ['agentConfig', 'builtinAgentOptOut'],
   });
   const existingCancellation = getMachineFlockProviderSetupCancellations(rows)[cancellation.id];
   const setup = getMachineFlockProviderSetups(rows)[cancellation.id];
@@ -786,6 +786,11 @@ export function applyProviderSetupCancellationToFlock(
     flock.delete(machineFlockKeys.providerSetup(cancellation.id), nowMs);
   }
   if (config) {
+    // 取消已发布的 setup 也是用户在删这个 provider，和从列表里删一样要留删除意图。
+    const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
+    if (optOut) {
+      flock.set(optOut.key, optOut.value, nowMs);
+    }
     flock.delete(machineFlockKeys.agentConfig(cancellation.id), nowMs);
   }
   flock.commit();
@@ -815,6 +820,127 @@ export function getMachineFlockBuiltinAgentOptOuts(
     optedOut.add(row.key[1]);
   }
   return optedOut;
+}
+
+/** 配置指向的托管内置 provider 类型；自定义、registry、DeepSeek 等不参与启动自动注册的一律返回 null。 */
+export function getBuiltinAgentOptOutAgentType(
+  config: AgentConfigMeta
+): ManagedBuiltinAgentType | null {
+  if (config.cliType !== 'builtin' || !isManagedBuiltinAgentType(config.agentType)) {
+    return null;
+  }
+  return config.agentType;
+}
+
+/**
+ * 删掉 `config` 之后本机要不要记一条「用户删过这类 provider」。
+ *
+ * 只在同类型的最后一个配置被删时才记：还剩别的同类型配置就谈不上「删掉了」，启动
+ * 自动注册也不会补。已经有墓碑就不再重写——墓碑里带时间戳，每次重写都会当成一次
+ * 变更广播给所有 peer。行本身不存在也照样记：删除意图不依赖行是否还在。
+ */
+export function planBuiltinAgentOptOutForDeletedConfig(
+  rows: MachineFlockRowMap,
+  config: AgentConfigMeta,
+  nowMs: number
+): Extract<MachineFlockRow, { key: MachineFlockBuiltinAgentOptOutKey }> | null {
+  const agentType = getBuiltinAgentOptOutAgentType(config);
+  if (agentType === null) {
+    return null;
+  }
+  const key = machineFlockKeys.builtinAgentOptOut(agentType);
+  if (serializeMachineFlockKey(key) in rows) {
+    return null;
+  }
+  const remaining = Object.values(getMachineFlockAgentConfigs(rows)).some(
+    (other) => other.id !== config.id && getBuiltinAgentOptOutAgentType(other) === agentType
+  );
+  if (remaining) {
+    return null;
+  }
+  return {
+    key,
+    value: { v: 1, agentType, machineId: config.machineId, removedAt: nowMs },
+  };
+}
+
+/**
+ * 写入 `config` 要收回的墓碑 key。显式添加内置 provider 就是收回之前的删除意图，
+ * 否则本机会一直记着「用户不要这个 provider」，而列表里明明有一个。没墓碑返回 null。
+ */
+export function findBuiltinAgentOptOutToRetract(
+  rows: MachineFlockRowMap,
+  config: AgentConfigMeta
+): MachineFlockBuiltinAgentOptOutKey | null {
+  const agentType = getBuiltinAgentOptOutAgentType(config);
+  if (agentType === null) {
+    return null;
+  }
+  const key = machineFlockKeys.builtinAgentOptOut(agentType);
+  return serializeMachineFlockKey(key) in rows ? key : null;
+}
+
+/** 写入 agentConfig 行并收回同类型墓碑，同一次 commit 落下。返回是否有变更。 */
+export function writeAgentConfigToFlock(
+  flock: MachineFlockWritableFlock,
+  config: AgentConfigMeta,
+  nowMs?: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    prefixes: [
+      machineFlockKeys.agentConfig(config.id),
+      ...(getBuiltinAgentOptOutAgentType(config) === null
+        ? []
+        : [MACHINE_FLOCK_ROW_FAMILY_PREFIXES.builtinAgentOptOut]),
+    ],
+  });
+  const key = machineFlockKeys.agentConfig(config.id);
+  const normalized = parseMachineFlockRow(key, config);
+  if (!normalized) {
+    return false;
+  }
+  const rowChanged = !machineFlockRowsEqual(rows[serializeMachineFlockKey(key)], normalized);
+  const retractKey = findBuiltinAgentOptOutToRetract(rows, config);
+  if (!rowChanged && !retractKey) {
+    return false;
+  }
+  if (rowChanged) {
+    flock.set(normalized.key, normalized.value, nowMs);
+  }
+  if (retractKey) {
+    flock.delete(retractKey, nowMs);
+  }
+  flock.commit();
+  return true;
+}
+
+/**
+ * 删除 agentConfig 行并按需立墓碑，同一次 commit 落下。删除是硬删，行本身不留痕迹；
+ * 托管内置 provider 不记删除意图，下次启动的自动注册只会看到「列表里没有」，把它当
+ * 没建过又补回来。返回是否有变更。
+ */
+export function deleteAgentConfigFromFlock(
+  flock: MachineFlockWritableFlock,
+  config: AgentConfigMeta,
+  nowMs: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    families: ['agentConfig', 'builtinAgentOptOut'],
+  });
+  const key = machineFlockKeys.agentConfig(config.id);
+  const rowExists = serializeMachineFlockKey(key) in rows;
+  const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
+  if (!rowExists && !optOut) {
+    return false;
+  }
+  if (optOut) {
+    flock.set(optOut.key, optOut.value, nowMs);
+  }
+  if (rowExists) {
+    flock.delete(key, nowMs);
+  }
+  flock.commit();
+  return true;
 }
 
 export function getMachineFlockSessionLaunchConfig(

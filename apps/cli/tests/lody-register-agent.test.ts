@@ -388,8 +388,7 @@ describe('Lody.registerAgent', () => {
     await lody.registerAgent(['kimi', 'codex']);
     await flushMicrotasks();
 
-    // 被删过的类型连「有没有」都不必问,更不会被创建。
-    expect(hasAgentConfig).not.toHaveBeenCalledWith('builtin', 'kimi', 'machine-1');
+    // 被删过的类型不会被创建。
     expect(createAgentConfig).not.toHaveBeenCalledWith(
       'builtin',
       'kimi',
@@ -397,7 +396,6 @@ describe('Lody.registerAgent', () => {
       expect.anything()
     );
     // 没删过的类型照常注册,证明跳过是按类型精确生效,不是整段被跳掉。
-    expect(hasAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1');
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
 });

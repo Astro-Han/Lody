@@ -12,10 +12,11 @@ import {
   isCustomAcpLaunchSpec,
   isLoroRepoDocDeleted,
   machineFlockKeys,
+  findBuiltinAgentOptOutToRetract,
+  planBuiltinAgentOptOutForDeletedConfig,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
   type AgentBrandId,
-  type BuiltinAgentOptOut,
   type AgentConfigId,
   type AgentConfigCliType,
   type AgentConfigMeta,
@@ -40,17 +41,6 @@ import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from './runtime';
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/**
- * 配置指向的托管内置 provider 类型；自定义、registry、DeepSeek 等不参与 CLI 启动时的
- * 自动注册,不需要删除意图记录,一律返回 null。
- */
-function getManagedBuiltinOptOutAgentType(config: AgentConfigMeta) {
-  if (config.cliType !== 'builtin' || !isManagedBuiltinAgentType(config.agentType)) {
-    return null;
-  }
-  return config.agentType;
-}
-
 export async function writeAgentConfigToMachineFlock(
   runtime: WorkspaceRuntime,
   config: AgentConfigMeta
@@ -58,13 +48,6 @@ export async function writeAgentConfigToMachineFlock(
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, config.machineId);
   const key = machineFlockKeys.agentConfig(config.id);
   await runtime.writer.flockRowPut(flockDocId, key, config);
-  // 显式添加内置 provider 就是收回之前的删除意图,墓碑必须一并清掉,否则本机会一直
-  // 记着「用户不要这个 provider」,而列表里明明有一个。
-  const optOutAgentType = getManagedBuiltinOptOutAgentType(config);
-  const optOutKey = optOutAgentType ? machineFlockKeys.builtinAgentOptOut(optOutAgentType) : null;
-  if (optOutKey) {
-    await runtime.writer.flockRowDelete(flockDocId, optOutKey);
-  }
   // The write goes through the writer seam (in local-first mode the CLI is the
   // sole author and the row syncs back into the local mirror asynchronously).
   // Read back the current rows from the local mirror and overlay the just-written
@@ -74,7 +57,11 @@ export async function writeAgentConfigToMachineFlock(
     ...readMachineFlockRowsFromFlock(handle.flock),
     [serializeMachineFlockKey(key)]: { key, value: config },
   };
+  // 显式添加内置 provider 就是收回之前的删除意图。先看本地镜像里有没有墓碑，
+  // 没有就不多发一次 writer 往返（稳态下墓碑基本不存在）。
+  const optOutKey = findBuiltinAgentOptOutToRetract(rows, config);
   if (optOutKey) {
+    await runtime.writer.flockRowDelete(flockDocId, optOutKey);
     delete rows[serializeMachineFlockKey(optOutKey)];
   }
   return rows;
@@ -86,29 +73,18 @@ async function deleteAgentConfigFromMachineFlock(
 ): Promise<MachineFlockRowMap> {
   const flockDocId = getMachineFlockDocId(runtime.workspaceId, config.machineId);
   const key = machineFlockKeys.agentConfig(config.id);
+  const handle = await runtime.repo.openFlockDoc(flockDocId);
+  const rows: MachineFlockRowMap = { ...readMachineFlockRowsFromFlock(handle.flock) };
   // 删除是硬删,行本身不留痕迹。托管内置 provider 必须单独记一条删除意图,否则 CLI
   // 下次启动的自动注册只会看到「列表里没有」,把它当没建过又补回来。先写墓碑再删行,
   // 中途断掉也不会退化成「删了但没记住」。
-  const optOutAgentType = getManagedBuiltinOptOutAgentType(config);
-  const optOut: BuiltinAgentOptOut | null = optOutAgentType
-    ? {
-        v: 1,
-        agentType: optOutAgentType,
-        machineId: config.machineId,
-        removedAt: getServerNow(),
-      }
-    : null;
-  const optOutKey = optOut ? machineFlockKeys.builtinAgentOptOut(optOut.agentType) : null;
-  if (optOutKey && optOut) {
-    await runtime.writer.flockRowPut(flockDocId, optOutKey, optOut);
+  const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, getServerNow());
+  if (optOut) {
+    await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
+    rows[serializeMachineFlockKey(optOut.key)] = optOut;
   }
   await runtime.writer.flockRowDelete(flockDocId, key);
-  const handle = await runtime.repo.openFlockDoc(flockDocId);
-  const rows: MachineFlockRowMap = { ...readMachineFlockRowsFromFlock(handle.flock) };
   delete rows[serializeMachineFlockKey(key)];
-  if (optOutKey && optOut) {
-    rows[serializeMachineFlockKey(optOutKey)] = { key: optOutKey, value: optOut };
-  }
   return rows;
 }
 
@@ -143,14 +119,6 @@ async function cancelProviderSetupInMachineFlock(
   const setupKey = machineFlockKeys.providerSetup(setup.id);
   const configKey = machineFlockKeys.agentConfig(setup.id);
 
-  // The durable marker is the cancellation accept boundary. The target CLI can
-  // reconcile both rows from it even if either best-effort cleanup is interrupted.
-  await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
-  await Promise.allSettled([
-    runtime.writer.flockRowDelete(flockDocId, setupKey),
-    runtime.writer.flockRowDelete(flockDocId, configKey),
-  ]);
-
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   const rows: MachineFlockRowMap = {
     ...readMachineFlockRowsFromFlock(handle.flock),
@@ -160,6 +128,26 @@ async function cancelProviderSetupInMachineFlock(
       value: cancellation,
     },
   };
+  // setup 已发布成 agentConfig 时，取消就是用户在删这个 provider，和从列表里删一样
+  // 要留删除意图，否则 CLI 下次启动又把它补回来。
+  const publishedConfigs = getMachineFlockAgentConfigs(rows);
+  const optOut =
+    setup.id in publishedConfigs
+      ? planBuiltinAgentOptOutForDeletedConfig(rows, publishedConfigs[setup.id], cancelledAt)
+      : null;
+
+  // The durable marker is the cancellation accept boundary. The target CLI can
+  // reconcile both rows from it even if either best-effort cleanup is interrupted.
+  await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
+  if (optOut) {
+    await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
+    rows[serializeMachineFlockKey(optOut.key)] = optOut;
+  }
+  await Promise.allSettled([
+    runtime.writer.flockRowDelete(flockDocId, setupKey),
+    runtime.writer.flockRowDelete(flockDocId, configKey),
+  ]);
+
   delete rows[serializeMachineFlockKey(setupKey)];
   delete rows[serializeMachineFlockKey(configKey)];
   return rows;
@@ -371,11 +359,11 @@ export const cmdCreateAgentConfigAtom = atom(
     if (!runtime) throw new Error('Runtime not ready');
     if (!config.machineId) throw new Error('machineId is required to create an agent config');
     const rows = await writeAgentConfigToMachineFlock(runtime, config);
+    // 用 replace 而不是 merge：merge 删不掉 key，收回的墓碑会留在缓存里直到下次同步。
     _set(setMachineFlockRowsForMachineAtom, {
       workspaceId: runtime.workspaceId,
       machineId: config.machineId,
       rows,
-      mode: 'merge',
     });
     return config.id;
   }

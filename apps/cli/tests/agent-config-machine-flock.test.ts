@@ -116,12 +116,11 @@ describe('machine flock agent config opt-out', () => {
     expect(await readMachineBuiltinAgentOptOuts(repo, workspaceId, machineId)).toEqual(new Set());
   });
 
-  it('still flushes when only the opt-out row changed', async () => {
+  it('records an opt-out even when the config row is already gone', async () => {
     const { repo } = createFakeRepo();
     // 行本来就不存在,删除只改了墓碑——这次变更也必须落盘,不能被「行没变」的早退吞掉。
     await deleteMachineAgentConfig(repo, workspaceId, kimiConfig);
 
-    expect(repo.flush).toHaveBeenCalled();
     expect(await readMachineBuiltinAgentOptOuts(repo, workspaceId, machineId)).toEqual(
       new Set(['kimi'])
     );

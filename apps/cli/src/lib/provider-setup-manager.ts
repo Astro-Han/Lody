@@ -4,6 +4,7 @@ import {
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
   getMachineFlockProviderSetups,
+  findBuiltinAgentOptOutToRetract,
   getMachineFlockProviderSetupCancellations,
   getServerNow,
   machineFlockKeys,
@@ -343,6 +344,7 @@ export class ProviderSetupManager {
         machineFlockKeys.providerSetupCancellation(setupId),
         machineFlockKeys.agentConfig(setupId),
       ],
+      families: ['builtinAgentOptOut'],
     });
     const cancellation = getMachineFlockProviderSetupCancellations(rows)[setupId];
     if (cancellation) {
@@ -369,6 +371,12 @@ export class ProviderSetupManager {
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
     flock.set(machineFlockKeys.agentConfig(setupId), setup.config, now);
+    // 发布就是用户显式添加，之前的同类型删除意图要一并收回，否则列表里有它、
+    // 启动却仍当它被删了。
+    const optOutKey = findBuiltinAgentOptOutToRetract(rows, setup.config);
+    if (optOutKey) {
+      flock.delete(optOutKey, now);
+    }
     flock.delete(machineFlockKeys.providerSetup(setupId), now);
     flock.commit();
     await this.repo.flush();
