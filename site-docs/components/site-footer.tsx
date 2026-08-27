@@ -9,7 +9,7 @@ import { founderCallUrl } from '@site/lib/founder-call';
 export type SiteFooterLocale = 'en' | 'zh';
 
 const X_HREF = 'https://x.com/lody_ai';
-const GITHUB_HREF = 'https://github.com/loro-dev/lody-oss';
+const GITHUB_HREF = 'https://github.com/LodyAI/Lody';
 
 const copy = {
   en: {

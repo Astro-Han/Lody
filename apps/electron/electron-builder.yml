@@ -114,5 +114,5 @@ npmRebuild: false
 # during packaging also depends on this block being present.
 publish:
   provider: github
-  owner: loro-dev
-  repo: lody-oss
+  owner: LodyAI
+  repo: Lody
