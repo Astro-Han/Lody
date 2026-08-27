@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   issues: write
+  pull-requests: write
 
 concurrency:
   group: external-pr-size-${{ github.event.pull_request.number || github.event_name }}
