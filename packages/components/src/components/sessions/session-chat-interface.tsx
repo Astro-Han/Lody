@@ -4939,7 +4939,13 @@ export const SessionChatInterface = memo(
       ]
     );
 
-    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(session);
+    const queueSteerCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(
+      capabilityAuthority,
+      queueSteerCapability
+    );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
         if (shouldUseNativeQueueSteer) {
