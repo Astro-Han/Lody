@@ -1693,6 +1693,8 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.mirror = new Mirror({
       doc: handle.doc,
       schema: sessionDocSchema,
+      // Tolerate root keys written by peers running a newer schema version.
+      ignoreUnknownProperties: true,
       // Type assertion needed because InferInputType makes plan required even though
       // schema defines it as required: false. At runtime, plan is optional on history entries.
       initialState: merged as unknown as ConstructorParameters<typeof Mirror>[0]['initialState'],

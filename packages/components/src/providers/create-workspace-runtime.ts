@@ -3611,6 +3611,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const mirror = new Mirror({
       doc: persistedDoc.doc as LoroDoc,
       schema: sessionDocSchema,
+      // Tolerate root keys written by peers running a newer schema version.
+      ignoreUnknownProperties: true,
       // Plan is now stored per-turn on history entries, not at root level
       initialState: { session: { id: sessionId }, history: [] },
       debug: false,
@@ -3807,6 +3809,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const mirror = new Mirror({
       doc: persistedDoc.doc as LoroDoc,
       schema: previewVisualCommentDocSchema,
+      // Tolerate root keys written by peers running a newer schema version.
+      ignoreUnknownProperties: true,
       initialState: { meta: { sessionId }, turns: {} },
       debug: false,
     });
@@ -3895,6 +3899,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     const mirror = new Mirror({
       doc: persistedDoc.doc as LoroDoc,
       schema: taskDocSchema,
+      // Tolerate root keys written by peers running a newer schema version.
+      ignoreUnknownProperties: true,
       initialState: {
         meta: {
           taskId,
