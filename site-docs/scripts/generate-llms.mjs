@@ -163,7 +163,7 @@ ${blog.map(renderLink).join('\n')}
 
 ## External Links
 
-- [GitHub](https://github.com/loro-dev/lody-oss) - Open-source CLI and local desktop.
+- [GitHub](https://github.com/LodyAI/Lody) - Open-source CLI and local desktop.
 - [Discord](https://discord.gg/E8mZtMu38s) - Community and support.
 - [X](https://x.com/lody_ai) - Product updates.
 - [Loro](https://loro.dev) - Local-first technology used by Lody.

@@ -3,7 +3,7 @@
   "version": "0.76.0",
   "description": "Self-contained single-file HTML viewer for Lody code reviews, fetched on demand by `lody review`.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "files": [
     "standalone.html"
   ],

@@ -38,5 +38,5 @@
     "typescript": "catalog:",
     "vitest": "^3.2.4"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }
