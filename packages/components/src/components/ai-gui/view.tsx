@@ -31,7 +31,7 @@ import {
   getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
 } from './message-copy';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
 import { Virtualizer, type VirtualizerHandle } from 'virtua';
@@ -69,8 +69,9 @@ import { VisualAnnotationReferenceCard } from './visual-annotation-reference-car
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
-import { authTokenAtom } from '@/atoms/runtime';
+import { authTokenAtom, activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
+import { redeliverSessionUserTurnWithRuntime } from '@/hooks/use-session-actions';
 import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
@@ -2544,13 +2545,25 @@ const UserMessageRowView = ({
   const rpcDelivered = rpcDeliveredTurns.has(getRpcDeliveredTurnKey(sessionId, message.id));
   const isPendingApply = message.status === 'pending_apply' && !rpcDelivered;
   const isDelivered = !isPendingApply && (isSessionHistoryDelivered(message) || rpcDelivered);
+  // Missing-history recovery negatively acknowledged this exact turn
+  // (`SessionMeta.lastMissingHistoryUserMsgId`): the entry is visible but kept
+  // out of every dispatch path, so it renders as a terminal "not delivered"
+  // state with an explicit deliver-now action instead of an endless "sending"
+  // one. Display-only derivation from meta + entry state — no CLI repair
+  // write, no entry status change; only the user's deliver-now re-dispatches.
+  const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
+  const isUndelivered = sessionMeta?.lastMissingHistoryUserMsgId === message.id && !isDelivered;
+  const workspaceRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const jotaiStore = useStore();
   const pinCtx = useSessionPin();
-  const showSendingSpinner = useIsMessageSendingVisible(message.id) && !isDelivered;
+  const showSendingSpinner =
+    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered;
 
   const hasTextContent = hasTextContentFromMessageItems(message.items);
   const [didCopy, setDidCopy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isRedelivering, setIsRedelivering] = useState(false);
   const [editText, setEditText] = useState(() => getTextContentFromMessageItems(message.items));
   const [didCopyMessageId, setDidCopyMessageId] = useState(message.id);
   if (didCopyMessageId !== message.id) {
@@ -2577,6 +2590,29 @@ const UserMessageRowView = ({
     pinCtx.onPin(isPinned ? null : message.id);
   }, [pinCtx, isPinned, message.id]);
 
+  const handleDeliverNow = useCallback(async () => {
+    if (isRedelivering || !workspaceRuntime) return;
+    setIsRedelivering(true);
+    try {
+      await redeliverSessionUserTurnWithRuntime(
+        workspaceRuntime,
+        jotaiStore,
+        sessionId,
+        message.id
+      );
+    } catch (error) {
+      console.warn('Failed to redeliver user turn', { sessionId, userTurnId: message.id, error });
+      toast.error(
+        t(
+          'sessions.messageStatus.deliverNowFailed',
+          'Failed to deliver the message - please try again'
+        )
+      );
+    } finally {
+      setIsRedelivering(false);
+    }
+  }, [isRedelivering, workspaceRuntime, jotaiStore, sessionId, message.id, t]);
+
   const handleSaveEdit = useCallback(async () => {
     if (!onEdit || isSavingEdit || !editText.trim()) return;
     setIsSavingEdit(true);
@@ -2602,7 +2638,29 @@ const UserMessageRowView = ({
       >
         <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isPendingApply ? (
+          {isUndelivered ? (
+            <>
+              <span className="inline-flex items-center gap-1 text-destructive">
+                <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isRedelivering}
+                className="h-5 gap-1 px-1.5 text-[11px] font-normal text-primary hover:bg-hover hover:text-primary"
+                onClick={() => {
+                  void handleDeliverNow();
+                }}
+              >
+                {isRedelivering ? (
+                  <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+                ) : null}
+                {t('sessions.messageStatus.deliverNow', 'Deliver now')}
+              </Button>
+            </>
+          ) : isPendingApply ? (
             <span className="inline-flex items-center gap-1 text-muted-foreground">
               <Clock3 className="h-3.5 w-3.5" strokeWidth={2} />
               {!isMobile ? t('sessions.messageStatus.pendingApply', 'Steering') : null}

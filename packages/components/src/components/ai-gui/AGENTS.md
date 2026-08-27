@@ -197,5 +197,16 @@ context/message-flow.md.
   **`isMessageContent` gates rendering** — a `MessageContent` variant missing a `case`
   here is silently dropped from the parsed history (see `index.tsx`).
 - `message-send-status-context.tsx` / `message-copy.ts` — send-state + copy helpers.
+- A user entry negatively acknowledged by missing-history recovery
+  (`SessionMeta.lastMissingHistoryUserMsgId === message.id`, entry still
+  non-terminal) renders as a terminal "Not delivered" state with a "Deliver now"
+  action, never as an endless sending spinner. The derivation is display-only
+  (meta + entry state, no CLI repair write and no entry status change), and the
+  action is the ONLY re-dispatch entry point: `redeliverSessionUserTurnWithRuntime`
+  (`@/hooks/use-session-actions`) re-aims `latestUserMsgId` and clears the marker
+  only for the exact id. The row deliberately uses that module-level function with
+  `activeWorkspaceRuntimeAtom` + `useStore()` rather than mounting
+  `useSessionActions` per row — Storybook stories render `MessageRowView` without
+  a `PlatformContext`. Never re-dispatch a marker-matched turn automatically.
 - File attachment rendering and mobile image-preview invariants:
   [session-files-rendering.md](session-files-rendering.md).

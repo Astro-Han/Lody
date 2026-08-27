@@ -542,6 +542,97 @@ describe('SessionDispatchWatcher', () => {
     }
   });
 
+  it('holds a stashed RPC turn while the missing-history marker names it, dispatching only after an explicit redelivery clears the marker', async () => {
+    const continueSession = vi.fn(async () => {});
+    const startSession = vi.fn(async () => {});
+    const cancelSession = vi.fn(async () => ({ success: true }));
+    const sessionId = 'session-rpc-marker-suppressed' as SessionId;
+    const userTurnId = 'turn-missing';
+    let currentMeta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' as const },
+      latestUserMsgId: userTurnId,
+      lastMissingHistoryUserMsgId: userTurnId,
+    };
+
+    const sessionDoc = {
+      roomId: `session-${sessionId}`,
+      mirror: {
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      getMetaState: vi.fn(async () => currentMeta),
+      getHistory: vi.fn(async () => []),
+      updateHistory: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    };
+
+    const workspaceDocument = {
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: currentMeta })),
+        upsertDocMeta: vi.fn(async () => {}),
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      onMetaRoomSynced: vi.fn(() => vi.fn()),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession,
+        startSession,
+        cancelSession,
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    await expect(
+      watcher.offerRpcTurn({
+        sessionId,
+        userTurnId,
+        userId: 'user-1',
+        timestamp: new Date().toISOString(),
+        inputConfig: { prompt: 'held by the marker' },
+      })
+    ).resolves.toBe('accepted');
+
+    // A duplicate RPC offer alone must not resurrect the negatively
+    // acknowledged turn: the stash keeps it, but no source may dispatch it.
+    await runMaybeHandleSession(watcher, sessionId);
+    expect(startSession).not.toHaveBeenCalled();
+    expect(continueSession).not.toHaveBeenCalled();
+    expect(watcher.hasPendingDispatch(sessionId)).toBe(true);
+
+    // The deliver-now producer write re-aims the pointer at the exact turn and
+    // clears the marker; the stashed payload then dispatches exactly once.
+    currentMeta = { ...currentMeta, lastMissingHistoryUserMsgId: undefined };
+    await runMaybeHandleSession(watcher, sessionId);
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session/create',
+        sessionId,
+        userTurnId,
+        acpSessionConfig: expect.objectContaining({ prompt: 'held by the marker' }),
+      }),
+      { dispatchSource: 'rpc' }
+    );
+  });
+
   it('repairs a late-arriving entry for an already-handled fast-path turn instead of re-dispatching', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});

@@ -312,6 +312,15 @@ export type SessionActions = {
     userTurnId: string,
     options?: { inputConfig?: SessionTurnInputConfig; machineId?: MachineId | null }
   ) => Promise<void>;
+  /**
+   * Re-dispatch one visible user turn the missing-history recovery negatively
+   * acknowledged. Producer write only; never invoked automatically.
+   */
+  redeliverSessionUserTurn: (
+    sessionId: SessionId,
+    userTurnId: string,
+    options?: { machineId?: MachineId | null }
+  ) => Promise<void>;
   requestSessionCancel: (sessionId: SessionId, turnId: string) => Promise<void>;
   requestSessionSteer: (
     sessionId: SessionId,
@@ -411,6 +420,131 @@ export async function touchSessionActivityMeta(
   if (parentSessionId && parentSessionId !== sessionId) {
     await upsertSessionActivityPatch(runtime, parentSessionId, proposal);
   }
+}
+
+/**
+ * Fire the `session/dispatch-turn` Machine RPC fast path for a user turn that
+ * is (or is about to be) durable. Returns a promise resolving to whether the
+ * machine accepted the offer, or null when the offer cannot be built. The RPC
+ * only accelerates dispatch — the durable `latestUserMsgId` pointer write
+ * remains recovery truth.
+ */
+function fireSessionDispatchTurnRpc(
+  runtime: WorkspaceRuntime,
+  store: ReturnType<typeof useStore>,
+  args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    machineId: MachineId | null | undefined;
+    timestamp: string | undefined;
+    inputConfig: SessionTurnInputConfig | undefined;
+    dispatchUserId: string | undefined;
+  }
+): Promise<boolean> | null {
+  const { sessionId, userTurnId, machineId, timestamp, inputConfig, dispatchUserId } = args;
+  // The Machine RPC fast path rides the facade's per-target routing: local
+  // machines go over the local socket RPC, remote machines over the cloud
+  // JSON stream.
+  if (!machineId || !timestamp || !inputConfig || !dispatchUserId) {
+    return null;
+  }
+  const rpcArgs = {
+    sessionId,
+    userTurnId,
+    userId: dispatchUserId,
+    timestamp,
+    inputConfig,
+  };
+  // Attachments ride as R2/local references, so payloads are normally
+  // small; skip the fast path for pathological sizes rather than risk an
+  // oversized stream append.
+  try {
+    if (JSON.stringify(rpcArgs).length > 256 * 1024) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return runtime
+    .requestSessionDispatchTurn(machineId, rpcArgs)
+    .then((response) => {
+      if (response?.accepted) {
+        store.set(rpcDeliveredTurnsAtom, (previous) =>
+          addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
+        );
+        return true;
+      }
+      log(
+        'session dispatch-turn rpc not accepted for %s/%s: %s',
+        sessionId,
+        userTurnId,
+        response
+          ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
+          : 'timeout'
+      );
+      return false;
+    })
+    .catch((error) => {
+      log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
+      return false;
+    });
+}
+
+/**
+ * Explicitly redeliver one visible user turn that never executed — the
+ * deliver-now action on an entry the missing-history recovery negatively
+ * acknowledged (`SessionMeta.lastMissingHistoryUserMsgId`).
+ *
+ * This is a dispatch-producer write: it re-aims `latestUserMsgId` at the
+ * exact entry (the load-bearing half — watch activation reads meta only) and
+ * lifts the negative acknowledgement ONLY when it names this entry, so a
+ * marker belonging to a different missing turn is never cleared. The durable
+ * write lands BEFORE the RPC fast path fires: the watcher refuses a
+ * marker-matched turn from every turn source until this write clears it,
+ * and once it lands, ordinary turn selection dispatches the entry exactly
+ * once. Never call this from an automatic path — re-dispatch must stay a
+ * deliberate user action.
+ *
+ * Exported for surfaces that cannot mount `useSessionActions` (e.g. per-row
+ * message renderers); the hook method of the same name delegates here.
+ */
+export async function redeliverSessionUserTurnWithRuntime(
+  runtime: WorkspaceRuntime,
+  store: ReturnType<typeof useStore>,
+  sessionId: SessionId,
+  userTurnId: string,
+  options?: { machineId?: MachineId | null }
+): Promise<void> {
+  const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
+    sessionStore
+      .getState()
+      .history.find((item) => item.id === userTurnId && item.role === 'user')
+  );
+  if (!entry) {
+    throw new Error('User turn is not visible in session history');
+  }
+  const roomId = getSessionRoomId(sessionId);
+  const existing = await runtime.repo.getDocMeta(roomId);
+  if (isLoroRepoDocDeleted(existing)) {
+    return;
+  }
+  const meta = existing?.meta as SessionMeta | undefined;
+  await runtime.writer.upsertDocMeta(roomId, {
+    latestUserMsgId: userTurnId,
+    ...(meta?.lastMissingHistoryUserMsgId === userTurnId
+      ? { lastMissingHistoryUserMsgId: undefined }
+      : {}),
+  } as Partial<SessionMeta>);
+  // Fast path: accelerate the now-authorized dispatch. A failure here is
+  // harmless — the durable pointer write above wakes the watcher anyway.
+  void fireSessionDispatchTurnRpc(runtime, store, {
+    sessionId,
+    userTurnId,
+    machineId: options?.machineId ?? meta?.machineId,
+    timestamp: entry.timestamp,
+    inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
+    dispatchUserId: entry.userId?.trim(),
+  });
 }
 
 export function useSessionActions(): SessionActions {
@@ -699,52 +833,15 @@ export function useSessionActions(): SessionActions {
       const dispatchUserId = entry?.userId?.trim();
       let rpcAcceptedPromise: Promise<boolean> | null = null;
       const startDispatchTurnRpc = (machineId: MachineId | null | undefined): void => {
-        // The Machine RPC fast path rides the facade's per-target routing: local
-        // machines go over the local socket RPC, remote machines over the cloud
-        // JSON stream. The durable pointer write below remains recovery truth.
-        if (!machineId || !entry || !inputConfig || !dispatchUserId) {
-          return;
-        }
-        const rpcArgs = {
+        // The durable pointer write below remains recovery truth.
+        rpcAcceptedPromise = fireSessionDispatchTurnRpc(runtime, store, {
           sessionId,
           userTurnId,
-          userId: dispatchUserId,
-          timestamp: entry.timestamp,
+          machineId,
+          timestamp: entry?.timestamp,
           inputConfig,
-        };
-        // Attachments ride as R2/local references, so payloads are normally
-        // small; skip the fast path for pathological sizes rather than risk an
-        // oversized stream append.
-        try {
-          if (JSON.stringify(rpcArgs).length > 256 * 1024) {
-            return;
-          }
-        } catch {
-          return;
-        }
-        rpcAcceptedPromise = runtime
-          .requestSessionDispatchTurn(machineId, rpcArgs)
-          .then((response) => {
-            if (response?.accepted) {
-              store.set(rpcDeliveredTurnsAtom, (previous) =>
-                addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
-              );
-              return true;
-            }
-            log(
-              'session dispatch-turn rpc not accepted for %s/%s: %s',
-              sessionId,
-              userTurnId,
-              response
-                ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
-                : 'timeout'
-            );
-            return false;
-          })
-          .catch((error) => {
-            log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
-            return false;
-          });
+          dispatchUserId,
+        });
       };
 
       // Local history writes are the accept boundary. Remote document sync is a
@@ -789,6 +886,18 @@ export function useSessionActions(): SessionActions {
         }
         throw error;
       }
+    },
+    [runtime, store]
+  );
+
+  /** Deliver-now on a missing-history-acked user turn. See
+   * `redeliverSessionUserTurnWithRuntime` for the write contract. */
+  const redeliverSessionUserTurn = useCallback(
+    async (sessionId: SessionId, userTurnId: string, options?: { machineId?: MachineId | null }) => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      await redeliverSessionUserTurnWithRuntime(runtime, store, sessionId, userTurnId, options);
     },
     [runtime, store]
   );
@@ -1313,6 +1422,7 @@ export function useSessionActions(): SessionActions {
     startSession,
     addSessionHistory,
     requestSessionDispatch,
+    redeliverSessionUserTurn,
     requestSessionCancel,
     requestSessionSteer,
     touchSessionActivity,

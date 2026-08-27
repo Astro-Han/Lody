@@ -49,7 +49,11 @@ export type SessionWatchSnapshot = {
  * `lastMissingHistoryUserMsgId` is a negative acknowledgement for one exact
  * activation. Keeping the producer-owned pointers intact avoids racing a later
  * producer write; comparing ids makes the acknowledgement harmless as soon as a
- * different turn is published.
+ * different turn is published. The marker is a one-shot negative ack for that
+ * exact turn: a late-arriving history entry is NEVER re-dispatched automatically
+ * (the renderer shows it as "not delivered"), and the only way back into
+ * dispatch is an explicit dispatch-producer write — the deliver-now action —
+ * that re-aims `latestUserMsgId` at the exact id and clears the marker.
  */
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
   const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
@@ -288,7 +292,9 @@ export function resolveSessionCancelAction(
  *
  * A turn matching `lastMissingHistoryUserMsgId` is excluded from every path:
  * recovery already surfaced its delivery failure, so a late payload must not be
- * resurrected by an unrelated activation.
+ * resurrected by an unrelated activation. The exclusion lifts only when a
+ * dispatch producer explicitly redelivers that exact turn (re-aiming
+ * `latestUserMsgId` at it and clearing the marker) — never automatically.
  *
  * Returns the first matching entry (chronological scan), or null.
  */

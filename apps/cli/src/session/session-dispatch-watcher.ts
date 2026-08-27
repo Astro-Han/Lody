@@ -339,9 +339,14 @@ const isConfigOptionValueRecord = (
  * essential: clearing either one after an awaited refresh can overwrite a newer
  * activation or processing claim from another peer.
  * The tradeoff is that a genuinely late History CRDT update after the timeout
- * will not be auto-dispatched; the UI instead asks the user to send another
- * message. That is preferred over an unbounded silent wait or repeated recovery
- * loops for a turn whose prompt payload never became readable.
+ * is never auto-dispatched: the marker stays, and the renderer derives a
+ * visible "not delivered" state for that exact entry from the marker plus its
+ * non-terminal status (no CLI repair write, no schema change). The only way
+ * the turn runs is the user's explicit deliver-now action on that entry — a
+ * dispatch-producer write that re-aims `latestUserMsgId` at the exact id and
+ * clears the marker, after which ordinary turn selection dispatches it once.
+ * That is preferred over an unbounded silent wait, repeated recovery loops,
+ * or auto-executing a message the user may already have resent as a new turn.
  *
  * Sessions without an explicit activation signal stay metadata-only. History is
  * a turn-selection source after activation, not a startup activation index.
@@ -745,6 +750,13 @@ export class SessionDispatchWatcher {
    * or already reached a terminal state (handled/denied while stashed) are
    * dropped instead of returned, so a denied turn cannot re-enter dispatch
    * from the stash.
+   *
+   * An entry whose id matches `lastMissingHistoryUserMsgId` stays stashed but
+   * is never returned: the negative acknowledgement excludes that exact turn
+   * from every turn source until a dispatch producer re-aims
+   * `latestUserMsgId` at it and clears the marker (the explicit deliver-now
+   * write). Only that durable write authorizes re-dispatch — a duplicate RPC
+   * offer alone must not resurrect the turn while the marker stands.
    */
   private peekStashedRpcTurn(sessionId: SessionId, meta: SessionMeta): SessionHistoryInput | null {
     const stash = this.rpcTurnStash.get(sessionId);
@@ -761,6 +773,9 @@ export class SessionDispatchWatcher {
         ) !== undefined;
       if (stashed.expiresAtMs <= now || isTerminal) {
         stash.delete(userTurnId);
+        continue;
+      }
+      if (userTurnId === meta.lastMissingHistoryUserMsgId) {
         continue;
       }
       this.turnSourceHints.set(`${sessionId}:${userTurnId}`, 'rpc');
@@ -2193,7 +2208,9 @@ export class SessionDispatchWatcher {
       return null;
     }
     this.deps.logger.debug(
-      `[${sessionId}] Pending user turn metadata is visible but history is missing it; waiting up to ${
+      `[${sessionId}] Pending user turn ${
+        getPendingUserTurnActivationId(meta) ?? 'unknown'
+      } metadata is visible but history is missing it; waiting up to ${
         SessionDispatchWatcher.HISTORY_SYNC_WAIT_TIMEOUT_MS / 1000
       }s for history CRDT sync`
     );
@@ -2500,6 +2517,11 @@ export class SessionDispatchWatcher {
       recoveryPatch.lastMissingHistoryUserMsgId = pendingUserMsgId;
     }
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, recoveryPatch);
+    this.deps.logger.info(
+      `[${sessionId}] Recorded missing-history recovery for user turn ${
+        pendingUserMsgId ?? 'unknown'
+      }; the turn stays undispatchable until the user explicitly redelivers it`
+    );
 
     if (this.deps.recordChatFailure) {
       try {
