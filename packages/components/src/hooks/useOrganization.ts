@@ -11,8 +11,12 @@ import {
   getCachedWorkspaceId,
 } from '@/lib/local-storage-cache';
 import { clearLastAppRoutePathIfWorkspaceMatch } from '@/lib/last-app-route';
-import { useSetAtom } from 'jotai';
-import { currentWorkspaceIdAtom } from '@/atoms';
+import { useSetAtom, useStore } from 'jotai';
+import {
+  setWorkspaceContextAtRevisionAtom,
+  setWorkspaceContextAtom,
+  workspaceContextSnapshotAtom,
+} from '@/atoms';
 import { WorkspaceId } from '@lody/shared';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useAuthClient } from '../providers/convex-provider';
@@ -224,7 +228,9 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     error: activeOrganizationError,
   } = authClient.useActiveOrganization();
 
-  const setCurrentWorkspace = useSetAtom(currentWorkspaceIdAtom);
+  const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
+  const setWorkspaceContextAtRevision = useSetAtom(setWorkspaceContextAtRevisionAtom);
+  const workspaceContextStore = useStore();
 
   const organizationsRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [organizationsRetryCount, setOrganizationsRetryCount] = useState(0);
@@ -457,28 +463,27 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       }
     }
 
-    if (resolvedActiveOrganization) {
-      setCurrentWorkspace(resolvedActiveOrganization.id as WorkspaceId);
-      // Cache workspace info for offline-first access on subsequent visits
-      if (resolvedActiveOrganization.slug) {
-        cacheWorkspaceInfo(
-          resolvedActiveOrganization.slug,
-          resolvedActiveOrganization.id,
-          resolvedActiveOrganization.name
-        );
-      }
+    // Only the route-scoped hook instance may publish render identity. Generic
+    // consumers (for example the sidebar) can briefly observe the previous
+    // Better Auth organization while a new URL target is already active.
+    if (!targetSlug) return;
+
+    if (resolvedActiveOrganization?.slug === targetSlug) {
+      setWorkspaceContext({
+        slug: targetSlug,
+        workspaceId: resolvedActiveOrganization.id as WorkspaceId,
+      });
       return;
     }
     if (optimisticWorkspaceId) {
-      setCurrentWorkspace(optimisticWorkspaceId);
-      return;
+      setWorkspaceContext({ slug: targetSlug, workspaceId: optimisticWorkspaceId });
     }
-    setCurrentWorkspace(null);
   }, [
     activeOrganization?.id,
     optimisticWorkspaceId,
     resolvedActiveOrganization,
-    setCurrentWorkspace,
+    setWorkspaceContext,
+    targetSlug,
     user?.id,
   ]);
 
@@ -603,11 +608,12 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         activeOrganization: resolvedActiveOrganization,
       });
       let didDelete = false;
+      let transitionRevision: number | null = null;
       // Clear before the server removes membership so workspace-scoped Convex
       // subscriptions skip immediately; otherwise listVisibleMachines can run
       // with the just-deleted workspace id and throw a 403 during redirect.
       if (removalTransition.isActiveOrganization) {
-        setCurrentWorkspace(null);
+        transitionRevision = setWorkspaceContext({ slug: null, workspaceId: null });
       }
       try {
         const { data, error } = await authClient.organization.delete({
@@ -628,15 +634,44 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
           }
           if (removalTransition.isActiveOrganization) {
             if (removalTransition.fallbackOrganization) {
-              try {
-                await switchOrganizationOrThrow(removalTransition.fallbackOrganization.id);
-                setCurrentWorkspace(removalTransition.fallbackOrganization.id as WorkspaceId);
-              } catch (switchError) {
-                console.error('Failed to switch organization after delete:', switchError);
-                setCurrentWorkspace(null);
+              const fallbackOrganization = removalTransition.fallbackOrganization;
+              const transitionIsCurrent = () =>
+                transitionRevision !== null &&
+                workspaceContextStore.get(workspaceContextSnapshotAtom).revision ===
+                  transitionRevision;
+              if (transitionIsCurrent()) {
+                try {
+                  await switchOrganizationOrThrow(fallbackOrganization.id);
+                  const latestContext = workspaceContextStore.get(workspaceContextSnapshotAtom);
+                  if (latestContext.revision !== transitionRevision) {
+                    if (
+                      latestContext.workspaceId &&
+                      latestContext.workspaceId !== fallbackOrganization.id
+                    ) {
+                      await switchOrganizationOrThrow(latestContext.workspaceId);
+                    }
+                  } else {
+                    setWorkspaceContextAtRevision({
+                      revision: transitionRevision,
+                      context: {
+                        slug: fallbackOrganization.slug,
+                        workspaceId: fallbackOrganization.id as WorkspaceId,
+                      },
+                    });
+                  }
+                } catch (switchError) {
+                  console.error('Failed to switch organization after delete:', switchError);
+                  setWorkspaceContextAtRevision({
+                    revision: transitionRevision,
+                    context: { slug: null, workspaceId: null },
+                  });
+                }
               }
             } else {
-              setCurrentWorkspace(null);
+              setWorkspaceContextAtRevision({
+                revision: transitionRevision,
+                context: { slug: null, workspaceId: null },
+              });
             }
           }
           // TODO: delete local workspace data
@@ -650,7 +685,13 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         return data;
       } catch (err) {
         if (removalTransition.isActiveOrganization && !didDelete) {
-          setCurrentWorkspace(organizationId as WorkspaceId);
+          setWorkspaceContextAtRevision({
+            revision: transitionRevision,
+            context: {
+              slug: removalTransition.removedSlug,
+              workspaceId: organizationId as WorkspaceId,
+            },
+          });
         }
         console.error('Failed to delete organization:', err);
         setMutationError('Failed to delete organization');
@@ -665,8 +706,10 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       refetchActiveOrganization,
       refetchOrganizations,
       resolvedActiveOrganization,
-      setCurrentWorkspace,
+      setWorkspaceContext,
+      setWorkspaceContextAtRevision,
       switchOrganizationOrThrow,
+      workspaceContextStore,
     ]
   );
 
@@ -686,8 +729,9 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         activeOrganization: resolvedActiveOrganization,
       });
       let didLeave = false;
+      let transitionRevision: number | null = null;
       if (removalTransition.isActiveOrganization) {
-        setCurrentWorkspace(null);
+        transitionRevision = setWorkspaceContext({ slug: null, workspaceId: null });
       }
       try {
         const { data, error } = await authClient.organization.leave({
@@ -702,15 +746,44 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
           }
           if (removalTransition.isActiveOrganization) {
             if (removalTransition.fallbackOrganization) {
-              try {
-                await switchOrganizationOrThrow(removalTransition.fallbackOrganization.id);
-                setCurrentWorkspace(removalTransition.fallbackOrganization.id as WorkspaceId);
-              } catch (switchError) {
-                console.error('Failed to switch organization after leave:', switchError);
-                setCurrentWorkspace(null);
+              const fallbackOrganization = removalTransition.fallbackOrganization;
+              const transitionIsCurrent = () =>
+                transitionRevision !== null &&
+                workspaceContextStore.get(workspaceContextSnapshotAtom).revision ===
+                  transitionRevision;
+              if (transitionIsCurrent()) {
+                try {
+                  await switchOrganizationOrThrow(fallbackOrganization.id);
+                  const latestContext = workspaceContextStore.get(workspaceContextSnapshotAtom);
+                  if (latestContext.revision !== transitionRevision) {
+                    if (
+                      latestContext.workspaceId &&
+                      latestContext.workspaceId !== fallbackOrganization.id
+                    ) {
+                      await switchOrganizationOrThrow(latestContext.workspaceId);
+                    }
+                  } else {
+                    setWorkspaceContextAtRevision({
+                      revision: transitionRevision,
+                      context: {
+                        slug: fallbackOrganization.slug,
+                        workspaceId: fallbackOrganization.id as WorkspaceId,
+                      },
+                    });
+                  }
+                } catch (switchError) {
+                  console.error('Failed to switch organization after leave:', switchError);
+                  setWorkspaceContextAtRevision({
+                    revision: transitionRevision,
+                    context: { slug: null, workspaceId: null },
+                  });
+                }
               }
             } else {
-              setCurrentWorkspace(null);
+              setWorkspaceContextAtRevision({
+                revision: transitionRevision,
+                context: { slug: null, workspaceId: null },
+              });
             }
           }
           void refetchOrganizations();
@@ -723,7 +796,13 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         return data;
       } catch (err) {
         if (removalTransition.isActiveOrganization && !didLeave) {
-          setCurrentWorkspace(organizationId as WorkspaceId);
+          setWorkspaceContextAtRevision({
+            revision: transitionRevision,
+            context: {
+              slug: removalTransition.removedSlug,
+              workspaceId: organizationId as WorkspaceId,
+            },
+          });
         }
         console.error('Failed to leave organization:', err);
         setMutationError('Failed to leave organization');
@@ -738,9 +817,11 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       refetchActiveOrganization,
       refetchOrganizations,
       resolvedActiveOrganization,
-      setCurrentWorkspace,
+      setWorkspaceContext,
+      setWorkspaceContextAtRevision,
       switchOrganizationOrThrow,
       user,
+      workspaceContextStore,
     ]
   );
 

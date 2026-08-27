@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import type { SessionMeta } from '@lody/shared';
-import { currentWorkspaceIdAtom, userAtom } from '@/atoms';
+import type { SessionMeta, WorkspaceId } from '@lody/shared';
+import { userAtom } from '@/atoms';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import {
@@ -14,9 +14,12 @@ import {
 } from '@/lib/session-sharing';
 import { useAuthClient } from '../providers/convex-provider';
 import { useAppCapability } from '@/lib/app-platform';
+import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 type UseSessionSharingOptions = {
   includeLocalProjectDetails?: boolean;
+  workspaceId?: WorkspaceId | null;
+  enabled?: boolean;
 };
 
 /**
@@ -40,21 +43,32 @@ function useSessionSharingActiveOrganization(teamSharingAvailable: boolean) {
 export function useSessionSharing(options: UseSessionSharingOptions = {}) {
   const teamSharingAvailable = useAppCapability('teamSharing');
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const scope = useResolvedWorkspaceScope(options);
+  const workspaceId = scope.workspaceId;
+  const enabled = scope.enabled;
   const activeOrganization = useSessionSharingActiveOrganization(teamSharingAvailable);
-  const machineIndex = useVisibleMachineMetas({ includeMachineFlock: false });
+  const machineIndex = useVisibleMachineMetas({
+    includeMachineFlock: false,
+    workspaceId,
+    enabled,
+  });
   const projectIndex = useVisibleLocalProjects({
     includeMachineFlock: options.includeLocalProjectDetails ?? false,
     syncMachineFlock: false,
+    workspaceId,
+    enabled,
   });
   const { machines, accessByMachineId, isLoading: machineVisibilityLoading } = machineIndex;
   const { projects, accessByProjectKey, isLoading: localProjectVisibilityLoading } = projectIndex;
-  const setMachineSharedWithTeam = useCloudMutation(cloudOperations.machines.setMachineSharedWithTeam);
+  const setMachineSharedWithTeam = useCloudMutation(
+    cloudOperations.machines.setMachineSharedWithTeam
+  );
   const setLocalProjectSharedWithTeam = useCloudMutation(
     cloudOperations.localProjects.setLocalProjectSharedWithTeam
   );
   const isLoading = machineVisibilityLoading || localProjectVisibilityLoading;
   const showSessionSharing =
+    enabled &&
     teamSharingAvailable &&
     shouldShowSessionSharing({
       workspaceId,
