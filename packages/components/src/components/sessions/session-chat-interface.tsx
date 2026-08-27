@@ -3887,6 +3887,37 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    // Resend a user turn the missing-history recovery negatively acknowledged:
+    // the row's "Not delivered" label opens a confirmation dialog that calls
+    // this with the turn's exact content. It rides the ordinary send path as a
+    // NEW message — the old turn is never revived.
+    const handleResendUndelivered = useCallback(
+      async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
+        const accepted = await handleSendMessage(inputBlocks);
+        if (accepted) {
+          // Supersede the abandoned delivery attempt. The ordinary send clears
+          // the missing-history marker, and without a terminal status the stale
+          // pending entry would become dispatchable again (duplicating the just
+          // resent content). 'canceled' is the truthful terminal state and also
+          // hides the row's not-delivered label independent of the marker.
+          try {
+            await updateHistoryEntry(userTurnId, (entry) => ({
+              ...entry,
+              status: 'canceled',
+              read: true,
+            }));
+          } catch (error) {
+            console.warn('Failed to supersede the undelivered user turn', {
+              userTurnId,
+              error,
+            });
+          }
+        }
+        return accepted;
+      },
+      [handleSendMessage, updateHistoryEntry]
+    );
+
     const autoReview = useAutoReview(session?.id, session);
 
     const handleContinueDiscussingProposedPlan = useCallback(() => {
@@ -5629,6 +5660,7 @@ export const SessionChatInterface = memo(
                           onEditLastUser={
                             editableLastUserMessageId ? handleEditLastUser : undefined
                           }
+                          onResendUndelivered={handleResendUndelivered}
                           forkingAssistantMessageId={forkingAssistantMessageId}
                           onNavigateSession={onNavigateSession}
                           onLastCompletedAssistantMessageIdChange={

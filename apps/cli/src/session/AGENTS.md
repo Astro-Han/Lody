@@ -34,9 +34,19 @@ delegation proofs or a shared-machine gate without a new product and security de
   Missing-history delivery recovery must never advance `lastHandledUserMsgId`;
   preserve the producer/executor pointers, set `lastMissingHistoryUserMsgId` as a
   negative acknowledgement for that exact turn, and surface a `chat_failed` notice
-  instead. Watch activation and turn selection suppress pointers only when their id
-  matches that marker; a different producer id wakes the session without any
-  read-await-clear race. The watcher must not publish or clear
+  instead. The marker is a PERMANENT one-shot negative ack for the exact turn id:
+  watch activation and turn selection (history AND the RPC stash) suppress pointers
+  only when their id matches that marker; a different producer id wakes the session
+  without any read-await-clear race. A late-arriving history entry is NEVER
+  re-dispatched — no path revives the old turn. The renderer derives a visible
+  "not delivered" label for that exact entry from the marker plus its non-terminal
+  status (no CLI repair write, no schema change), and recovery is a fresh send:
+  the row's "not delivered" label opens a confirmation dialog that re-sends the
+  SAME content as a brand-new message (new turn id) through the ordinary
+  producer path, whose ordinary dispatch write clears the marker as a side
+  effect; the resend also supersedes the abandoned entry to `canceled` so the
+  stale pending copy can never dispatch once the marker is gone. The watcher
+  must not publish or clear
   session active presence; `../lib/loro/session-active-presence.ts` is the only owner
   for start/phase/heartbeat/clear. Owned-session startup/meta bootstrap scans may contain
   thousands of rooms. Session metadata is the activation index: an idle row with no

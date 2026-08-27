@@ -197,5 +197,19 @@ context/message-flow.md.
   **`isMessageContent` gates rendering** — a `MessageContent` variant missing a `case`
   here is silently dropped from the parsed history (see `index.tsx`).
 - `message-send-status-context.tsx` / `message-copy.ts` — send-state + copy helpers.
+- A user entry negatively acknowledged by missing-history recovery
+  (`SessionMeta.lastMissingHistoryUserMsgId === message.id`, entry still
+  non-terminal) renders as a terminal "Not delivered" label, never as an
+  endless sending spinner. The derivation is display-only
+  (`src/lib/undelivered-user-turn.ts`): the marker permanently excludes the
+  exact turn, so the old turn never revives. The label is the ONLY recovery
+  entry point: clicking it opens `ResendUndeliveredDialog` (local to
+  `view.tsx`), which resends the SAME content as a brand-new message through
+  the interface's ordinary send path (`onResendUndelivered`, threaded through
+  `SessionChatStream` → `MessageRowView`), then the interface supersedes the
+  abandoned entry to `canceled` — the ordinary producer write clears the
+  marker, and without the terminal flip the stale pending entry would
+  duplicate-dispatch once the marker is gone. Never add an automatic or
+  old-turn re-dispatch path.
 - File attachment rendering and mobile image-preview invariants:
   [session-files-rendering.md](session-files-rendering.md).

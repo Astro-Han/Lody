@@ -87,6 +87,7 @@ import {
   useSessionActions,
   type SessionActions,
 } from '../src/hooks/use-session-actions';
+import { buildResendInputBlocks } from '../src/lib/undelivered-user-turn';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -637,6 +638,56 @@ describe('useSessionActions', () => {
       expect.objectContaining({ id: entry.id, role: 'user' }),
       undefined
     );
+  });
+
+  it('mints a fresh turn id when identical content is sent again (undelivered-turn resend)', async () => {
+    const sessionId = 'session-resend-new-turn-id' as SessionId;
+    const appendSessionTurn = vi.fn(async () => 'direct' as const);
+    const runtime = createRuntime({
+      writer: {
+        modeForMachine: () => 'direct' as const,
+        modeForSession: async () => 'direct' as const,
+        upsertDocMeta: vi.fn(async () => undefined),
+        appendSessionTurn,
+        appendSessionHistory: vi.fn(async () => undefined),
+      } as unknown as WorkspaceRuntime['writer'],
+    });
+    const actions = await renderActions(runtime);
+
+    // The undelivered entry's exact content, extracted the same way the
+    // composer-area resend bar does it.
+    const inputBlocks = buildResendInputBlocks({
+      items: [{ type: 'text', text: 'same content' }],
+      inputConfig: {
+        prompt: 'same content',
+        inputBlocks: [{ type: 'text', text: 'same content' }],
+      },
+    });
+    const payload = {
+      role: 'user',
+      userId: 'user-1',
+      items: [{ type: 'text', text: 'same content' }],
+      timestamp: '2026-07-05T00:00:00.000Z',
+      status: 'pending',
+      read: false,
+      finished: true,
+      inputConfig: {
+        inputBlocks,
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    } as unknown as Parameters<SessionActions['addSessionHistory']>[1];
+
+    const first = await actions.addSessionHistory(sessionId, payload);
+    const second = await actions.addSessionHistory(sessionId, payload);
+
+    // A resend rides the ordinary send path: identical content, brand-new id.
+    expect(second.id).not.toBe(first.id);
+    expect(appendSessionTurn).toHaveBeenCalledTimes(2);
+    const resentEntry = appendSessionTurn.mock.calls[1]?.[1] as {
+      inputConfig?: { inputBlocks?: unknown };
+    };
+    expect(resentEntry.inputConfig?.inputBlocks).toEqual(inputBlocks);
   });
 
   it('starts a session through one aggregate writer call', async () => {

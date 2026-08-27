@@ -413,6 +413,74 @@ export async function touchSessionActivityMeta(
   }
 }
 
+/**
+ * Fire the `session/dispatch-turn` Machine RPC fast path for a user turn that
+ * is (or is about to be) durable. Returns a promise resolving to whether the
+ * machine accepted the offer, or null when the offer cannot be built. The RPC
+ * only accelerates dispatch — the durable `latestUserMsgId` pointer write
+ * remains recovery truth.
+ */
+function fireSessionDispatchTurnRpc(
+  runtime: WorkspaceRuntime,
+  store: ReturnType<typeof useStore>,
+  args: {
+    sessionId: SessionId;
+    userTurnId: string;
+    machineId: MachineId | null | undefined;
+    timestamp: string | undefined;
+    inputConfig: SessionTurnInputConfig | undefined;
+    dispatchUserId: string | undefined;
+  }
+): Promise<boolean> | null {
+  const { sessionId, userTurnId, machineId, timestamp, inputConfig, dispatchUserId } = args;
+  // The Machine RPC fast path rides the facade's per-target routing: local
+  // machines go over the local socket RPC, remote machines over the cloud
+  // JSON stream.
+  if (!machineId || !timestamp || !inputConfig || !dispatchUserId) {
+    return null;
+  }
+  const rpcArgs = {
+    sessionId,
+    userTurnId,
+    userId: dispatchUserId,
+    timestamp,
+    inputConfig,
+  };
+  // Attachments ride as R2/local references, so payloads are normally
+  // small; skip the fast path for pathological sizes rather than risk an
+  // oversized stream append.
+  try {
+    if (JSON.stringify(rpcArgs).length > 256 * 1024) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return runtime
+    .requestSessionDispatchTurn(machineId, rpcArgs)
+    .then((response) => {
+      if (response?.accepted) {
+        store.set(rpcDeliveredTurnsAtom, (previous) =>
+          addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
+        );
+        return true;
+      }
+      log(
+        'session dispatch-turn rpc not accepted for %s/%s: %s',
+        sessionId,
+        userTurnId,
+        response
+          ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
+          : 'timeout'
+      );
+      return false;
+    })
+    .catch((error) => {
+      log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
+      return false;
+    });
+}
+
 export function useSessionActions(): SessionActions {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const setDocMetaByRoomId = useSetAtom(setDocMetaByRoomIdAtom);
@@ -699,52 +767,15 @@ export function useSessionActions(): SessionActions {
       const dispatchUserId = entry?.userId?.trim();
       let rpcAcceptedPromise: Promise<boolean> | null = null;
       const startDispatchTurnRpc = (machineId: MachineId | null | undefined): void => {
-        // The Machine RPC fast path rides the facade's per-target routing: local
-        // machines go over the local socket RPC, remote machines over the cloud
-        // JSON stream. The durable pointer write below remains recovery truth.
-        if (!machineId || !entry || !inputConfig || !dispatchUserId) {
-          return;
-        }
-        const rpcArgs = {
+        // The durable pointer write below remains recovery truth.
+        rpcAcceptedPromise = fireSessionDispatchTurnRpc(runtime, store, {
           sessionId,
           userTurnId,
-          userId: dispatchUserId,
-          timestamp: entry.timestamp,
+          machineId,
+          timestamp: entry?.timestamp,
           inputConfig,
-        };
-        // Attachments ride as R2/local references, so payloads are normally
-        // small; skip the fast path for pathological sizes rather than risk an
-        // oversized stream append.
-        try {
-          if (JSON.stringify(rpcArgs).length > 256 * 1024) {
-            return;
-          }
-        } catch {
-          return;
-        }
-        rpcAcceptedPromise = runtime
-          .requestSessionDispatchTurn(machineId, rpcArgs)
-          .then((response) => {
-            if (response?.accepted) {
-              store.set(rpcDeliveredTurnsAtom, (previous) =>
-                addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
-              );
-              return true;
-            }
-            log(
-              'session dispatch-turn rpc not accepted for %s/%s: %s',
-              sessionId,
-              userTurnId,
-              response
-                ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
-                : 'timeout'
-            );
-            return false;
-          })
-          .catch((error) => {
-            log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
-            return false;
-          });
+          dispatchUserId,
+        });
       };
 
       // Local history writes are the accept boundary. Remote document sync is a
