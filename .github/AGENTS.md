@@ -30,6 +30,10 @@
 - Workflows triggered by `pull_request_target` have a write-capable token. They
   must never check out the pull request head or execute files supplied by the
   pull request. Read scripts and configuration from the base commit only.
+- Code CI runs on `pull_request` with read-only repository permissions, checks
+  out all public submodules recursively, and keeps the stable `Static checks`
+  and `Tests` jobs aligned with the root validation scripts so they can be used
+  as required status checks.
 - PR-body comments require pull-request write permission. Treat comment creation,
   updates, and cleanup as best-effort feedback; the checker result alone decides
   whether the enforcement job passes or fails.
