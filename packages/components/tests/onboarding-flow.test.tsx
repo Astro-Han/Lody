@@ -31,9 +31,13 @@ vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
   useRecoverableConvexQuery: () => [],
 }));
 
-vi.mock('../src/hooks/use-authenticated-convex', () => ({
-  useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
-}));
+vi.mock('../src/hooks/use-authenticated-convex', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/hooks/use-authenticated-convex')>();
+  return {
+    ...actual,
+    useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
+  };
+});
 
 vi.mock('../src/hooks/use-visible-local-projects', () => ({
   useVisibleLocalProjects: mocks.useVisibleLocalProjects,
