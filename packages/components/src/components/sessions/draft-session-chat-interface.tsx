@@ -16,8 +16,10 @@ import type {
   SessionId,
   SessionMeta,
   SessionInputBlock,
+  SessionTurnInputConfig,
 } from '@lody/shared';
 import {
+  buildSessionTurnInputConfig,
   extractPromptPreviewFromInputBlocks,
   getMachineFlockLocalProjects,
   resolveSessionConversationConfig,
@@ -25,6 +27,12 @@ import {
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { docMetaCacheReadyAtom } from '@/atoms/doc-meta';
+import { tasksFeatureEnabledAtom } from '@/atoms/settings';
+import {
+  extractIssuePRMentionsFromText,
+  useKnownIssuePrItems,
+} from '@/components/mentions/issue-pr-hash-mention';
+import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { useResolvedTheme } from '../../theme-provider';
@@ -63,7 +71,6 @@ const areConfigOptionValuesEqual = (
 export type DraftSessionSendPayload = {
   draftId: DraftSessionTab['id'];
   sessionId: SessionId;
-  prompt: string;
   inputBlocks: SessionInputBlock[];
   preservedInputText?: string;
   agentConfigId?: DraftSessionTab['agentConfigId'];
@@ -73,10 +80,15 @@ export type DraftSessionSendPayload = {
   customAcp?: CustomAcpLaunchSpec;
   /** Runtime binary override resolved from the selected builtin agent config. */
   runtimeOverrides?: BuiltinRuntimeOverrides;
-  modeId: string | null;
-  modelId: string | null;
-  configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Analytics-only; the dispatched values live in `inputConfig`. */
   configOptionSelectors?: AcpConfigOptionSelector[];
+  /**
+   * Complete first-turn input config, built by the composer that owns the
+   * selections. The parent accepts the session with this turn as one unit
+   * (`startSession`), so prompt/mode/model/config values must be read from
+   * here, never carried or reconstructed separately.
+   */
+  inputConfig: SessionTurnInputConfig;
 };
 
 export interface DraftSessionChatInterfaceProps {
@@ -89,8 +101,6 @@ export interface DraftSessionChatInterfaceProps {
 }
 
 export type DraftSessionChatInterfaceHandle = {
-  sendQuickMessage: (prompt: string) => void;
-  setInputText: (text: string) => void;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   insertSessionMention: (sessionId: string) => boolean;
@@ -148,6 +158,12 @@ export const DraftSessionChatInterface = memo(
       );
       const agentConfigs = useAtomValue(getAllAgentConfigAtom);
       const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
+      const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
+      // The draft composer has no MCP picker yet, so the first turn carries the
+      // workspace default selection — the same set the promoted child composer
+      // resolves for an empty session doc.
+      const mcpSelection = useSessionMcpSelection(undefined, {});
+      const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(parentSession.repoFullName);
       const { doc: parentSessionDoc, ready: parentSessionDocReady } = useSessionDoc(
         parentSession.id
       );
@@ -326,22 +342,42 @@ export const DraftSessionChatInterface = memo(
         (
           inputBlocks: SessionInputBlock[],
           preservedInputText?: string
-        ): DraftSessionSendPayload => ({
-          draftId: draft.id,
-          sessionId: draft.sessionId,
-          prompt: extractPromptPreviewFromInputBlocks(inputBlocks),
-          inputBlocks,
-          preservedInputText,
-          agentConfigId: draft.agentConfigId,
-          cliType: draft.cliType,
-          agentType: draft.agentType,
-          customAcp: sessionAgentConfig?.customAcp,
-          runtimeOverrides: sessionAgentConfig?.runtimeOverrides,
-          modeId: selectedModeId,
-          modelId: selectedModelId,
-          configOptionValues: dispatchConfigOptionValues,
-          configOptionSelectors,
-        }),
+        ): DraftSessionSendPayload => {
+          const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
+          return {
+            draftId: draft.id,
+            sessionId: draft.sessionId,
+            inputBlocks,
+            preservedInputText,
+            agentConfigId: draft.agentConfigId,
+            cliType: draft.cliType,
+            agentType: draft.agentType,
+            customAcp: sessionAgentConfig?.customAcp,
+            runtimeOverrides: sessionAgentConfig?.runtimeOverrides,
+            configOptionSelectors,
+            // Unlike chat-landing's first turn, the prompt deliberately has no
+            // agent-config prompt prefix: a child tab continues the parent's
+            // running context, matching what the promoted composer would send.
+            inputConfig: buildSessionTurnInputConfig({
+              inputBlocks,
+              prompt,
+              cliType: draft.cliType,
+              agentType: draft.agentType,
+              modeId: selectedModeId,
+              modelId: selectedModelId,
+              configOptionValues: dispatchConfigOptionValues,
+              issuePRMentions: prompt
+                ? extractIssuePRMentionsFromText(
+                    prompt,
+                    knownIssuePrItems,
+                    parentSession.repoFullName
+                  )
+                : undefined,
+              mcpServerIds: mcpSelection.selectedIds,
+              taskToolsEnabled: tasksFeatureEnabled,
+            }),
+          };
+        },
         [
           configOptionSelectors,
           draft.agentConfigId,
@@ -352,8 +388,12 @@ export const DraftSessionChatInterface = memo(
           draft.id,
           draft.sessionId,
           dispatchConfigOptionValues,
+          knownIssuePrItems,
+          mcpSelection.selectedIds,
+          parentSession.repoFullName,
           selectedModeId,
           selectedModelId,
+          tasksFeatureEnabled,
         ]
       );
 
@@ -387,17 +427,6 @@ export const DraftSessionChatInterface = memo(
       useImperativeHandle(
         ref,
         () => ({
-          sendQuickMessage: (prompt: string) => {
-            void onSendDraft(
-              buildSendPayload(
-                [{ type: 'text', text: prompt }],
-                draft.prompt.trim().length > 0 ? draft.prompt : undefined
-              )
-            );
-          },
-          setInputText: (text: string) => {
-            inputAreaRef.current?.setInputText(text);
-          },
           focusInput: () => {
             inputAreaRef.current?.focusInput();
           },
@@ -408,7 +437,7 @@ export const DraftSessionChatInterface = memo(
             return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
           },
         }),
-        [buildSendPayload, draft.prompt, onSendDraft]
+        []
       );
 
       return (

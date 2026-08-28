@@ -1819,17 +1819,11 @@ function SpinningLoaderIcon({ className }: { className?: string }) {
 const EMPTY_CHAT_STREAM_EMPTY_STATE = <></>;
 
 export type SessionChatInterfaceHandle = {
-  sendQuickMessage: (prompt: string) => void;
-  setInputText: (text: string) => void;
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
-  dispatchInputBlocks: (
-    inputBlocks: SessionInputBlock[],
-    options?: DispatchInputBlocksOptions
-  ) => Promise<boolean>;
   copyConversationHistory: () => Promise<void>;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
@@ -4604,12 +4598,6 @@ export const SessionChatInterface = memo(
     useImperativeHandle(
       ref,
       () => ({
-        sendQuickMessage: (prompt: string) => {
-          void dispatchPrompt(prompt);
-        },
-        setInputText: (text: string) => {
-          inputAreaRef.current?.setInputText(text);
-        },
         focusInput: () => {
           inputAreaRef.current?.focusInput();
         },
@@ -4625,7 +4613,6 @@ export const SessionChatInterface = memo(
         toggleVisualAnnotationReference: (reference) => {
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
         },
-        dispatchInputBlocks,
         copyConversationHistory: handleCopyConversationHistory,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
@@ -4633,13 +4620,7 @@ export const SessionChatInterface = memo(
           return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
         },
       }),
-      [
-        dispatchInputBlocks,
-        dispatchPrompt,
-        handleCopyConversationHistory,
-        lastCompletedAssistantMessageId,
-        openSearch,
-      ]
+      [handleCopyConversationHistory, lastCompletedAssistantMessageId, openSearch]
     );
 
     const [prevSessionIdForActionReset, setPrevSessionIdForActionReset] = useState(session.id);

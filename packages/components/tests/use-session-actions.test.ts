@@ -1006,6 +1006,39 @@ describe('useSessionActions', () => {
     );
   });
 
+  it('archives from the rendered meta cache when repo meta has not hydrated', async () => {
+    const sessionId = 'session-archive-known-meta' as SessionId;
+    const renderedMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      cliType: 'builtin',
+      createdAt: new Date().toISOString(),
+      parentSessionId: 'parent-session-1' as SessionId,
+    } as SessionMeta;
+    const upsertDocMeta = vi.fn(async () => undefined);
+    // The repo cannot read the doc meta yet (child session still hydrating).
+    const getDocMeta = vi.fn(async () => undefined);
+    const runtime = createRuntime({
+      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+    });
+    const actions = await renderActions(runtime, {
+      sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
+    });
+
+    await actions.archiveSession(sessionId);
+
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(sessionId),
+      expect.objectContaining({ isArchived: true })
+    );
+
+    // A session neither the repo nor the UI knows still fails loudly.
+    await expect(actions.archiveSession('session-unknown-meta' as SessionId)).rejects.toThrow(
+      'Session metadata missing'
+    );
+  });
+
   it('archives child tabs and independently opened session workspaces together', async () => {
     const rootSession = {
       id: 'archive-root' as SessionId,

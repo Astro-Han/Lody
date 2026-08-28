@@ -22,7 +22,12 @@ delegation proofs or a shared-machine gate without a new product and security de
   `latestUserMsgId` ≠ `lastHandledUserMsgId`. Also accepts `session/dispatch-turn`
   Machine RPC pushes via `offerRpcTurn` (ack-then-execute: stash the payload as a
   third turn source — history → queue → stash — and wake the per-session check
-  chain; the RPC ack means delivered, not authorized/executed). Fast-path turns
+  chain; the RPC ack means delivered, not authorized/executed). Absent session
+  meta during watch reconciliation is "unknown", not foreign: a freshly created
+  session's RPC turn can reach this machine before its meta syncs, so the
+  TTL-bounded RPC stash must survive until meta lands and only a definitive
+  verdict — deleted doc, another machine's session, or an archived one — drops
+  it. Fast-path turns
   that finish before their history entry syncs are reconciled by
   `maybeRepairAlreadyHandledTurn` (late `pending` entry gets flipped to its
   recorded terminal status, never re-dispatched). Extensive header comment is the

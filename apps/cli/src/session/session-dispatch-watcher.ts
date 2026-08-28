@@ -1136,9 +1136,8 @@ export class SessionDispatchWatcher {
       if (!isActive()) {
         return;
       }
-      const meta = isLoroRepoDocDeleted(record)
-        ? undefined
-        : (record?.meta as SessionMeta | undefined);
+      const docDeleted = isLoroRepoDocDeleted(record);
+      const meta = docDeleted ? undefined : (record?.meta as SessionMeta | undefined);
 
       phase = 'evaluate-ownership';
       const isOwned = meta?.machineId === this.deps.machineId && !meta?.isArchived;
@@ -1148,7 +1147,14 @@ export class SessionDispatchWatcher {
         this.watchedSessions.delete(sessionId);
         this.cancelCheckChains.delete(sessionId);
         this.cancelSeenTurn.delete(sessionId);
-        this.rpcTurnStash.delete(sessionId);
+        // Absent metadata is "unknown", not "foreign": a freshly created
+        // session's RPC turn can arrive before its meta syncs to this machine.
+        // Keep the TTL-bounded stash so the metadata watch dispatches it once
+        // the meta lands; only a definitive verdict — deleted doc, another
+        // machine's session, or an archived one — drops the stashed turn.
+        if (meta || docDeleted) {
+          this.rpcTurnStash.delete(sessionId);
+        }
         this.interruptAccessRetry(sessionId);
         return;
       }
