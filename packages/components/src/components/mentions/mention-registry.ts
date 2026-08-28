@@ -118,6 +118,23 @@ export type MentionCategoryActivation = {
   activate: () => void;
 };
 
+export type MentionCategoryAction = {
+  label: string;
+  ariaLabel: string;
+  icon?: 'switch';
+  onAction: () => void;
+};
+
+export type MentionCategoryHeader = {
+  title: string;
+  action?: MentionCategoryAction;
+};
+
+export type MentionCategoryEmptyState = {
+  message: string;
+  action?: MentionCategoryAction;
+};
+
 export type MentionCategory = {
   id: MentionCategoryId;
   /** The `<namespace>:` segment of the drill-down prefix. */
@@ -137,6 +154,10 @@ export type MentionCategory = {
   message?: string;
   /** Rendered above the rows, e.g. the truncated-file-list warning. */
   notice?: string;
+  /** Optional second-level chrome supplied by the category, without menu id special-casing. */
+  header?: MentionCategoryHeader;
+  /** Optional actionable empty state supplied by the category. */
+  emptyState?: MentionCategoryEmptyState;
   /**
    * Candidates for a term inside this category. Lazy on purpose: ranking the
    * file index is the expensive one, and a query aimed at another category
@@ -444,7 +465,6 @@ export function toSessionCandidate(
     kind: 'session',
     icon: 'session',
     title: item.title || labels.untitled,
-    subtitle: item.projectLabel,
   };
 }
 
@@ -583,6 +603,8 @@ export type MentionCategorySources = {
   };
   session?: SourceState & {
     items: readonly SessionMentionItem[];
+    header?: MentionCategoryHeader;
+    emptyState?: MentionCategoryEmptyState;
   };
   agentRole?: SourceState & {
     items: readonly AgentRoleMentionItem[];
@@ -693,6 +715,8 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         label: t('mention.category.session.label', 'Sessions'),
         icon: 'session',
         ...sourceCategoryFields('session', session),
+        header: session.header,
+        emptyState: session.emptyState,
         getCandidates: (term, limit) =>
           buildSessionCandidates(
             session.items,
