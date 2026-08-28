@@ -35,9 +35,11 @@
 - External pull request body enforcement is based on the PR author's
   `author_association`. Only `OWNER`, `MEMBER`, and automated bot accounts are
   exempt; outside collaborators and prior contributors remain subject to it.
-- Workflows triggered by `pull_request_target` have a write-capable token. They
-  must never check out the pull request head or execute files supplied by the
-  pull request. Read scripts and configuration from the base commit only.
+- Workflows triggered by `pull_request_target` have a write-capable token. For
+  PR events, read policy scripts and configuration from the trusted revision at
+  `github.sha`; scheduled and manual audits use
+  `github.event.repository.default_branch`. Never check out or execute the PR
+  head, and never use the possibly stale `github.event.pull_request.base.sha`.
 - Code CI runs on `pull_request` with read-only repository permissions, checks
   out all public submodules recursively, and keeps the stable `Static checks`
   and `Tests` jobs aligned with the root validation scripts so they can be used

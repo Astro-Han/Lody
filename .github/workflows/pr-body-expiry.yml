@@ -22,10 +22,13 @@ jobs:
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout base commit
+      # This workflow has a write-capable token. Read policy from the trusted
+      # default-branch revision at github.sha, never the PR head or a possibly
+      # stale pull_request.base.sha.
+      - name: Checkout trusted default-branch revision
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Close an expired PR again
@@ -62,9 +65,12 @@ jobs:
     if: github.event_name != 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout default branch
+      # Scheduled and manual audits read policy from the trusted default branch;
+      # never check out or execute the pull request head.
+      - name: Checkout trusted default branch
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Reconcile and expire PR body states
