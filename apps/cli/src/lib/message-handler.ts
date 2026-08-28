@@ -8269,6 +8269,7 @@ export class MessageHandler {
     configOptions?: AcpConfigOptionSummary[];
     availableCommands?: NonNullable<MachineAcpCapabilitiesRefreshResponse['availableCommands']>;
     sessionFork: boolean;
+    acknowledgedSteer: boolean;
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
   }> {

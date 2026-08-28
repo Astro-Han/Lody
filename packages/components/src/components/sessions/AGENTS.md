@@ -289,6 +289,10 @@ Session conversation page chain:
   wide markdown, tool output, and user content own their nested horizontal scrollers
   and must never make the whole conversation pane pan sideways.
 - `session-chat-input-area.tsx` — composer; `message-queue-display.tsx` — queued turns.
+  A queued item's Steer action uses native acknowledged steering only when the
+  authoritative ACP capability cache advertises it. Never infer steering support
+  from built-in/custom config type or agent identity; unsupported and stale cache
+  entries retain the interrupt-and-send fallback.
   Child-tab suggestions are shared by draft and persisted child sessions through
   `child-tab-empty-state.tsx`; it uses the same `px-3` + `ConversationColumn` as
   the composer, so its right edge and max width must stay aligned automatically.
