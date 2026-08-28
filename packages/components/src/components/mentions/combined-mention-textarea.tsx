@@ -291,36 +291,28 @@ function TwoLevelMentionMenu({
     () => filterSessionMentionItemsByProject(sessionItems, sessionProjectKey, sessionProjectScope),
     [sessionItems, sessionProjectKey, sessionProjectScope]
   );
-  const sessionScopeTitle =
-    sessionProjectScope === 'all'
-      ? t('mention.session.scope.all', 'All projects')
-      : sessionProjectKey === 'chat'
-        ? t('mention.session.scope.none', 'No project')
-        : t('mention.session.scope.current', 'Current project');
-  const sessionScopeActionLabel =
-    sessionProjectScope === 'current'
-      ? t('mention.session.scope.showAll', 'All projects')
-      : sessionProjectKey === 'chat'
-        ? t('mention.session.scope.showNone', 'No project')
-        : t('mention.session.scope.showCurrent', 'Current project');
-  const sessionScopeActionAriaLabel =
-    sessionProjectScope === 'current'
-      ? t('mention.session.scope.showAllAria', 'Show sessions from all projects')
-      : sessionProjectKey === 'chat'
-        ? t('mention.session.scope.showNoneAria', 'Show sessions with no project')
-        : t('mention.session.scope.showCurrentAria', 'Show sessions from the current project only');
+  const currentSessionScopeLabel =
+    sessionProjectKey === 'chat'
+      ? t('mention.session.scope.none', 'No project')
+      : t('mention.session.scope.current', 'Current project');
   const sessionSource = React.useMemo<MentionCategorySources['session']>(
     () => ({
       enabled: enableSessionMentions,
       items: visibleSessionItems,
       header: {
-        title: sessionScopeTitle,
-        action: {
-          label: sessionScopeActionLabel,
-          ariaLabel: sessionScopeActionAriaLabel,
-          icon: 'switch',
-          onAction: toggleSessionProjectScope,
-        },
+        ariaLabel: t('mention.session.scope.label', 'Session project scope'),
+        options: [
+          {
+            label: currentSessionScopeLabel,
+            selected: sessionProjectScope === 'current',
+            onSelect: () => setSessionProjectScope('current'),
+          },
+          {
+            label: t('mention.session.scope.all', 'All projects'),
+            selected: sessionProjectScope === 'all',
+            onSelect: () => setSessionProjectScope('all'),
+          },
+        ],
       },
       emptyState:
         sessionProjectScope === 'current'
@@ -347,12 +339,10 @@ function TwoLevelMentionMenu({
           : undefined,
     }),
     [
+      currentSessionScopeLabel,
       enableSessionMentions,
       sessionProjectKey,
       sessionProjectScope,
-      sessionScopeActionAriaLabel,
-      sessionScopeActionLabel,
-      sessionScopeTitle,
       t,
       toggleSessionProjectScope,
       visibleSessionItems,

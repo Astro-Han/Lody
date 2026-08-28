@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import {
   Boxes,
-  ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -272,13 +271,42 @@ function CategoryAction({ action }: { action: MentionCategoryAction }) {
     <button
       type="button"
       aria-label={action.ariaLabel}
-      className="flex max-w-full min-w-0 items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+      className="flex max-w-full min-w-0 select-none items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
       onPointerDown={(event) => event.preventDefault()}
       onClick={action.onAction}
     >
-      {action.icon === 'switch' ? <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" /> : null}
       <span className="truncate">{action.label}</span>
     </button>
+  );
+}
+
+function CategoryHeaderOptions({ header }: { header: NonNullable<MentionCategory['header']> }) {
+  return (
+    <div
+      role="group"
+      aria-label={header.ariaLabel}
+      className="ml-auto flex shrink-0 items-center rounded-md bg-muted-foreground/[0.08] p-0.5"
+    >
+      {header.options.map((option) => (
+        <button
+          key={option.label}
+          type="button"
+          aria-pressed={option.selected}
+          className={cn(
+            'h-6 rounded-[4px] px-2 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
+            option.selected
+              ? 'bg-background font-medium text-foreground shadow-xs'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => {
+            if (!option.selected) option.onSelect();
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -294,27 +322,20 @@ function CategoryBreadcrumb({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="sticky top-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1 border-b border-border bg-popover px-2 py-1.5">
-      <div className="min-w-0 justify-self-start">
-        {showBack ? (
-          <button
-            type="button"
-            className="-ml-1 flex items-center gap-0.5 rounded px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground"
-            // Keep focus in the composer: the menu closes the moment it blurs.
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={onBack}
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            {t('mention.menu.back', 'Back')}
-          </button>
-        ) : null}
-      </div>
-      <span className="min-w-0 truncate text-center text-xs font-medium text-foreground">
-        {category.header?.title}
-      </span>
-      <div className="min-w-0 justify-self-end">
-        {category.header?.action ? <CategoryAction action={category.header.action} /> : null}
-      </div>
+    <div className="sticky top-0 z-10 flex min-w-0 select-none items-center gap-3 border-b border-border bg-popover px-2 py-1.5">
+      {showBack ? (
+        <button
+          type="button"
+          className="-ml-1 flex h-6 shrink-0 items-center gap-0.5 rounded px-1 text-xs text-muted-foreground hover:text-foreground"
+          // Keep focus in the composer: the menu closes the moment it blurs.
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={onBack}
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          {t('mention.menu.back', 'Back')}
+        </button>
+      ) : null}
+      {category.header ? <CategoryHeaderOptions header={category.header} /> : null}
     </div>
   );
 }

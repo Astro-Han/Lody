@@ -238,9 +238,11 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     expect(document.body.textContent).not.toContain('Other parser work');
     expect(document.body.textContent).toContain('Current project');
 
-    const toggle = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Show sessions from all projects"]'
-    );
+    const toggle = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '[role="group"][aria-label="Session project scope"] button'
+      )
+    ).find((button) => button.textContent === 'All projects');
     if (!toggle) throw new Error('scope toggle missing');
     await act(async () => {
       toggle.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }));

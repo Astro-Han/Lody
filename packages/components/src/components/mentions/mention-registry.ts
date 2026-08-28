@@ -121,13 +121,16 @@ export type MentionCategoryActivation = {
 export type MentionCategoryAction = {
   label: string;
   ariaLabel: string;
-  icon?: 'switch';
   onAction: () => void;
 };
 
 export type MentionCategoryHeader = {
-  title: string;
-  action?: MentionCategoryAction;
+  ariaLabel: string;
+  options: ReadonlyArray<{
+    label: string;
+    selected: boolean;
+    onSelect: () => void;
+  }>;
 };
 
 export type MentionCategoryEmptyState = {
