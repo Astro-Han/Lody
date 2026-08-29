@@ -13,6 +13,12 @@ export const EXPIRED_BODY_LABEL = Object.freeze({
   description: 'PR closed after its body remained invalid for seven days',
 });
 
+export const BYPASS_PR_POLICY_LABEL = Object.freeze({
+  name: 'status:pr-policy-bypass',
+  color: '0E8A16',
+  description: 'Repository owner approved an exception to external PR policy',
+});
+
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
 const INVALID_COMMENT_PREFIX = '<!-- lody-pr-body-format-check';
 const INVALID_SINCE_PATTERN = /<!-- lody-pr-body-format-check invalid-since="([^"]+)" -->/;
@@ -45,7 +51,12 @@ function invalidCommentMarker(invalidSince) {
 export function shouldEnforcePullRequest(pullRequest) {
   const association = pullRequest.author_association;
   const login = pullRequest.user?.login ?? '';
-  return association !== 'OWNER' && association !== 'MEMBER' && !login.endsWith('[bot]');
+  return (
+    association !== 'OWNER' &&
+    association !== 'MEMBER' &&
+    !login.endsWith('[bot]') &&
+    !hasPullRequestLabel(pullRequest, BYPASS_PR_POLICY_LABEL.name)
+  );
 }
 
 export function hasPullRequestLabel(pullRequest, name) {
@@ -152,6 +163,7 @@ async function ensureRepositoryLabel(github, owner, repo, label) {
 export async function ensurePolicyLabels(github, owner, repo) {
   await ensureRepositoryLabel(github, owner, repo, NEEDS_BODY_LABEL);
   await ensureRepositoryLabel(github, owner, repo, EXPIRED_BODY_LABEL);
+  await ensureRepositoryLabel(github, owner, repo, BYPASS_PR_POLICY_LABEL);
 }
 
 async function policyComments(github, owner, repo, issueNumber) {

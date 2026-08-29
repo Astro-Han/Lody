@@ -34,7 +34,14 @@
   organization members are not exempt. A valid edit clears the bot-owned state.
 - External pull request body enforcement is based on the PR author's
   `author_association`. Only `OWNER`, `MEMBER`, and automated bot accounts are
-  exempt; outside collaborators and prior contributors remain subject to it.
+  exempt by default; outside collaborators and prior contributors remain subject
+  to it. Repository owners may explicitly exempt an exceptional PR with
+  `status:pr-policy-bypass`; adding or removing it immediately reconciles both
+  body and size policy state.
+- `workflows/pr-policy.yml` is the only event entry point for external PR body,
+  size, and expiry policy. The three implementation workflows remain callable
+  only through `workflow_call`; route new events through the entry point so one
+  run owns concurrency and dispatch.
 - Workflows triggered by `pull_request_target` have a write-capable token. For
   PR events, read policy scripts and configuration from the trusted revision at
   `github.sha`; scheduled and manual audits use
@@ -45,9 +52,10 @@
   and `Tests` jobs aligned with the root validation scripts so they can be used
   as required status checks.
 - `scripts/pr-body-policy.mjs` owns PR-body status labels, comment markers, and
-  the seven-day grace period. An invalid external PR keeps its original timer
-  across edits and pushes; only a valid body clears the state. Before closing,
-  the scheduled workflow must re-read and revalidate the latest body.
+  the shared external-PR exemption, and the seven-day grace period. An invalid
+  external PR keeps its original timer across edits and pushes; only a valid body
+  or explicit exemption clears the state. Before closing, the scheduled workflow
+  must re-read and revalidate the latest body.
 - External PR size enforcement counts additions plus deletions. A change over
   200 lines without a full Lody issue URL is labeled `status:pr-too-large` and
   shares the PR-body seven-day correction window; adding a valid URL clears the
