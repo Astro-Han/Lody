@@ -2,11 +2,9 @@ import { ListTodo, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import {
-  WINDOW_DRAG_EXEMPT_CLASS,
-  useWindowDragRegionClass,
-  useWindowsCaptionPadClass,
-} from '@/ui/window-drag-region';
-import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
+  TAB_PILL_ACTIVE_CLASS,
+  TAB_PILL_INACTIVE_CLASS,
+} from '@/components/shared/tab-pill-strip';
 
 export type TaskTabItem = {
   taskId: string;
@@ -47,41 +45,26 @@ export function TaskTabBar({
   rightSlot,
 }: TaskTabBarProps) {
   const { t } = useTranslation();
-  const windowDragClass = useWindowDragRegionClass();
-  const windowsCaptionPadClass = useWindowsCaptionPadClass();
   const allActive = activeTaskId === null;
   // When only All Tasks is open, the pill reads as page chrome rather than a
   // selected sibling among many — same "solo" treatment as SessionTabBar.
   const solo = tabs.length === 0;
 
   return (
-    <div
-      className={cn(
-        'flex h-11 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2',
-        windowDragClass,
-        windowsCaptionPadClass
-      )}
-    >
+    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2">
       <div
         role="tablist"
         aria-label={t('tasks.tabs.label', 'Task tabs')}
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
       >
-        <div
+        <button
+          type="button"
           role="tab"
           aria-selected={allActive}
-          tabIndex={allActive ? 0 : -1}
           onClick={onSelectAll}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              onSelectAll();
-            }
-          }}
           className={cn(
             TAB_ITEM_CLASS,
-            'shrink-0 cursor-pointer font-medium',
-            !solo && WINDOW_DRAG_EXEMPT_CLASS,
+            'shrink-0 font-medium',
             solo
               ? 'text-tab-active-foreground'
               : allActive
@@ -91,7 +74,7 @@ export function TaskTabBar({
         >
           <ListTodo className="h-3.5 w-3.5 shrink-0 opacity-70" />
           <span className="truncate">{t('tasks.tabs.allTasks', 'All Tasks')}</span>
-        </div>
+        </button>
 
         {tabs.map((tab) => {
           const active = tab.taskId === activeTaskId;
@@ -105,7 +88,6 @@ export function TaskTabBar({
               aria-label={label}
               className={cn(
                 TAB_ITEM_CLASS,
-                WINDOW_DRAG_EXEMPT_CLASS,
                 active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS
               )}
               onClick={() => onSelectTask(tab.taskId)}
@@ -135,11 +117,7 @@ export function TaskTabBar({
           );
         })}
       </div>
-      {rightSlot ? (
-        <div className={cn('ml-1 flex shrink-0 items-center gap-1', WINDOW_DRAG_EXEMPT_CLASS)}>
-          {rightSlot}
-        </div>
-      ) : null}
+      {rightSlot ? <div className="ml-1 flex shrink-0 items-center gap-1">{rightSlot}</div> : null}
     </div>
   );
 }

@@ -12,8 +12,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { cn } from '@/lib/utils';
-import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
-import { useElectronFullscreen } from '@/lib/electron';
+
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Kbd } from '@/ui/kbd';
@@ -678,7 +677,6 @@ export const LoroSidebar = memo(function LoroSidebar({
   onRequestCollapse,
 }: LoroSidebarProps) {
   const isMobile = useIsMobile();
-  const isElectronFullscreen = useElectronFullscreen();
   const mergedLabels: LoroSidebarLabels = {
     ...defaultLabels,
     ...labels,
@@ -822,7 +820,6 @@ export const LoroSidebar = memo(function LoroSidebar({
       </span>
     </>
   );
-  const windowDrag = isElectron && !isElectronFullscreen;
   const workspaceIdentityClassName = cn(
     'grid w-full min-w-0 select-none grid-cols-[20px_1fr_16px] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
     isMobile ? 'h-9' : 'h-8',
@@ -884,8 +881,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
               : isElectronMacOS
                 ? 'h-[72px] px-1.5 pt-7'
-                : 'h-11 px-1.5',
-            windowDrag && WINDOW_DRAG_HEADER_CLASS
+                : 'h-11 px-1.5'
           )}
         >
           {workspaceSwitcherEnabled ? (
@@ -894,10 +890,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className={cn(
-                      workspaceIdentityClassName,
-                      windowDrag && WINDOW_DRAG_EXEMPT_CLASS
-                    )}
+                    className={workspaceIdentityClassName}
                     data-workspace-switcher-trigger
                     data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
                     aria-busy={workspaceSyncing || undefined}
@@ -984,7 +977,6 @@ export const LoroSidebar = memo(function LoroSidebar({
                 'absolute right-1.5 flex h-7 w-7 items-center justify-center rounded-md',
                 isElectronMacOS ? '-top-0.5' : 'top-2',
                 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                windowDrag && WINDOW_DRAG_EXEMPT_CLASS,
                 isElectron
                   ? 'focus-visible:outline-hidden'
                   : 'opacity-0 pointer-events-none group-hover/sidebar-header:opacity-100 group-hover/sidebar-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-hidden transition-opacity duration-100'

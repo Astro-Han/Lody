@@ -339,7 +339,8 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       : {}),
     // Windows: hide the native title bar (its neutral gray clashes with the
     // app canvas) and keep only the OS-drawn caption buttons as an overlay
-    // tinted to match the theme.
+    // tinted to match the theme. The renderer reserves a drag band of the
+    // same height at the top of the window.
     ...(process.platform === 'win32'
       ? {
           titleBarStyle: 'hidden',

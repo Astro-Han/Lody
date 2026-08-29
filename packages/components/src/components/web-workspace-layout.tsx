@@ -7,9 +7,9 @@ import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
 import { sidebarCollapsedAtom, sidebarLastWidthAtom, WORKSPACE_FOCUS_SCOPES } from '../atoms';
 import { cn } from '@/lib/utils';
+import { isWindowsElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { isSettingsRoute, NATIVE_KEYBOARD_OFFSET_CLASS } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
-import { WindowDragStrip } from '@/ui/window-drag-region';
 
 // LoroSidebar's default expanded width (see loro-sidebar.tsx `defaultWidth`);
 // `sidebarLastWidthAtom` stores 0 until the user resizes, so fall back to this.
@@ -26,18 +26,22 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
+  const isElectronFullscreen = useElectronFullscreen();
 
   useKeyboardNavigation();
+
+  const windowsTitleBarPadding =
+    isWindowsElectronRenderer() && !isElectronFullscreen ? 'pt-9' : undefined;
 
   if (isSettingsRoute(pathname)) {
     return (
       <div
         className={cn(
-          'relative flex h-svh w-full overflow-hidden bg-background',
-          NATIVE_KEYBOARD_OFFSET_CLASS
+          'flex h-svh w-full overflow-hidden bg-background',
+          NATIVE_KEYBOARD_OFFSET_CLASS,
+          windowsTitleBarPadding
         )}
       >
-        <WindowDragStrip />
         <div className="min-h-0 flex-1 overflow-hidden">
           <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
             {children}
@@ -60,7 +64,8 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     <div
       className={cn(
         'flex h-svh w-full overflow-hidden bg-background',
-        NATIVE_KEYBOARD_OFFSET_CLASS
+        NATIVE_KEYBOARD_OFFSET_CLASS,
+        windowsTitleBarPadding
       )}
     >
       <AnimatePresence initial={false}>
@@ -81,9 +86,8 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       </AnimatePresence>
       <FocusScope
         id={WORKSPACE_FOCUS_SCOPES.content}
-        className="relative flex min-w-0 flex-1 overflow-hidden"
+        className="flex min-w-0 flex-1 overflow-hidden"
       >
-        <WindowDragStrip />
         <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
           <div className="flex h-full min-w-0 w-full flex-1 flex-col overflow-hidden">
             {children}

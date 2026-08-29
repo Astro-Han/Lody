@@ -12,7 +12,6 @@ import {
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/ui';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { WindowDragStrip } from '@/ui/window-drag-region';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
@@ -63,7 +62,6 @@ export function DesktopSettingsModal() {
     >
       <DialogContent
         noAnimation
-        overlaySlot={<WindowDragStrip />}
         className="flex h-[min(90vh,950px)] w-[84vw] max-w-[1100px] flex-col gap-0 overflow-hidden p-0 sm:p-0"
       >
         <SettingsModalBody />

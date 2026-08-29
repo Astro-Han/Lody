@@ -24,7 +24,7 @@ const DialogOverlay = React.forwardRef<
     /** Skip the backdrop fade so the overlay shows/hides instantly. */
     noAnimation?: boolean;
   }
->(({ className, noAnimation, children, ...props }, ref) => (
+>(({ className, noAnimation, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
@@ -33,9 +33,7 @@ const DialogOverlay = React.forwardRef<
       className
     )}
     {...props}
-  >
-    {children}
-  </DialogPrimitive.Overlay>
+  />
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
@@ -61,43 +59,35 @@ const DialogContent = React.forwardRef<
     /** Extra classes for the backdrop overlay — e.g. a z-index override so the dialog
      *  stacks above a surface that carries its own hardcoded z-index. */
     overlayClassName?: string;
-    overlaySlot?: React.ReactNode;
     /** Skip the enter/exit animation so the dialog appears instantly. */
     noAnimation?: boolean;
   }
->(
-  (
-    { className, overlayClassName, overlaySlot, noAnimation, children, onEscapeKeyDown, ...props },
-    ref
-  ) => (
-    <DialogPortal>
-      <DialogOverlay className={overlayClassName} noAnimation={noAnimation}>
-        {overlaySlot}
-      </DialogOverlay>
-      <DialogPrimitive.Content
-        ref={ref}
-        data-lody-dialog-content=""
-        className={cn(dialogBaseClasses, !noAnimation && dialogAnimationClasses, className)}
-        onEscapeKeyDown={(event) => {
-          // Esc first cancels an active IME preedit. Treating the same keydown as
-          // dialog dismissal loses any draft held by a form inside the dialog.
-          if (isImeComposingNativeKeyboardEvent(event)) {
-            event.preventDefault();
-            return;
-          }
-          onEscapeKeyDown?.(event);
-        }}
-        {...props}
-      >
-        {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-hover data-[state=open]:text-muted-foreground">
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      </DialogPrimitive.Content>
-    </DialogPortal>
-  )
-);
+>(({ className, overlayClassName, noAnimation, children, onEscapeKeyDown, ...props }, ref) => (
+  <DialogPortal>
+    <DialogOverlay className={overlayClassName} noAnimation={noAnimation} />
+    <DialogPrimitive.Content
+      ref={ref}
+      data-lody-dialog-content=""
+      className={cn(dialogBaseClasses, !noAnimation && dialogAnimationClasses, className)}
+      onEscapeKeyDown={(event) => {
+        // Esc first cancels an active IME preedit. Treating the same keydown as
+        // dialog dismissal loses any draft held by a form inside the dialog.
+        if (isImeComposingNativeKeyboardEvent(event)) {
+          event.preventDefault();
+          return;
+        }
+        onEscapeKeyDown?.(event);
+      }}
+      {...props}
+    >
+      {children}
+      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-hover data-[state=open]:text-muted-foreground">
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
+  </DialogPortal>
+));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogContentWithoutClose = React.forwardRef<

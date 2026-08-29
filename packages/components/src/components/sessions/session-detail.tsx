@@ -86,7 +86,6 @@ import {
   terminalDockOpenAtom,
 } from '@/components/terminal/terminal-controller';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { useWindowsCaptionPadClass } from '@/ui/window-drag-region';
 import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
@@ -679,7 +678,6 @@ const SessionDetail = ({
   const hidesBillingUi = isMobile || isNativeAppShell();
   const { openSettings } = useOpenSettings();
   const isElectronFullscreen = useElectronFullscreen();
-  const windowsCaptionPadClass = useWindowsCaptionPadClass();
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
   usePublishSessionViewing(sessionId);
@@ -5531,8 +5529,7 @@ const SessionDetail = ({
         // 6px higher for them to land on that same line: 2 + (44 - 32) / 2 = 8.
         // Re-derive this if the row or the pill height changes.
         'mt-0.5 h-11',
-        isLeftSidebarCollapsed && hasMacOSTitlebarInset && 'pl-[4.5rem]',
-        !isSidebarOpen && windowsCaptionPadClass
+        isLeftSidebarCollapsed && hasMacOSTitlebarInset && 'pl-[4.5rem]'
       )}
     />
   );
@@ -5704,8 +5701,7 @@ const SessionDetail = ({
           'border-b border-border/50 bg-background',
           // Right panel is never under the macOS traffic lights (top-left) —
           // it must not reserve the titlebar inset the left sidebar needs.
-          'h-11',
-          windowsCaptionPadClass
+          'h-11'
         )}
       />
       <div className="relative min-h-0 flex-1 overflow-hidden">

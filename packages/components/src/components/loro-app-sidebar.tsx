@@ -25,7 +25,6 @@ import { resolveWorkspaceIdentityLogo } from '@/lib/workspace-identity';
 import { cn } from '@/lib/utils';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { isElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -2895,13 +2894,11 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         className
       )}
     >
-      {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
         className={cn(
           isMobile
             ? 'h-full w-full rounded-none border-0 shadow-none'
-            : 'mb-2 ml-2 mr-1 mt-2 h-[calc(100%_-_1rem)] rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]',
-          isElectron && !isElectronFullscreen && 'z-20'
+            : 'mb-2 ml-2 mr-1 mt-2 h-[calc(100%_-_1rem)] rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]'
         )}
         workspaceName={resolvedWorkspaceName}
         userEmail={user?.email ?? ''}
