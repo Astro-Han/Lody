@@ -27,6 +27,7 @@ import { Button } from '@/ui/button';
 import { useRouter } from '@tanstack/react-router';
 import { usePostHog } from '@posthog/react';
 import {
+  buildPendingUserHistoryEntry,
   getAcpCapabilityCacheKey,
   getProjectRefBranch,
   getServerNow,
@@ -35,7 +36,6 @@ import {
   getAcpCapabilityCacheEntryAuthority,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
-  type AcpConfigOptionValue,
   type CommentReferencePayload,
   type LocalProjectHistoryProvider,
   type LocalProjectId,
@@ -43,7 +43,6 @@ import {
   type PrStatus,
   type ProjectRef,
   type SessionId,
-  type SessionInputBlock,
   type SessionMeta,
   type VisualAnnotationReferencePayload,
   type WorkspaceId,
@@ -58,7 +57,10 @@ import {
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
-import { clearSessionChatInputDrafts } from '@/components/sessions/session-chat-input-area';
+import {
+  clearSessionChatInputDrafts,
+  setSessionChatInputTextDraft,
+} from '@/components/sessions/session-chat-input-area';
 import {
   RenameSessionDialog,
   type RenameSessionDialogTarget,
@@ -688,19 +690,6 @@ const SessionDetail = ({
   const visualAnnotationReferenceChangeHandlersRef = useRef<
     Map<string, (references: VisualAnnotationReferencePayload[]) => void>
   >(new Map());
-  const pendingInitialTurnRef = useRef<
-    Map<
-      SessionId,
-      {
-        inputBlocks?: SessionInputBlock[];
-        prompt?: string;
-        restoredInputText?: string;
-        modeId?: string | null;
-        modelId?: string | null;
-        configOptionValues?: Record<string, AcpConfigOptionValue>;
-      }
-    >
-  >(new Map());
   const sendingDraftIdsRef = useRef<Set<DraftSessionTab['id']>>(new Set());
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
   const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab);
@@ -931,7 +920,6 @@ const SessionDetail = ({
   if (localStateSessionId !== sessionId) {
     const nextInitialTabState = getSessionDetailInitialTabState(sessionId, urlTab);
     detailLoadStartMsRef.current = getPerformanceNowMs();
-    pendingInitialTurnRef.current.clear();
     sendingDraftIdsRef.current.clear();
     desktopTabFocusRegionRef.current = 'conversation';
     restoredPrSidebarRef.current = null;
@@ -973,7 +961,7 @@ const SessionDetail = ({
     []
   );
 
-  // Child meta can appear before createSession() or fork RPC resolves. Hide a
+  // Child meta can appear before startSession() or fork RPC resolves. Hide a
   // requesting target until its RPC succeeds. Once acknowledged, mount the
   // child tab in the background and keep its source button loading until the
   // child conversation surface has durable history ready to paint.
@@ -1671,7 +1659,9 @@ const SessionDetail = ({
   );
   // Multi-tab: create a new child session
   const {
-    createSession,
+    startSession,
+    requestSessionDispatch,
+    touchSessionActivity,
     updateSessionTitle,
     archiveSession,
     restoreSession,
@@ -1696,66 +1686,11 @@ const SessionDetail = ({
     },
     [t, transferSessionOwner, workspaceMembers]
   );
-  const flushPendingInitialTurn = useCallback((tabSessionId: SessionId) => {
-    const pendingTurn = pendingInitialTurnRef.current.get(tabSessionId);
-    if (!pendingTurn) {
-      return;
-    }
-    const ref = chatRefsMap.current.get(tabSessionId);
-    if (!ref) {
-      return;
-    }
-    pendingInitialTurnRef.current.delete(tabSessionId);
-    const dispatchPendingTurn = (
-      targetRef: SessionChatInterfaceHandle | DraftSessionChatInterfaceHandle
-    ) => {
-      if ('dispatchInputBlocks' in targetRef) {
-        const inputBlocks =
-          pendingTurn.inputBlocks ??
-          (pendingTurn.prompt ? [{ type: 'text' as const, text: pendingTurn.prompt }] : []);
-        if (inputBlocks.length > 0) {
-          void targetRef.dispatchInputBlocks(inputBlocks, {
-            modeIdOverride: pendingTurn.modeId,
-            modelIdOverride: pendingTurn.modelId,
-            configOptionValuesOverride: pendingTurn.configOptionValues,
-          });
-          return;
-        }
-      }
-      if (pendingTurn.prompt) {
-        targetRef.sendQuickMessage(pendingTurn.prompt);
-      }
-    };
-    if (typeof window === 'undefined') {
-      dispatchPendingTurn(ref);
-      if (pendingTurn.restoredInputText) {
-        ref.setInputText(pendingTurn.restoredInputText);
-      }
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      const mountedRef = chatRefsMap.current.get(tabSessionId);
-      if (!mountedRef) {
-        return;
-      }
-      dispatchPendingTurn(mountedRef);
-      if (pendingTurn.restoredInputText) {
-        const restoredInputText = pendingTurn.restoredInputText;
-        window.requestAnimationFrame(() => {
-          chatRefsMap.current.get(tabSessionId)?.setInputText(restoredInputText);
-        });
-      }
-    });
-  }, []);
-
   const setChatTabRef = useCallback(
     (tabId: string, ref: SessionChatInterfaceHandle | DraftSessionChatInterfaceHandle | null) => {
       chatRefsMap.current.set(tabId, ref);
-      if (ref && !isDraftSessionTabId(tabId)) {
-        flushPendingInitialTurn(tabId as SessionId);
-      }
     },
-    [flushPendingInitialTurn]
+    []
   );
 
   const handleInsertDroppedSessionMention = useCallback(
@@ -1962,17 +1897,18 @@ const SessionDetail = ({
       sendingDraftIdsRef.current.add(payload.draftId);
       const startedAtMs = getPerformanceNowMs();
       const imageCount = payload.inputBlocks.filter((block) => block.type === 'image').length;
+      const prompt = payload.inputConfig.prompt ?? '';
       const acpAnalyticsProperties = buildSessionCreateAcpAnalyticsProperties({
         cliType: payload.cliType,
         agentType: payload.agentType,
-        modeId: payload.modeId,
-        modelId: payload.modelId,
-        configOptionValues: payload.configOptionValues,
+        modeId: payload.inputConfig.modeId,
+        modelId: payload.inputConfig.modelId,
+        configOptionValues: payload.inputConfig.configOptionValues,
         configOptionSelectors: payload.configOptionSelectors,
       });
       captureSessionDetailEvent('session/tab_draft_send_requested', {
         draft_tab_id: payload.draftId,
-        prompt_length: payload.prompt.length,
+        prompt_length: prompt.length,
         has_preserved_input: Boolean(payload.preservedInputText?.trim()),
         cli_type: payload.cliType,
         agent_type: payload.agentType,
@@ -1982,32 +1918,56 @@ const SessionDetail = ({
       });
       const childSessionId = payload.sessionId;
       try {
-        const draftTitle = getDraftTabLabel({ prompt: payload.prompt }, '').trim();
+        const draftTitle = getDraftTabLabel({ prompt }, '').trim();
+        const pendingHistoryEntry = buildPendingUserHistoryEntry({
+          userId: user.id,
+          inputBlocks: payload.inputBlocks,
+          timestamp: new Date().toISOString(),
+          inputConfig: payload.inputConfig,
+        });
+        if (!pendingHistoryEntry) {
+          toast.error(t('sessions.sendError'));
+          return false;
+        }
         setPendingDraftChildSessionIds((prev) => ({
           ...prev,
           [payload.draftId]: childSessionId,
         }));
 
-        await createSession({
-          sessionId: childSessionId,
-          machineId: activeSession.machineId,
-          userId: user.id,
-          cliType: payload.cliType,
-          agentType: payload.agentType,
-          agentConfigId: payload.agentConfigId,
-          customAcp: payload.customAcp,
-          runtimeOverrides: payload.runtimeOverrides,
-          project: activeSession.project,
-          repoFullName: activeSession.repoFullName,
-          baseBranch: activeSession.baseBranch,
-          parentSessionId: activeSession.id,
-          title: draftTitle || undefined,
-          titleSource: draftTitle ? 'draft' : undefined,
+        // Meta and the first user turn are one accept unit: the draft is only
+        // promoted after both are durable locally, so a half-created child (a
+        // tab whose message never entered the session doc) cannot exist. The
+        // dispatch RPC below only accelerates; the durable pointer written by
+        // requestSessionDispatch remains recovery truth.
+        const { historyEntry } = await startSession(
+          {
+            sessionId: childSessionId,
+            machineId: activeSession.machineId,
+            userId: user.id,
+            cliType: payload.cliType,
+            agentType: payload.agentType,
+            agentConfigId: payload.agentConfigId,
+            customAcp: payload.customAcp,
+            runtimeOverrides: payload.runtimeOverrides,
+            project: activeSession.project,
+            repoFullName: activeSession.repoFullName,
+            baseBranch: activeSession.baseBranch,
+            parentSessionId: activeSession.id,
+            title: draftTitle || undefined,
+            titleSource: draftTitle ? 'draft' : undefined,
+          },
+          pendingHistoryEntry
+        );
+        // Marks the first message read for the sender and bubbles activity to
+        // the parent session, matching the ordinary send path. The child's own
+        // lastMessageAt is already durable inside the startSession accept unit.
+        touchSessionActivity(childSessionId).catch((err: unknown) => {
+          console.warn('Failed to update child session activity after start', err);
         });
         persistAgentSessionDefaults(payload.agentConfigId, {
-          modeId: payload.modeId,
-          modelId: payload.modelId,
-          configOptionValues: payload.configOptionValues,
+          modeId: payload.inputConfig.modeId,
+          modelId: payload.inputConfig.modelId,
+          configOptionValues: payload.inputConfig.configOptionValues,
         });
 
         captureSessionDetailEvent(SESSION_ACP_CONFIG_USED_EVENT, {
@@ -2022,24 +1982,14 @@ const SessionDetail = ({
           entrypoint: 'session_child_tab',
         });
 
-        const pendingTurn = {
-          inputBlocks: payload.inputBlocks.length > 0 ? payload.inputBlocks : undefined,
-          prompt: payload.prompt.trim() ? payload.prompt : undefined,
-          restoredInputText: payload.preservedInputText?.trim()
-            ? payload.preservedInputText
-            : undefined,
-          modeId: payload.modeId,
-          modelId: payload.modelId,
-          configOptionValues: payload.configOptionValues,
-        };
-        if (pendingTurn.inputBlocks || pendingTurn.prompt || pendingTurn.restoredInputText) {
-          pendingInitialTurnRef.current.set(childSessionId, pendingTurn);
-        }
-
         // Draft tabs reuse the future child session id. Clear input caches before promotion;
         // waiting for the old draft input to clear lets the newly mounted child input hydrate
-        // from stale text/image drafts.
+        // from stale text/image drafts. Preserved text is handed over through the
+        // same cache the promoted composer hydrates from on mount.
         clearSessionChatInputDrafts(childSessionId);
+        if (payload.preservedInputText?.trim()) {
+          setSessionChatInputTextDraft(childSessionId, payload.preservedInputText);
+        }
         setDraftTabs((prev) => prev.filter((draft) => draft.id !== payload.draftId));
         setPendingDraftChildSessionIds((prev) => {
           const { [payload.draftId]: _removed, ...rest } = prev;
@@ -2050,15 +2000,23 @@ const SessionDetail = ({
           setActiveViewerTabId(null);
         }
         setActiveTabSessionId(childSessionId);
-        flushPendingInitialTurn(childSessionId);
+        void requestSessionDispatch(childSessionId, historyEntry.id, {
+          inputConfig: payload.inputConfig,
+          machineId: activeSession.machineId,
+        }).catch((dispatchError: unknown) => {
+          // The turn is already durable; the watcher retries once the machine
+          // syncs. Surface the failure instead of looking stuck silently.
+          console.error('Failed to request child session dispatch', dispatchError);
+          toast.error(t('sessions.sendError'));
+        });
         captureSessionDetailEvent('session/tab_child_created', {
           draft_tab_id: payload.draftId,
           child_session_id: childSessionId,
           duration_ms: getDurationSinceMs(startedAtMs),
-          prompt_length: payload.prompt.length,
-          has_initial_prompt: Boolean(pendingTurn.prompt),
+          prompt_length: prompt.length,
+          has_initial_prompt: Boolean(prompt.trim()),
           image_count: imageCount,
-          has_restored_input: Boolean(pendingTurn.restoredInputText),
+          has_restored_input: Boolean(payload.preservedInputText?.trim()),
           cli_type: payload.cliType,
           agent_type: payload.agentType,
           agent_config_id: payload.agentConfigId ?? null,
@@ -2135,14 +2093,15 @@ const SessionDetail = ({
     [
       activeSession,
       captureSessionDetailEvent,
-      createSession,
       deleteSessions,
-      flushPendingInitialTurn,
       hidesBillingUi,
       isMobile,
       openSettings,
+      requestSessionDispatch,
       setDraftTabs,
+      startSession,
       t,
+      touchSessionActivity,
       user,
     ]
   );
@@ -2165,21 +2124,34 @@ const SessionDetail = ({
         tab_session_id: tabSessionId,
         is_active_tab: tabSessionId === activeTabSessionId,
       });
-      // Switch to parent tab if closing the active tab
-      if (tabSessionId === activeTabSessionId) {
-        setActiveTabSessionId(sessionId);
-      }
       // If the tab has never had a message, just delete it instead of archiving
       const tabMeta = childSessions.find((s) => s.id === tabSessionId);
-      if (tabMeta && !tabMeta.lastMessageAt) {
-        await deleteSessions([tabSessionId]);
-        captureSessionDetailEvent('session/tab_deleted_empty', {
+      try {
+        if (tabMeta && !tabMeta.lastMessageAt) {
+          await deleteSessions([tabSessionId]);
+          captureSessionDetailEvent('session/tab_deleted_empty', {
+            tab_session_id: tabSessionId,
+          });
+        } else {
+          await archiveSession(tabSessionId);
+          captureSessionDetailEvent('session/tab_archived', {
+            tab_session_id: tabSessionId,
+          });
+        }
+        // Switch to the parent tab only once the close is durable; a failed
+        // close keeps the tab selected instead of yanking the user off it.
+        if (tabSessionId === activeTabSessionId) {
+          setActiveTabSessionId(sessionId);
+        }
+      } catch (error) {
+        // A silent failure reads as "the close button does nothing" — surface
+        // it and leave the tab where it was.
+        console.error('Failed to close session tab', { tabSessionId, error });
+        toast.error(t('sessions.tabCloseFailed', 'Could not close this tab'));
+        captureSessionDetailEvent('session/tab_close_failed', {
           tab_session_id: tabSessionId,
-        });
-      } else {
-        await archiveSession(tabSessionId);
-        captureSessionDetailEvent('session/tab_archived', {
-          tab_session_id: tabSessionId,
+          error_name: error instanceof Error ? error.name : typeof error,
+          error_message: error instanceof Error ? error.message : String(error),
         });
       }
     },
@@ -2191,6 +2163,7 @@ const SessionDetail = ({
       closeDraftTab,
       deleteSessions,
       sessionId,
+      t,
     ]
   );
 

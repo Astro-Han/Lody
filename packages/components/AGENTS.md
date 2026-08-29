@@ -173,6 +173,17 @@ mobile surfaces.
 ## Common entry points
 
 - Chat landing: `src/components/chat/chat-landing.tsx`.
+- Child-tab drafts send through the same accept unit as every other first
+  message: `handleSendDraft` (`sessions/session-detail.tsx`) writes Session meta
+  plus the first user turn together via `startSession` and only then promotes
+  the draft tab; `requestSessionDispatch` is acceleration on top of the durable
+  pointer. Never reintroduce a create-then-hand-off flow (pending-turn refs,
+  post-mount ref flushes): a promoted tab must not exist before its first
+  message is locally durable, and preserved composer text crosses the promotion
+  via the input draft cache, not a component ref. `archiveSession` falls back to
+  the rendered meta cache when the repo read lags hydration (a session the UI
+  can show must be closable), and a close failure surfaces a toast — never a
+  silent no-op.
 - Sidebar: `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, and
   `sessions/session-list-rows.ts`. Sidebar rows are sessions, not Tasks.
   EVERY desktop session row is a drag source for a session mention

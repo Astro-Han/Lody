@@ -1241,6 +1241,7 @@
   "sessions.contextWindow.remaining": "Remaining",
   "sessions.contextWindow.title": "Context Window Usage",
   "sessions.contextWindow.used": "Used",
+  "sessions.tabCloseFailed": "Could not close this tab",
   "sessions.usage.context": "Context",
   "sessions.usage.compacting": "Compacting",
   "sessions.usage.compactingContext": "Compacting context",
