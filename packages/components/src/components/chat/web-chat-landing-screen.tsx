@@ -10,6 +10,7 @@ import {
 } from '@/components/shared/conversation-drop-overlay';
 import { focusFirstChatLandingOption } from '@/hooks/use-chat-landing-keyboard-nav';
 import { FocusScope } from '@/ui/focus-scope';
+import { WINDOW_DRAG_EXEMPT_CLASS, WindowDragStrip } from '@/ui/window-drag-region';
 
 import { WORKSPACE_FOCUS_SCOPES } from '@/atoms';
 
@@ -54,11 +55,13 @@ export function WebChatLandingScreen({
       )}
       {...dropHandlers}
     >
+      <WindowDragStrip />
       <ConversationDropOverlay active={dropActive} kind={dropKind} />
       {leftSidebarExpandSlot != null ? (
         <div
           className={cn(
-            'absolute top-3 z-10',
+            'absolute top-3 z-20',
+            WINDOW_DRAG_EXEMPT_CLASS,
             // macOS Electron: `top-[9px]` centers the h-7 button at 23px, on the
             // traffic-light centerline (`trafficLightPosition.y` 16 + 7px radius
             // in apps/electron/src/main/window.ts); `left-[96px]` leaves a 24px
