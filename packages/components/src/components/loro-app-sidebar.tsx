@@ -129,6 +129,7 @@ import {
   getLatestPullRequestInfo,
   type SessionListScope,
 } from './sessions/session-list-rows';
+import { getSelectedLocalProjectKey } from './chat/chat-landing-derived';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import {
   useLocalProjectRemovalResultNotifications,
@@ -471,37 +472,6 @@ function getSelectedSessionId(pathname: string, workspaceSlug: string | null): s
 
   const sessionId = segments[1];
   return sessionId ? sessionId : null;
-}
-
-function getSelectedLocalProjectKey(
-  pathname: string,
-  workspaceSlug: string | null,
-  search?: Record<string, unknown>
-): string | null {
-  const workspacePrefix = workspaceSlug ? `/${workspaceSlug}` : '';
-  const normalizedPath =
-    workspaceSlug && pathname.startsWith(workspacePrefix)
-      ? pathname.slice(workspacePrefix.length) || '/'
-      : pathname;
-
-  const segments = normalizedPath.split('/').filter(Boolean);
-
-  // New route: /chat?context=local&machine=X&project=Y
-  if (
-    segments[0] === 'chat' &&
-    search?.context === 'local' &&
-    typeof search?.machine === 'string' &&
-    typeof search?.project === 'string'
-  ) {
-    return `${search.machine}:${search.project}`;
-  }
-
-  // Legacy route: /local/$machineId/$localProjectId
-  if (segments[0] !== 'local') return null;
-  const machineId = segments[1];
-  const localProjectId = segments[2];
-  if (!machineId || !localProjectId) return null;
-  return `${machineId}:${localProjectId}`;
 }
 
 function isHomeRoute(pathname: string, workspaceSlug: string | null): boolean {
@@ -1672,6 +1642,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (machineId: MachineId, localProjectId: string) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
+      // The landing mirrors composer steering back into the URL, so the URL
+      // names the live selection: a click on an already-selected project is an
+      // identical-URL no-op, and any other click is an ordinary search change
+      // the landing's pre-selection effect applies.
       void router.navigate({
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
