@@ -18,6 +18,7 @@ export * from './settings-machine-tab';
 export * from './focus-layer';
 export * from './onboarding';
 export * from './bug-report';
+export * from './join-community';
 
 export const userAtom = atom<CurrentUser | null>(readBootstrappedCurrentUser());
 
