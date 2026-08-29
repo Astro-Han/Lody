@@ -78,6 +78,12 @@ Root `AGENTS.md` also applies.
   Renderer-mounted notification must come from a committed layout-effect sentinel,
   never a timer or microtask guess.
 - Theme changes must also update the native window color in `window-theme.ts`.
+- Frameless window drag is per-panel, not a root overlay: each column's top
+  header (or a same-height `WindowDragStrip` when there is no header) is
+  `-webkit-app-region: drag`. Interactive descendants use `app-region-no-drag`.
+  Hide those regions in native fullscreen. Windows caption buttons stay an OS
+  overlay (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`); right-edge headers pad
+  `pr-[144px]` so toolbar controls do not sit under them.
   OS appearance changes while `themeSource` is `system` must retint chrome and
   notify the renderer (`app.nativeTheme`). On macOS also subscribe
   to `AppleInterfaceThemeChangedNotification`; Chromium `matchMedia` and

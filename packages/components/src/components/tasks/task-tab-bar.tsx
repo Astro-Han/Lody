@@ -2,9 +2,11 @@ import { ListTodo, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import {
-  TAB_PILL_ACTIVE_CLASS,
-  TAB_PILL_INACTIVE_CLASS,
-} from '@/components/shared/tab-pill-strip';
+  WINDOW_DRAG_EXEMPT_CLASS,
+  useWindowDragRegionClass,
+  useWindowsCaptionPadClass,
+} from '@/ui/window-drag-region';
+import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 
 export type TaskTabItem = {
   taskId: string;
@@ -33,8 +35,9 @@ export type TaskTabBarProps = {
 const TAB_ITEM_CLASS =
   'group relative flex h-8 min-w-0 max-w-[12rem] items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
 
-const TAB_INLINE_ACTION_CLASS =
-  'ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100';
+const TAB_INLINE_ACTION_CLASS = `ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100 ${WINDOW_DRAG_EXEMPT_CLASS}`;
+
+const TAB_SELECT_HIT_CLASS = `shrink-0 ${WINDOW_DRAG_EXEMPT_CLASS}`;
 
 export function TaskTabBar({
   tabs,
@@ -45,26 +48,40 @@ export function TaskTabBar({
   rightSlot,
 }: TaskTabBarProps) {
   const { t } = useTranslation();
+  const windowDragClass = useWindowDragRegionClass();
+  const windowsCaptionPadClass = useWindowsCaptionPadClass();
   const allActive = activeTaskId === null;
   // When only All Tasks is open, the pill reads as page chrome rather than a
   // selected sibling among many — same "solo" treatment as SessionTabBar.
   const solo = tabs.length === 0;
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2">
+    <div
+      className={cn(
+        'flex h-11 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2',
+        windowDragClass,
+        windowsCaptionPadClass
+      )}
+    >
       <div
         role="tablist"
         aria-label={t('tasks.tabs.label', 'Task tabs')}
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
       >
-        <button
-          type="button"
+        <div
           role="tab"
           aria-selected={allActive}
+          tabIndex={allActive ? 0 : -1}
           onClick={onSelectAll}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onSelectAll();
+            }
+          }}
           className={cn(
             TAB_ITEM_CLASS,
-            'shrink-0 font-medium',
+            'shrink-0 cursor-pointer font-medium',
             solo
               ? 'text-tab-active-foreground'
               : allActive
@@ -72,9 +89,11 @@ export function TaskTabBar({
                 : TAB_PILL_INACTIVE_CLASS
           )}
         >
-          <ListTodo className="h-3.5 w-3.5 shrink-0 opacity-70" />
+          <span className={TAB_SELECT_HIT_CLASS}>
+            <ListTodo className="h-3.5 w-3.5 opacity-70" />
+          </span>
           <span className="truncate">{t('tasks.tabs.allTasks', 'All Tasks')}</span>
-        </button>
+        </div>
 
         {tabs.map((tab) => {
           const active = tab.taskId === activeTaskId;
@@ -98,6 +117,10 @@ export function TaskTabBar({
                 }
               }}
             >
+              <span
+                className={cn('absolute inset-y-0 left-0 w-6', WINDOW_DRAG_EXEMPT_CLASS)}
+                aria-hidden
+              />
               <span className="min-w-0 flex-1 truncate">{label}</span>
               <button
                 type="button"
@@ -117,7 +140,11 @@ export function TaskTabBar({
           );
         })}
       </div>
-      {rightSlot ? <div className="ml-1 flex shrink-0 items-center gap-1">{rightSlot}</div> : null}
+      {rightSlot ? (
+        <div className={cn('ml-1 flex shrink-0 items-center gap-1', WINDOW_DRAG_EXEMPT_CLASS)}>
+          {rightSlot}
+        </div>
+      ) : null}
     </div>
   );
 }

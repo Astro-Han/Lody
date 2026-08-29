@@ -42,8 +42,6 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout-return-deep-link';
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
 import { readElectronAuthCallbackToken } from '@/lib/electron-oauth';
-import { isWindowsElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { cn } from '@/lib/utils';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
@@ -356,8 +354,6 @@ function RootOutletBoundary() {
   const location = useLocation({
     select: (l) => ({ pathname: l.pathname, search: l.search }),
   });
-  const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
-  const isElectronFullscreen = useElectronFullscreen();
   return (
     <ErrorBoundary
       name="RootOutlet"
@@ -367,22 +363,6 @@ function RootOutletBoundary() {
       propagateAuthErrors={false}
     >
       <ErrorBoundaryProbe />
-      {/* Window drag strip. Hidden in native fullscreen: the
-          window can't be dragged there, and the strip would only
-          block clicks on the top of the top bar. On Windows the
-          strip is the drag band behind the titleBarOverlay
-          caption buttons (36px, matching
-          MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT in
-          apps/electron/src/main/window-theme.ts); content clears
-          it via the matching pt-9 in web-workspace-layout.tsx. */}
-      {isElectron && !isElectronFullscreen && (
-        <div
-          className={cn(
-            'app-region-drag fixed left-0 top-0 right-0 z-50 select-none bg-transparent',
-            isWindowsElectronRenderer() ? 'h-9' : 'h-5'
-          )}
-        />
-      )}
       <Outlet />
     </ErrorBoundary>
   );

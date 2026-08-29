@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
-import { SidebarKeyboardHighlight } from '@/components/sidebar-keyboard-highlight';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
@@ -26,6 +25,7 @@ import { resolveWorkspaceIdentityLogo } from '@/lib/workspace-identity';
 import { cn } from '@/lib/utils';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { isElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -40,6 +40,7 @@ import {
   sidebarShowFullListAtom,
   setMobileDrawerOpenAtom,
   userAtom,
+  WORKSPACE_FOCUS_SCOPES,
 } from '@/atoms';
 import {
   activeWorkspaceRuntimeAtom,
@@ -113,6 +114,7 @@ import {
   ContextMenuTrigger,
 } from '@/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   SessionList,
@@ -652,6 +654,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       role="button"
       tabIndex={0}
       aria-label={title}
+      aria-current={isSelected ? 'page' : undefined}
+      data-id={`session:${session.id}`}
+      data-scope-item="row"
       data-sidebar-session-id={session.id}
       // Drag a conversation onto a chat surface to mention it there.
       draggable
@@ -1035,6 +1040,10 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               role={projectCanNavigate ? 'button' : undefined}
               tabIndex={projectCanNavigate ? 0 : -1}
               aria-label={ariaLabel}
+              aria-current={isSelected ? 'page' : undefined}
+              aria-disabled={!projectCanNavigate ? true : undefined}
+              data-id={`project:${machineId}:${project.id}`}
+              data-scope-item="row"
               data-sidebar-project-key={`${machineId}:${project.id}`}
               className={cn(
                 'group relative w-full rounded-md pl-2 pr-3 py-1 text-left',
@@ -2855,6 +2864,18 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     items: sidebarNavigationItems,
     callbacks: keyboardNavCallbacks,
   });
+  const handleSidebarItemFocus = useCallback(
+    (item: HTMLElement) => {
+      const sessionId = item.dataset.sidebarSessionId?.trim();
+      if (sessionId) handleNavigateToSession(sessionId);
+    },
+    [handleNavigateToSession]
+  );
+  useListKeyboardNavigation({
+    enabled: !isMobile,
+    onItemFocus: handleSidebarItemFocus,
+    scopeId: WORKSPACE_FOCUS_SCOPES.sidebar,
+  });
 
   // Use cached workspace name for offline-first display, fallback to slug
   const cachedName = workspaceSlug ? getCachedWorkspaceName(workspaceSlug) : null;
@@ -2867,13 +2888,20 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const resolvedWorkspaceId = expectedWorkspaceId ?? workspaceId ?? '';
 
   return (
-    <div className={cn('flow-root bg-background', className)}>
-      <SidebarKeyboardHighlight />
+    <FocusScope
+      id={WORKSPACE_FOCUS_SCOPES.sidebar}
+      className={cn(
+        'relative flow-root bg-background data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset data-[scope-active]:rounded-2xl',
+        className
+      )}
+    >
+      {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
         className={cn(
           isMobile
             ? 'h-full w-full rounded-none border-0 shadow-none'
-            : 'mb-2 ml-2 mr-1 mt-2 h-[calc(100%_-_1rem)] rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]'
+            : 'mb-2 ml-2 mr-1 mt-2 h-[calc(100%_-_1rem)] rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]',
+          isElectron && !isElectronFullscreen && 'z-20'
         )}
         workspaceName={resolvedWorkspaceName}
         userEmail={user?.email ?? ''}
@@ -2998,6 +3026,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           void handleConfirmRemoveLocalProject(options);
         }}
       />
-    </div>
+    </FocusScope>
   );
 }

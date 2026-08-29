@@ -58,7 +58,6 @@ import {
   machineMetaCacheAtom,
   sessionMetaCacheAtom,
 } from '@/atoms/doc-meta';
-import { focusLayerAtom } from '@/atoms/focus-layer';
 import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
@@ -617,7 +616,6 @@ function createStoryStore(session: SessionMeta, state: PageState) {
     email: 'zixuan@example.com',
     image: null,
   });
-  store.set(focusLayerAtom, 'L3');
   store.set(machineMetaCacheAtom, {
     [getMachineRoomId(STORY_MACHINE_ID)]: machineMeta,
   });

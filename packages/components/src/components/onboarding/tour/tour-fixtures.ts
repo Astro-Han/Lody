@@ -31,7 +31,6 @@ import {
   machineMetaCacheAtom,
   sessionMetaCacheAtom,
 } from '@/atoms/doc-meta';
-import { focusLayerAtom } from '@/atoms/focus-layer';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import type { TaskListTask } from '@/components/task-list';
 import type { SessionDiffChangeEntry } from '@/components/sessions/session-diff-summary';
@@ -783,7 +782,6 @@ export function createTourStore(identity: TourIdentity) {
     email: identity.userEmail,
     image: null,
   });
-  store.set(focusLayerAtom, 'L3');
   store.set(machineMetaCacheAtom, {
     [getMachineRoomId(TOUR_MACHINE_ID)]: buildTourMachine(identity),
   });
