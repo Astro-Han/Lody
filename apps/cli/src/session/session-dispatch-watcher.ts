@@ -39,6 +39,7 @@ import {
   findNextDispatchableUserTurn,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
+  isActivationAwaitingHistory,
   resolveDispatchTurnInput,
   resolveDispatchAcpSessionId,
   resolveResumableAcpSessionId,
@@ -259,12 +260,12 @@ const isConfigOptionValueRecord = (
  *      • read === false (legacy field), OR
  *      • id matches meta.processingUserMsgId (interrupted processing), OR
  *      • id matches meta.latestUserMsgId but NOT meta.lastHandledUserMsgId
- *    - If no turn found in history, try promoting from the message queue (I/O).
- *      Promotion is a dispatch producer: it publishes `latestUserMsgId` for the
- *      turn it materializes, so a drained queue cannot leave that pointer naming
- *      an older turn than `lastHandledUserMsgId` forever.
- *    - If still nothing, wait for remote sync and retry (handles the race where
- *      metadata arrives before session doc content syncs from the web client).
+ *    - If no turn found in history, try promoting from the message queue (I/O)
+ *      via `SessionDocument.appendUserTurn`, which publishes the pointer too.
+ *    - If still nothing AND the pointer's entry is genuinely absent, wait for
+ *      remote sync and retry (the race where metadata arrives before session doc
+ *      content syncs from the web client). A pointer whose entry is already
+ *      terminal is settled instead — history has answered, so waiting cannot.
  *    └─ pending meta still has no history turn after 5m → negatively acknowledge
  *       that exact turn id and unload the session doc
  *
@@ -1366,7 +1367,7 @@ export class SessionDispatchWatcher {
         return;
       }
       if (!nextUserTurn) {
-        if (this.hasPendingUserTurnSignal(meta)) {
+        if (hasPendingUserTurnActivation(meta)) {
           outcome = 'missing-history';
           await this.markMissingUserTurnRecovery(sessionId, sessionDoc, meta);
         } else {
@@ -2200,20 +2201,38 @@ export class SessionDispatchWatcher {
       return turn;
     }
 
-    if (this.hasPendingUserTurnSignal(meta)) {
-      return await this.waitForPendingUserTurnHistorySync(
-        sessionId,
-        sessionDoc,
-        meta,
-        lifecycleGeneration
-      );
+    const pendingUserTurnId = getPendingUserTurnActivationId(meta);
+    if (!pendingUserTurnId) {
+      return null;
     }
-
-    return null;
-  }
-
-  private hasPendingUserTurnSignal(meta: SessionMeta): boolean {
-    return hasPendingUserTurnActivation(meta);
+    // Phase 2 is a wait for HISTORY, so it is only meaningful while history can
+    // still explain the pointer. If the entry is already here and terminal, the
+    // check above just judged it and declined: waiting cannot change that, and
+    // the recovery that follows would accuse a turn that already ran. Settling
+    // the pointer instead keeps that path for genuinely undelivered turns.
+    if (!isActivationAwaitingHistory(await sessionDoc.getHistory(), pendingUserTurnId)) {
+      // Retire it through the existing marker: no new field, no rewrite of the
+      // producer-owned pointer, and `markMissingUserTurnRecovery` re-reads meta
+      // and returns early once this lands — which is what keeps the delivery
+      // notice out of this path. The renderer's "not delivered" label needs the
+      // marker AND a non-terminal entry, so a turn that ran stays unlabeled.
+      this.deps.logger.debug(
+        `[${sessionId}] Activation ${pendingUserTurnId} already has a terminal history entry; settling the pointer without dispatch recovery`
+      );
+      await this.deps.workspaceDocument.repo.upsertDocMeta?.(sessionDoc.roomId, {
+        lastMissingHistoryUserMsgId: pendingUserTurnId,
+      } satisfies Partial<SessionMeta>);
+      return null;
+    }
+    if (!isActive()) {
+      return null;
+    }
+    return await this.waitForPendingUserTurnHistorySync(
+      sessionId,
+      sessionDoc,
+      meta,
+      lifecycleGeneration
+    );
   }
 
   /**
@@ -2238,10 +2257,10 @@ export class SessionDispatchWatcher {
     const pendingUserTurnId = getPendingUserTurnActivationId(meta);
     this.deps.logger.debug(
       `[${sessionId}] Pending user turn ${
-        getPendingUserTurnActivationId(meta) ?? 'unknown'
-      } metadata is visible but history is missing it; waiting up to ${
+        pendingUserTurnId ?? 'unknown'
+      } has no history entry yet; waiting up to ${
         SessionDispatchWatcher.HISTORY_SYNC_WAIT_TIMEOUT_MS / 1000
-      }s for history CRDT sync (pendingUserMsgId=${pendingUserTurnId ?? 'unknown'})`
+      }s for history CRDT sync`
     );
 
     return await new Promise<SessionHistoryInput | null>((resolve) => {
@@ -2490,7 +2509,7 @@ export class SessionDispatchWatcher {
           finish(null);
           return;
         }
-        if (!this.hasPendingUserTurnSignal(currentMeta)) {
+        if (!hasPendingUserTurnActivation(currentMeta)) {
           this.deps.logger.debug(
             `[${sessionId}] Pending user turn pointer cleared during pre-wait sync; exiting wait`
           );
@@ -2532,7 +2551,7 @@ export class SessionDispatchWatcher {
     if (
       meta.machineId !== this.deps.machineId ||
       meta.isArchived ||
-      !this.hasPendingUserTurnSignal(meta)
+      !hasPendingUserTurnActivation(meta)
     ) {
       return;
     }

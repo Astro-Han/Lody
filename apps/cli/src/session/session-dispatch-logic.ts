@@ -13,6 +13,7 @@ import {
   historyItemsToInputBlocks,
   normalizeSessionInputBlocks,
   getLocalProjectHistoryProviderKey,
+  resolveSessionHistoryStatus,
   type MachineId,
   type SessionHistoryInput,
   type SessionInputBlock,
@@ -77,6 +78,25 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
 
 export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {
   return getPendingUserTurnActivationId(meta) !== undefined;
+}
+
+/**
+ * Whether an activation can still be explained by history that has not synced.
+ *
+ * The meta pointers are an activation INDEX, not the truth, so they may disagree
+ * with history — but exactly one disagreement is legitimate: the entry has not
+ * arrived yet. Once it is here and terminal, waiting cannot change the answer.
+ */
+export function isActivationAwaitingHistory(
+  history: SessionHistoryInput[],
+  pendingUserTurnId: string
+): boolean {
+  const entry = history.find((item) => item.role === 'user' && item.id === pendingUserTurnId);
+  if (!entry) {
+    return true;
+  }
+  const status = resolveSessionHistoryStatus(entry);
+  return status !== 'handled' && status !== 'failed' && status !== 'canceled';
 }
 
 // ── Action types ────────────────────────────────────────────────────────────

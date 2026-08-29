@@ -2511,23 +2511,14 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   /**
    * Append a user turn and publish its dispatch pointer as ONE operation.
    *
-   * These two writes are a single fact — "this turn is now waiting to run" —
-   * split across two documents: the entry lives in session history, the
-   * activation lives in workspace meta (which is what startup scans, so it
-   * cannot be derived from history without opening every session doc). Anything
-   * that appends a user turn through `updateHistory` and then remembers to write
-   * the pointer separately is one forgotten line away from a turn that runs but
-   * never advances `latestUserMsgId`, which leaves the pointer pair permanently
-   * unequal once the queue drains: the dispatch watcher then reads that as a
-   * still-pending activation, waits out its history-sync timeout on an entry
-   * that is already terminal, and reports a delivery failure for a turn that
-   * already succeeded. Keep both halves behind this one call so no producer can
-   * write one without the other.
-   *
-   * History is written first so the durable turn content lands before the
-   * pointer that advertises it. `lastMissingHistoryUserMsgId` is deliberately
-   * untouched — clearing it belongs to producers that first supersede the
-   * acknowledged entry, which appending a new turn does not do.
+   * Both writes are a single fact — "this turn is waiting to run" — split across
+   * two documents, because the pointer lives in workspace meta (the activation
+   * index startup scans) and so cannot be derived from history. Pairing them by
+   * convention leaves every producer one forgotten line from a turn that runs
+   * without advancing `latestUserMsgId`; see `../../session/AGENTS.md` for what
+   * that costs. History is written first so the content lands before the pointer
+   * that advertises it, and `lastMissingHistoryUserMsgId` is left alone: clearing
+   * it belongs to producers that first supersede the acknowledged entry.
    */
   async appendUserTurn(entry: SessionHistoryInput): Promise<void> {
     if (entry.role !== 'user') {

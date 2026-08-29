@@ -3265,4 +3265,79 @@ describe('SessionDispatchWatcher', () => {
       vi.useRealTimers();
     }
   });
+
+  it('settles a stale activation pointer instead of accusing a turn that already ran', async () => {
+    const sessionId = 'session-stale-pointer' as SessionId;
+    // The shape a drained message queue used to leave behind: the pointer still
+    // names the first direct send while `lastHandledUserMsgId` has advanced to a
+    // later turn, so the pair never becomes equal on its own.
+    let storedMeta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      latestUserMsgId: 'turn-a',
+      lastHandledUserMsgId: 'turn-b',
+    };
+    const history: SessionHistoryInput[] = [
+      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
+      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
+    ];
+
+    const sessionDoc = {
+      roomId: `session-${sessionId}`,
+      mirror: { subscribe: vi.fn(() => vi.fn()) },
+      getMetaState: vi.fn(async () => storedMeta),
+      getHistory: vi.fn(async () => history),
+      setStatus: vi.fn(async () => {}),
+      // Reaching any of these would mean the five-minute wait was entered.
+      waitUntilSynced: vi.fn(async () => true),
+      ensureDocRoomJoined: vi.fn(async () => {}),
+      getDocRoomStatus: vi.fn(() => 'joined'),
+      onDocRoomStatusChange: vi.fn(() => vi.fn()),
+      rejoinDocRoom: vi.fn(async () => {}),
+    };
+
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      storedMeta = { ...storedMeta, ...patch };
+    });
+    const recordChatFailure = vi.fn(async () => {});
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {
+        repo: {
+          getDocMeta: vi.fn(async () => ({ meta: storedMeta })),
+          upsertDocMeta,
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        cleanSessionDoc: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession: vi.fn(async () => {}),
+        startSession: vi.fn(async () => {}),
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+      recordChatFailure,
+    } as unknown as WatcherDeps);
+
+    await runMaybeHandleSession(watcher, sessionId);
+
+    // History already answered for `turn-a`, so no waiting and no accusation.
+    expect(sessionDoc.waitUntilSynced).not.toHaveBeenCalled();
+    expect(recordChatFailure).not.toHaveBeenCalled();
+    // And the activation is retired, so the session can stop being watched
+    // instead of re-checking this same stale pair forever.
+    expect(hasPendingUserTurnActivation(storedMeta)).toBe(false);
+  });
 });
