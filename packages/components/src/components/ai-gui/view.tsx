@@ -3731,11 +3731,6 @@ const AssistantChatItem = memo(function AssistantChatItem({
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
-  const fileDiffsForTurn = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
-  const coveredFilePaths = useMemo(
-    () => (message.finished === true ? buildCoveredFilePathSet(fileDiffsForTurn) : undefined),
-    [fileDiffsForTurn, message.finished]
-  );
   const handleMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
     const nextTurn =
       event.relatedTarget instanceof Element
@@ -3775,7 +3770,6 @@ const AssistantChatItem = memo(function AssistantChatItem({
           isStreaming: message.finished !== true,
           onFilePathClick,
           conversationFontSize,
-          coveredFilePaths,
         });
       }
       case 'activity_group_header':
@@ -4096,21 +4090,6 @@ const formatJsonValue = (value: unknown) => {
   }
 };
 
-const buildCoveredFilePathSet = (
-  files: readonly AssistantEditedFileEntry[] | undefined
-): ReadonlySet<string> | undefined => {
-  if (!files || files.length === 0) return undefined;
-  const keys = new Set<string>();
-  for (const file of files) {
-    if (!file.filePath) continue;
-    const normalized = file.filePath.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
-    keys.add(normalized);
-    const base = normalized.split('/').pop();
-    if (base) keys.add(base);
-  }
-  return keys.size > 0 ? keys : undefined;
-};
-
 const renderAssistantContent = (
   content: MessageContent,
   sessionId: SessionId,
@@ -4120,7 +4099,6 @@ const renderAssistantContent = (
     isStreaming?: boolean;
     onFilePathClick?: (filePath: string) => void;
     conversationFontSize?: ConversationFontSize;
-    coveredFilePaths?: ReadonlySet<string>;
   }
 ) => {
   const messageId = options?.messageId ?? 'assistant';
@@ -4135,7 +4113,6 @@ const renderAssistantContent = (
           size={conversationFontSize}
           isStreaming={options?.isStreaming}
           onFilePathClick={options?.onFilePathClick}
-          coveredFilePaths={options?.coveredFilePaths}
           searchBlockId={getTextSearchBlockId(messageId, itemIndex)}
         />
       );
@@ -4907,15 +4884,12 @@ export const MarkdownBlock = memo(function MarkdownBlock({
   size = DEFAULT_CONVERSATION_FONT_SIZE,
   isStreaming = false,
   onFilePathClick,
-  coveredFilePaths,
   searchBlockId,
 }: {
   text: string;
   size?: ConversationFontSize;
   isStreaming?: boolean;
   onFilePathClick?: (filePath: string) => void;
-  /** Paths already shown in the turn edited-files footer (dedupe chips). */
-  coveredFilePaths?: ReadonlySet<string>;
   searchBlockId?: string;
 }) {
   const handleAgentFileLinkClick = useStableCallback((href: string) => {
@@ -4931,7 +4905,6 @@ export const MarkdownBlock = memo(function MarkdownBlock({
       size={size}
       isStreaming={isStreaming}
       onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
-      coveredFilePaths={coveredFilePaths}
       searchBlockId={searchBlockId}
     />
   );
