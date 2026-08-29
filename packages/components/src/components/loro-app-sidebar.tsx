@@ -29,7 +29,7 @@ import { isElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { openExternalUrl } from '@/lib/native-browser';
-import { getChangelogUrl, LODY_DISCORD_URL } from '@/lib/lody-urls';
+import { getChangelogUrl } from '@/lib/lody-urls';
 import { getCachedWorkspaceName } from '@/lib/local-storage-cache';
 import {
   languageAtom,
@@ -44,6 +44,7 @@ import {
 import {
   activeWorkspaceRuntimeAtom,
   bugReportDialogOpenAtom,
+  joinCommunityDialogOpenAtom,
   currentWorkspaceIdAtom,
   currentWorkspaceSlugAtom,
   setWorkspaceContextAtom,
@@ -2417,10 +2418,11 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     void openExternalUrl(targetUrl);
   }, [closeMobileDrawer, language]);
 
+  const setJoinCommunityDialogOpen = useSetAtom(joinCommunityDialogOpenAtom);
   const handleJoinCommunityClicked = useCallback(() => {
     closeMobileDrawer();
-    void openExternalUrl(LODY_DISCORD_URL);
-  }, [closeMobileDrawer]);
+    setJoinCommunityDialogOpen(true);
+  }, [closeMobileDrawer, setJoinCommunityDialogOpen]);
 
   const handleFeedbackClicked = useCallback(() => {
     closeMobileDrawer();
