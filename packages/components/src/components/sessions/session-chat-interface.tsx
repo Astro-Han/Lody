@@ -191,6 +191,7 @@ import { resolveSessionInfoBarGitHubActionIds } from './session-info-action-stat
 import {
   canPauseGoalThroughPromptBridge,
   getPromptBridgeGoalCommands,
+  GOAL_PROMPT_DISPATCH_OPTIONS,
   isSessionPromptBusy,
 } from './session-goal-control';
 import { resolveSessionMessageSubmitRoute } from './session-message-submit-route';
@@ -3995,7 +3996,7 @@ export const SessionChatInterface = memo(
         }
 
         try {
-          const accepted = await dispatchPrompt(`/goal ${command}`);
+          const accepted = await dispatchPrompt(`/goal ${command}`, GOAL_PROMPT_DISPATCH_OPTIONS);
           if (!accepted) {
             throw new Error('Goal command was not accepted for dispatch');
           }
@@ -4806,7 +4807,7 @@ export const SessionChatInterface = memo(
       }
 
       if (goalToPause) {
-        void handleGoalCommand('pause', goalToPause, { showPending: false });
+        await handleGoalCommand('pause', goalToPause, { showPending: false });
       }
     }, [
       activeAssistantTurnId,
