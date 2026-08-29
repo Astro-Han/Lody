@@ -640,6 +640,12 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
       const { sessionId, sessionMeta } = buildSessionCreateResult(payload);
+      // The accept unit includes the first user message, so the meta it
+      // publishes already carries that activity. Written here, not by a
+      // follow-up touch: a close between acceptance and the first turn must
+      // never make the session look empty (empty tabs are deleted, not
+      // archived).
+      sessionMeta.lastMessageAt = getServerNow();
       const sessionRoomId = getSessionRoomId(sessionId);
       const historyEntry = { ...history, id: uuidv4() } as SessionHistory;
       const inputConfig = normalizeSessionTurnInputConfig(historyEntry.inputConfig);

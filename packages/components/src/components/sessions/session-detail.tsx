@@ -1661,6 +1661,7 @@ const SessionDetail = ({
   const {
     startSession,
     requestSessionDispatch,
+    touchSessionActivity,
     updateSessionTitle,
     archiveSession,
     restoreSession,
@@ -1957,6 +1958,12 @@ const SessionDetail = ({
           },
           pendingHistoryEntry
         );
+        // Marks the first message read for the sender and bubbles activity to
+        // the parent session, matching the ordinary send path. The child's own
+        // lastMessageAt is already durable inside the startSession accept unit.
+        touchSessionActivity(childSessionId).catch((err: unknown) => {
+          console.warn('Failed to update child session activity after start', err);
+        });
         persistAgentSessionDefaults(payload.agentConfigId, {
           modeId: payload.inputConfig.modeId,
           modelId: payload.inputConfig.modelId,
@@ -2094,6 +2101,7 @@ const SessionDetail = ({
       setDraftTabs,
       startSession,
       t,
+      touchSessionActivity,
       user,
     ]
   );

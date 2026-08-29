@@ -719,7 +719,14 @@ describe('useSessionActions', () => {
     expect(startSession).toHaveBeenCalledOnce();
     expect(startSession).toHaveBeenCalledWith(
       sessionId,
-      expect.objectContaining({ id: sessionId, machineId: 'machine-1' }),
+      // lastMessageAt rides the accept unit itself: the meta always carries
+      // the first message's activity, so a close racing the first turn can
+      // never mistake the session for an empty, deletable one.
+      expect.objectContaining({
+        id: sessionId,
+        machineId: 'machine-1',
+        lastMessageAt: expect.any(Number),
+      }),
       expect.objectContaining({ id: result.historyEntry.id, role: 'user' }),
       expect.objectContaining({ userTurnId: result.historyEntry.id })
     );

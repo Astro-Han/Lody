@@ -38,7 +38,10 @@ import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { useResolvedTheme } from '../../theme-provider';
 import { SessionChatInputArea, type SessionChatInputAreaHandle } from './session-chat-input-area';
 import { useSessionAcpSelectorContext } from '@/hooks/use-session-acp-selector-context';
-import { resolveSessionLocalProjectRootPath } from '@/lib/session-local-file-source';
+import {
+  resolveSessionLocalProjectRootPath,
+  resolveSessionRepoFullName,
+} from '@/lib/session-local-file-source';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import type { DraftSessionTab } from '@/lib/session-draft-tabs';
 import { agentDefaultsCache } from '@/lib/local-storage-cache';
@@ -163,7 +166,12 @@ export const DraftSessionChatInterface = memo(
       // workspace default selection — the same set the promoted child composer
       // resolves for an empty session doc.
       const mcpSelection = useSessionMcpSelection(undefined, {});
-      const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(parentSession.repoFullName);
+      // Same resolution the composer uses: a local project may carry its repo
+      // only in project.githubRepoFullName, not in repoFullName.
+      const parentRepoFullName = resolveSessionRepoFullName(parentSession);
+      const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
+        parentRepoFullName || undefined
+      );
       const { doc: parentSessionDoc, ready: parentSessionDocReady } = useSessionDoc(
         parentSession.id
       );
@@ -370,7 +378,7 @@ export const DraftSessionChatInterface = memo(
                 ? extractIssuePRMentionsFromText(
                     prompt,
                     knownIssuePrItems,
-                    parentSession.repoFullName
+                    parentRepoFullName || undefined
                   )
                 : undefined,
               mcpServerIds: mcpSelection.selectedIds,
@@ -390,7 +398,7 @@ export const DraftSessionChatInterface = memo(
           dispatchConfigOptionValues,
           knownIssuePrItems,
           mcpSelection.selectedIds,
-          parentSession.repoFullName,
+          parentRepoFullName,
           selectedModeId,
           selectedModelId,
           tasksFeatureEnabled,
