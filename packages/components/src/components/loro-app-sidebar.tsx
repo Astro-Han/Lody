@@ -58,6 +58,7 @@ import { lodyConnectionUiStateAtom } from '@/atoms/control-connection';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { selectAndWriteLocalProject } from '@/lib/local-project-import';
 import { importSidebarLocalProject } from '@/components/sidebar-local-project-import';
+import { requestChatLandingProjectSelection } from '@/components/chat/chat-landing-project-selection';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import {
   chatScopeAtom,
@@ -1672,13 +1673,19 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (machineId: MachineId, localProjectId: string) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
+      if (!isMobile) {
+        requestChatLandingProjectSelection({
+          workspaceSlug,
+          selection: { kind: 'local', machineId, localProjectId },
+        });
+      }
       void router.navigate({
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
         search: { context: 'local' as const, machine: machineId, project: localProjectId },
       });
     },
-    [closeMobileDrawer, router, workspaceSlug]
+    [closeMobileDrawer, isMobile, router, workspaceSlug]
   );
 
   const handleImportLocalProject = useCallback(async () => {
@@ -1826,6 +1833,12 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (repoFullName?: string) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
+      if (!isMobile) {
+        requestChatLandingProjectSelection({
+          workspaceSlug,
+          selection: repoFullName ? { kind: 'github', repoFullName } : { kind: 'none' },
+        });
+      }
       void router.navigate({
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
@@ -1834,7 +1847,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           : { context: 'chat' as const },
       });
     },
-    [closeMobileDrawer, router, workspaceSlug]
+    [closeMobileDrawer, isMobile, router, workspaceSlug]
   );
 
   const handleRequestRemoval = useCallback(

@@ -363,6 +363,10 @@ import {
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
 } from './chat-landing-derived';
+import {
+  subscribeToChatLandingProjectSelection,
+  type ChatLandingProjectSelection,
+} from './chat-landing-project-selection';
 
 interface ChatLandingProps {
   workspaceSlug: string;
@@ -1238,6 +1242,32 @@ function WorkspaceChatLanding({
     },
     []
   );
+  const applyProjectSelection = useCallback(
+    (selection: ChatLandingProjectSelection) => {
+      if (selection.kind === 'none') {
+        setContextType('chat');
+        return;
+      }
+      if (selection.kind === 'github') {
+        setSelectedRepo(selection.repoFullName);
+        setContextType('github');
+        return;
+      }
+      handleSelectedLocalProjectChange({
+        machineId: selection.machineId as MachineId,
+        localProjectId: selection.localProjectId as LocalProjectId,
+      });
+      setContextType('local');
+    },
+    [handleSelectedLocalProjectChange]
+  );
+  useLayoutEffect(() => {
+    if (isMobile) return;
+    return subscribeToChatLandingProjectSelection((request) => {
+      if (request.workspaceSlug !== workspaceSlug) return;
+      applyProjectSelection(request.selection);
+    });
+  }, [applyProjectSelection, isMobile, workspaceSlug]);
   const getFirstVisibleLocalProjectForMachine = useCallback(
     (machineId: MachineId): LocalProjectSelection | null => {
       for (const entry of visibleLocalProjectMap.values()) {
@@ -1413,24 +1443,23 @@ function WorkspaceChatLanding({
     preSelectionAppliedRef.current = preSelectionKey;
 
     if (preSelectedContext === 'chat') {
-      setContextType('chat');
+      applyProjectSelection({ kind: 'none' });
     } else if (preSelectedContext === 'local' && preSelectedMachine && preSelectedProject) {
-      setContextType('local');
-      handleSelectedLocalProjectChange({
-        machineId: preSelectedMachine as MachineId,
-        localProjectId: preSelectedProject as LocalProjectId,
+      applyProjectSelection({
+        kind: 'local',
+        machineId: preSelectedMachine,
+        localProjectId: preSelectedProject,
       });
     } else if (preSelectedRepo) {
-      setContextType('github');
-      setSelectedRepo(preSelectedRepo);
+      applyProjectSelection({ kind: 'github', repoFullName: preSelectedRepo });
     }
   }, [
+    applyProjectSelection,
     preSelectionKey,
     preSelectedContext,
     preSelectedMachine,
     preSelectedProject,
     preSelectedRepo,
-    handleSelectedLocalProjectChange,
   ]);
 
   // ── Machine-owner authorization check for local projects ──
@@ -3380,22 +3409,9 @@ function WorkspaceChatLanding({
   }, [contextType, selectedLocalProject, selectedRepo]);
   const handleDesktopProjectChange = useCallback(
     (selection: UnifiedProjectSelection) => {
-      if (selection.kind === 'none') {
-        setContextType('chat');
-        return;
-      }
-      if (selection.kind === 'github') {
-        setSelectedRepo(selection.repoFullName);
-        setContextType('github');
-        return;
-      }
-      handleSelectedLocalProjectChange({
-        machineId: selection.machineId,
-        localProjectId: selection.localProjectId,
-      });
-      setContextType('local');
+      applyProjectSelection(selection);
     },
-    [handleSelectedLocalProjectChange]
+    [applyProjectSelection]
   );
   const desktopAgentMachineIds = useMemo(
     () => (scopedMachineId ? [scopedMachineId] : []),
