@@ -3,7 +3,7 @@ import { Effect } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher';
 import type { SessionExecutionService } from '../src/session/session-execution-service';
-import type { LoroDocumentManager } from '../src/lib/loro/doc';
+import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import {
   findNextDispatchableUserTurn,
   getPendingUserTurnActivationId,
@@ -1314,6 +1314,7 @@ describe('SessionDispatchWatcher', () => {
     const sessionId = 'session-mq-1' as SessionId;
     const roomId = `session-${sessionId}`;
     let history: SessionHistoryInput[] = [];
+    let promotedPointer: string | undefined;
     const queue = [
       {
         $cid: 'mq-1',
@@ -1346,6 +1347,10 @@ describe('SessionDispatchWatcher', () => {
       })),
       getHistory: vi.fn(async () => history),
       popMessageQueue: vi.fn(async () => queue.shift() ?? null),
+      appendUserTurn: vi.fn(async (entry: SessionHistoryInput) => {
+        history = [...history, entry];
+        promotedPointer = entry.id;
+      }),
       updateHistory: vi.fn(
         async (updateFn: (items: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updateFn(history);
@@ -1402,7 +1407,6 @@ describe('SessionDispatchWatcher', () => {
       expect(startSession).toHaveBeenCalledTimes(1);
     });
     expect(sessionDoc.popMessageQueue).toHaveBeenCalledTimes(1);
-    expect(sessionDoc.updateHistory).toHaveBeenCalledTimes(1);
     expect(history[0]).toEqual(
       expect.objectContaining({
         id: 'queued-mq-1',
@@ -1411,6 +1415,8 @@ describe('SessionDispatchWatcher', () => {
         userId: 'user-1',
       })
     );
+    // The promoted turn is published for dispatch, not just written to history.
+    expect(promotedPointer).toBe('queued-mq-1');
     expect(startSession).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'session/create',
@@ -1528,8 +1534,22 @@ describe('SessionDispatchWatcher', () => {
       canUseMachine: createAllowMachineAccess(),
     });
 
-    const sessionDoc = {
-      roomId,
+    // A real SessionDocument over a stub mirror, so promotion runs the real
+    // `appendUserTurn` binding rather than a fake that could drift from it.
+    const docState: { history: SessionHistoryInput[] } = { history: [] };
+    const realDoc = new SessionDocument(
+      { upsertDocMeta } as unknown as ConstructorParameters<typeof SessionDocument>[0],
+      initialMeta.id,
+      async () => {},
+      createSilentLogger()
+    );
+    realDoc.roomId = roomId;
+    realDoc.mirror = {
+      setState: (updateFn: (prev: typeof docState) => typeof docState) => {
+        updateFn(docState);
+      },
+    } as unknown as SessionDocument['mirror'];
+    const sessionDoc = Object.assign(realDoc, {
       popMessageQueue: vi.fn(async () => ({
         $cid: 'mq-pointer',
         task: 'queued hello',
@@ -1544,8 +1564,7 @@ describe('SessionDispatchWatcher', () => {
           agentType: 'codex' as const,
         },
       })),
-      updateHistory: vi.fn(async () => {}),
-    };
+    });
 
     const promoted = await (
       watcher as unknown as {

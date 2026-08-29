@@ -114,13 +114,18 @@ delegation proofs or a shared-machine gate without a new product and security de
   except promotion also clears a prior missing-history marker. Promotion must NOT
   clear it: the others supersede the acknowledged entry to `canceled` first, so
   without that step clearing the marker would revive its stale `pending` copy.
-  Promotion publishing the pointer is not optional bookkeeping — it is what keeps
-  the pointer pair in lockstep. `lastHandledUserMsgId` advances to every turn that
-  RUNS, so if promoted turns never pass through `latestUserMsgId`, a drained queue
+  Publishing the pointer is not optional bookkeeping — it is what keeps the
+  pointer pair in lockstep. `lastHandledUserMsgId` advances to every turn that
+  RUNS, so if a turn never passes through `latestUserMsgId`, a drained queue
   leaves the two permanently unequal, which reads as a pending activation forever:
   the watcher waits out `HISTORY_SYNC_WAIT_TIMEOUT_MS` on a turn whose entry is
   present and terminal, then negatively acknowledges it with a bogus
-  `message_delivery_failed` notice. Ordinary turn
+  `message_delivery_failed` notice. **Append a user turn only through
+  `SessionDocument.appendUserTurn`**, which writes the history entry and publishes
+  the pointer as one call; the pointer lives in workspace meta (the activation
+  index startup scans) and so cannot be derived from history, which is exactly why
+  a separate hand-written pointer write is one forgotten line away from that bug.
+  Ordinary turn
   execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; its start,
   success, failure, denial, and cancel paths must never read-await-rewrite
   `latestUserMsgId` or `lastMissingHistoryUserMsgId`. Otherwise a terminal write for
