@@ -3398,7 +3398,7 @@ function WorkspaceChatLanding({
     [handleSelectedLocalProjectChange]
   );
   const desktopAgentMachineIds = useMemo(
-    () => (scopedMachineId ? [scopedMachineId] : undefined),
+    () => (scopedMachineId ? [scopedMachineId] : []),
     [scopedMachineId]
   );
   /* Roles offered for the machine this chat will start on. Scoped to that one
@@ -3674,6 +3674,11 @@ function WorkspaceChatLanding({
         <DesktopRunConfigMenu
           agentSelection={selectedAgent}
           allowedMachineIds={desktopAgentMachineIds}
+          disabledReason={
+            scopedMachineId
+              ? undefined
+              : t('chat.machineSelector.selectFirst', 'Select a machine first')
+          }
           fallbackAgent={{
             cliType: selectedConfig?.cliType,
             agentType: selectedConfig?.agentType,
