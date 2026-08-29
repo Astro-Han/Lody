@@ -5,6 +5,11 @@ import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher'
 import type { SessionExecutionService } from '../src/session/session-execution-service';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
+  findNextDispatchableUserTurn,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
+} from '../src/session/session-dispatch-logic';
+import {
   buildMissingEmail,
   type MessageContent,
   type SessionHistoryInput,
@@ -1486,6 +1491,135 @@ describe('SessionDispatchWatcher', () => {
     expect(promoted).toBeNull();
     expect(popMessageQueue).toHaveBeenCalledTimes(1);
     expect(updateHistory).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Promotion is a dispatch producer. A queued turn that never passes through
+   * `latestUserMsgId` while `lastHandledUserMsgId` advances to it leaves the two
+   * pointers permanently unequal once the queue drains, which every activation
+   * reader treats as a turn still waiting to be delivered.
+   */
+  const promoteQueuedMessage = async (
+    initialMeta: SessionMeta,
+    queuedTurnId: string
+  ): Promise<SessionMeta> => {
+    const roomId = `session-${initialMeta.id}`;
+    let meta = initialMeta;
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {
+        repo: { upsertDocMeta },
+      } as unknown as LoroDocumentManager,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession: vi.fn(async () => {}),
+        startSession: vi.fn(async () => {}),
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    const sessionDoc = {
+      roomId,
+      popMessageQueue: vi.fn(async () => ({
+        $cid: 'mq-pointer',
+        task: 'queued hello',
+        userId: 'user-1',
+        userTurnId: queuedTurnId,
+        timestamp: new Date().toISOString(),
+        project: undefined,
+        acpSessionConfig: {
+          prompt: 'queued hello',
+          inputBlocks: [{ type: 'text' as const, text: 'queued hello' }],
+          cliType: 'builtin' as const,
+          agentType: 'codex' as const,
+        },
+      })),
+      updateHistory: vi.fn(async () => {}),
+    };
+
+    const promoted = await (
+      watcher as unknown as {
+        promoteNextQueuedMessage: (
+          doc: typeof sessionDoc,
+          meta: SessionMeta,
+          history: SessionHistoryInput[]
+        ) => Promise<SessionHistoryInput | null>;
+      }
+    ).promoteNextQueuedMessage.bind(watcher)(sessionDoc, meta, []);
+
+    expect(promoted?.id).toBe(queuedTurnId);
+    return meta;
+  };
+
+  it('leaves no pending activation once a promoted queue turn is handled', async () => {
+    // The settled state after a direct send has run: both pointers name it.
+    const afterPromotion = await promoteQueuedMessage(
+      {
+        id: 'session-mq-pointer' as SessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date().toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        latestUserMsgId: 'direct-1',
+        lastHandledUserMsgId: 'direct-1',
+      },
+      'queued-1'
+    );
+
+    // The promoted turn is the activation the machine now owes an answer for.
+    expect(getPendingUserTurnActivationId(afterPromotion)).toBe('queued-1');
+
+    // Ordinary execution finishing that turn writes only `lastHandledUserMsgId`.
+    // Both pointers must land on the same turn, or the watcher spends
+    // HISTORY_SYNC_WAIT_TIMEOUT_MS waiting for an entry that already ran and
+    // then reports a bogus `message_delivery_failed`.
+    const afterHandled: SessionMeta = { ...afterPromotion, lastHandledUserMsgId: 'queued-1' };
+    expect(hasPendingUserTurnActivation(afterHandled)).toBe(false);
+  });
+
+  it('keeps a missing-history marker when promoting a queued turn', async () => {
+    // Unlike a resend, promotion does not supersede the acknowledged entry, so
+    // clearing the marker here would let its stale `pending` copy dispatch.
+    const afterPromotion = await promoteQueuedMessage(
+      {
+        id: 'session-mq-marker' as SessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date().toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        latestUserMsgId: 'stranded-1',
+        lastHandledUserMsgId: 'direct-1',
+        lastMissingHistoryUserMsgId: 'stranded-1',
+      },
+      'queued-2'
+    );
+
+    expect(afterPromotion.latestUserMsgId).toBe('queued-2');
+    expect(afterPromotion.lastMissingHistoryUserMsgId).toBe('stranded-1');
+    // The stranded entry stays skipped; the promoted turn is what dispatches.
+    expect(
+      findNextDispatchableUserTurn(
+        [
+          createPendingUserTurn('stranded-1', 'never delivered'),
+          createPendingUserTurn('queued-2', 'queued hello'),
+        ],
+        afterPromotion
+      )?.id
+    ).toBe('queued-2');
   });
 
   it('uses queue update watermarks to wake and settle idle sessions', async () => {

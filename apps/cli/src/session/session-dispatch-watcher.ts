@@ -260,6 +260,9 @@ const isConfigOptionValueRecord = (
  *      • id matches meta.processingUserMsgId (interrupted processing), OR
  *      • id matches meta.latestUserMsgId but NOT meta.lastHandledUserMsgId
  *    - If no turn found in history, try promoting from the message queue (I/O).
+ *      Promotion is a dispatch producer: it publishes `latestUserMsgId` for the
+ *      turn it materializes, so a drained queue cannot leave that pointer naming
+ *      an older turn than `lastHandledUserMsgId` forever.
  *    - If still nothing, wait for remote sync and retry (handles the race where
  *      metadata arrives before session doc content syncs from the web client).
  *    └─ pending meta still has no history turn after 5m → negatively acknowledge
@@ -2130,6 +2133,23 @@ export class SessionDispatchWatcher {
       };
 
       await sessionDoc.updateHistory((prevHistory) => [...prevHistory, entry]);
+      // Promotion is the producer act for this turn — the moment a queued intent
+      // becomes a real user turn — so it publishes the same dispatch pointer a
+      // direct send writes. Without it `latestUserMsgId` keeps naming the last
+      // DIRECT send while `lastHandledUserMsgId` advances through every promoted
+      // turn, so a drained queue leaves the two permanently unequal and
+      // `getPendingUserTurnActivationId` reads that as a still-pending
+      // activation: the watcher then waits five minutes for a history entry that
+      // is already there and terminal, and negatively acknowledges an
+      // already-executed turn with a `message_delivery_failed` notice.
+      //
+      // `lastMissingHistoryUserMsgId` is deliberately NOT cleared. Producers that
+      // clear it supersede the acknowledged entry to `canceled` first; promotion
+      // does not, so clearing here would let that stale `pending` copy dispatch.
+      // Leaving it costs nothing: the marker only ever suppresses its own turn id.
+      await this.deps.workspaceDocument.repo.upsertDocMeta?.(sessionDoc.roomId, {
+        latestUserMsgId: entry.id,
+      } satisfies Partial<SessionMeta>);
       return entry;
     } finally {
       releaseQueueMutation();

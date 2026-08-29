@@ -109,8 +109,18 @@ delegation proofs or a shared-machine gate without a new product and security de
   re-sending would duplicate it. An entry that is already active, terminal, or past
   `lastHandledUserMsgId` is left alone so a late duplicate cannot resurrect a turn.
   `latestUserMsgId` has single-writer-role ownership: dispatch producers (Web/CLI
-  sends, edit-and-resend, refused-steer requeue, and accepted steer ownership
-  transfer) may publish it and clear a prior missing-history marker. Ordinary turn
+  sends, edit-and-resend, refused-steer requeue, accepted steer ownership
+  transfer, and message-queue promotion) may publish it, and every one of them
+  except promotion also clears a prior missing-history marker. Promotion must NOT
+  clear it: the others supersede the acknowledged entry to `canceled` first, so
+  without that step clearing the marker would revive its stale `pending` copy.
+  Promotion publishing the pointer is not optional bookkeeping — it is what keeps
+  the pointer pair in lockstep. `lastHandledUserMsgId` advances to every turn that
+  RUNS, so if promoted turns never pass through `latestUserMsgId`, a drained queue
+  leaves the two permanently unequal, which reads as a pending activation forever:
+  the watcher waits out `HISTORY_SYNC_WAIT_TIMEOUT_MS` on a turn whose entry is
+  present and terminal, then negatively acknowledges it with a bogus
+  `message_delivery_failed` notice. Ordinary turn
   execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; its start,
   success, failure, denial, and cancel paths must never read-await-rewrite
   `latestUserMsgId` or `lastMissingHistoryUserMsgId`. Otherwise a terminal write for
