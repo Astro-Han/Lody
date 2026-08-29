@@ -79,10 +79,18 @@ describe('SessionTabBar drag sources', () => {
     });
   }
 
-  it('does not mark the tab title as a window-drag hole', async () => {
+  it('does not mark a solo tab title as a window-drag hole', async () => {
     await renderTabBar([]);
     const tab = container.querySelector<HTMLElement>('#session-tab-session-parent')!;
     expect(tab.className).not.toContain('app-region-no-drag');
+  });
+
+  it('marks each tab as a click target when more than one is open', async () => {
+    await renderTabBar([childSession]);
+    const parent = container.querySelector<HTMLElement>('#session-tab-session-parent')!;
+    const child = container.querySelector<HTMLElement>('#session-tab-session-child')!;
+    expect(parent.className).toContain('app-region-no-drag');
+    expect(child.className).toContain('app-region-no-drag');
   });
 
   it('disables dragging when only the parent Session tab is visible', async () => {

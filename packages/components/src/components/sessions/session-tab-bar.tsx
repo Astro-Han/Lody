@@ -117,8 +117,8 @@ const TAB_ITEM_CLASS =
   'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
 const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
 const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
-const TAB_INLINE_ACTION_CLASS = `ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100 ${WINDOW_DRAG_EXEMPT_CLASS}`;
-const TAB_SELECT_HIT_CLASS = `shrink-0 ${WINDOW_DRAG_EXEMPT_CLASS}`;
+const TAB_INLINE_ACTION_CLASS =
+  'ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100';
 const TAB_BAR_ACTION_CLASS = `flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground ${WINDOW_DRAG_EXEMPT_CLASS}`;
 
 function clientPointFromDragEnd(event: DragEndEvent): { x: number; y: number } | null {
@@ -232,6 +232,7 @@ function TabContent({
       }
       className={cn(
         TAB_ITEM_CLASS,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS,
         solo
           ? 'text-tab-active-foreground'
           : isActive
@@ -255,7 +256,7 @@ function TabContent({
         }
       }}
     >
-      <span className={TAB_SELECT_HIT_CLASS}>
+      <span className="shrink-0">
         {isWorking ? (
           <Loader2 className="h-3 w-3 animate-spin text-tab-active-accent" />
         ) : isWaiting ? (
@@ -361,6 +362,7 @@ function DraftTabContent({
       aria-label={label}
       className={cn(
         TAB_ITEM_CLASS,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS,
         solo
           ? 'text-tab-active-foreground'
           : isActive
@@ -377,7 +379,7 @@ function DraftTabContent({
         }
       }}
     >
-      <span className={TAB_SELECT_HIT_CLASS}>
+      <span className="shrink-0">
         <AgentIcon
           cliType={draft.cliType}
           agentType={draft.agentType}
@@ -442,6 +444,7 @@ function ViewerTabContent({
       aria-label={saveStateLabel ? `${tab.label}, ${saveStateLabel}` : tab.label}
       className={cn(
         TAB_ITEM_CLASS,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS,
         solo
           ? 'text-tab-active-foreground'
           : isActive
@@ -458,7 +461,7 @@ function ViewerTabContent({
         }
       }}
     >
-      <span className={TAB_SELECT_HIT_CLASS}>
+      <span className="shrink-0">
         {tab.type === 'file' && tab.filePath ? (
           <FileIcon filePath={tab.filePath} className="h-3 w-3" />
         ) : (

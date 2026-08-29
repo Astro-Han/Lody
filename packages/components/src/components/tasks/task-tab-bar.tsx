@@ -35,9 +35,8 @@ export type TaskTabBarProps = {
 const TAB_ITEM_CLASS =
   'group relative flex h-8 min-w-0 max-w-[12rem] items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
 
-const TAB_INLINE_ACTION_CLASS = `ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100 ${WINDOW_DRAG_EXEMPT_CLASS}`;
-
-const TAB_SELECT_HIT_CLASS = `shrink-0 ${WINDOW_DRAG_EXEMPT_CLASS}`;
+const TAB_INLINE_ACTION_CLASS =
+  'ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100';
 
 export function TaskTabBar({
   tabs,
@@ -82,6 +81,7 @@ export function TaskTabBar({
           className={cn(
             TAB_ITEM_CLASS,
             'shrink-0 cursor-pointer font-medium',
+            !solo && WINDOW_DRAG_EXEMPT_CLASS,
             solo
               ? 'text-tab-active-foreground'
               : allActive
@@ -89,9 +89,7 @@ export function TaskTabBar({
                 : TAB_PILL_INACTIVE_CLASS
           )}
         >
-          <span className={TAB_SELECT_HIT_CLASS}>
-            <ListTodo className="h-3.5 w-3.5 opacity-70" />
-          </span>
+          <ListTodo className="h-3.5 w-3.5 shrink-0 opacity-70" />
           <span className="truncate">{t('tasks.tabs.allTasks', 'All Tasks')}</span>
         </div>
 
@@ -107,6 +105,7 @@ export function TaskTabBar({
               aria-label={label}
               className={cn(
                 TAB_ITEM_CLASS,
+                WINDOW_DRAG_EXEMPT_CLASS,
                 active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS
               )}
               onClick={() => onSelectTask(tab.taskId)}
@@ -117,10 +116,6 @@ export function TaskTabBar({
                 }
               }}
             >
-              <span
-                className={cn('absolute inset-y-0 left-0 w-6', WINDOW_DRAG_EXEMPT_CLASS)}
-                aria-hidden
-              />
               <span className="min-w-0 flex-1 truncate">{label}</span>
               <button
                 type="button"

@@ -133,7 +133,7 @@ type SessionSidePanelTabBarProps = {
 };
 
 const TAB_CLASS =
-  'group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[13px] transition-colors';
+  `group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[13px] transition-colors ${WINDOW_DRAG_EXEMPT_CLASS}`;
 // Soft cool-gray pills on the white side panel (Linear-like), not heavy slate washes.
 const ACTIVE_TAB_CLASS =
   'bg-foreground/[0.08] text-tab-active-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]';
@@ -267,7 +267,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
                   }
                 }}
               >
-                <span className={cn('shrink-0', WINDOW_DRAG_EXEMPT_CLASS)}>
+                <span className="shrink-0">
                   <SidePanelTabIcon tab={tab} />
                 </span>
                 {saveStateLabel ? (
