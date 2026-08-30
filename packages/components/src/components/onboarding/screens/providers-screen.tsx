@@ -269,7 +269,7 @@ export function ProvidersScreenView({
       title={t('onboarding.providers.title', 'Connect a coding agent')}
       description={t(
         'onboarding.providers.description',
-        'Add a provider now. Lody will continue setup and let you know if anything needs your attention.'
+        'Add an Agent now. Lody will continue setup and let you know if anything needs your attention.'
       )}
       previewIdentity={
         previewConfig
@@ -464,15 +464,15 @@ export function ProvidersScreenView({
         >
           <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
           {configs.length + setups.length === 0
-            ? t('onboarding.providers.addFirst', 'Add your first provider')
-            : t('onboarding.providers.addAnother', 'Add another provider')}
+            ? t('onboarding.providers.addFirst', 'Add your first Agent')
+            : t('onboarding.providers.addAnother', 'Add another Agent')}
         </button>
 
         {!noLocalMachine && !canProceed ? (
           <p className="text-center text-xs text-muted-foreground/80">
             {t(
               'onboarding.providers.needTested',
-              'Add a provider to continue, or skip and configure later.'
+              'Add an Agent to continue, or skip and configure later.'
             )}
           </p>
         ) : null}
