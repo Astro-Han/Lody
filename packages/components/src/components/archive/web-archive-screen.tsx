@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+
 import { isNativeAppShell } from '@/lib/native-platform';
 import { Button } from '@/ui/button';
 import {
@@ -50,6 +51,7 @@ export function WebArchiveScreen({
   const { t } = useTranslation();
   const [isLeftSidebarCollapsed, setLeftSidebarCollapsed] = useAtom(sidebarCollapsedAtom);
   const isElectronFullscreen = useElectronFullscreen();
+
   // Traffic lights auto-hide in native fullscreen — no inset to reserve then.
   // Mirrors the same derivation in session-detail.tsx.
   const hasMacOSTitlebarInset =

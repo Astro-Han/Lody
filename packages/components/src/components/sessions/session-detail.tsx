@@ -85,7 +85,7 @@ import {
   terminalDockCanCreateAtom,
   terminalDockOpenAtom,
 } from '@/components/terminal/terminal-controller';
-import { isElectronRenderer } from '@/lib/electron';
+import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
@@ -151,7 +151,7 @@ import {
 import { getAppShareUrl } from '@/lib/app-location';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { cn, getBasename } from '@/lib';
-import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+
 import {
   resolveSessionFileOpenTarget,
   type SessionFileOpenPathKind,

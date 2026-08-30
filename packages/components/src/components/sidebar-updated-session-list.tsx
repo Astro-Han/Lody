@@ -804,6 +804,10 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     <div
       role={!useAnchor && onSelect ? 'button' : undefined}
       tabIndex={!useAnchor && onSelect ? 0 : undefined}
+      aria-current={selected ? 'page' : undefined}
+      data-id={`updated:${item.id}`}
+      data-scope-item="row"
+      data-sidebar-session-id={item.id}
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
       // Drag a conversation onto a chat surface to mention it there.

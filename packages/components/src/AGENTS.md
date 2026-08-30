@@ -2,6 +2,16 @@
 
 Parent `AGENTS.md` files also apply.
 
+## Keyboard navigation
+
+- Each independently navigable list owns one `FocusScope` and one
+  `useListKeyboardNavigation` call. Rows expose `data-scope-item` plus a stable
+  `data-id`; Up/Down (and J/K) move only in the active scope, while the shell's
+  single scope switcher uses Left/Right between visible leaf scopes. A local
+  control may keep a key by calling `preventDefault`; text inputs are never
+  intercepted. Nested parent scopes yield to their visible child scopes, and an
+  open dialog's scopes never switch focus into the background workspace.
+
 ## Workspace transitions
 
 - Authenticated workspace switches keep `MainLayout` mounted: the sidebar and
