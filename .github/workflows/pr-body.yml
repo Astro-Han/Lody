@@ -22,7 +22,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Determine whether PR policy applies
+      - name: Normalize issue link and determine PR policy
         id: policy
         uses: actions/github-script@v9
         with:
@@ -31,7 +31,25 @@ jobs:
             const policy = await import(pathToFileURL(
               `${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-body-policy.mjs`
             ).href)
-            const pullRequest = context.payload.pull_request
+            const issueLink = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-issue-link.mjs`
+            ).href)
+            const pullRequest = (await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            })).data
+            try {
+              await issueLink.reconcilePullRequestIssueLink({
+                github,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pullRequest,
+                defaultBranch: context.payload.repository.default_branch,
+              })
+            } catch (error) {
+              core.warning(`Could not normalize the related Issue link: ${error.message}`)
+            }
             const enforce = policy.shouldEnforcePullRequest(pullRequest)
             core.setOutput('enforce', enforce)
             if (!enforce) {

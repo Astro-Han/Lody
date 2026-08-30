@@ -37,9 +37,9 @@ export function buildOversizedPullRequestWarning({ author, lines }) {
     COMMENT_MARKER,
     `@${author}, this pull request changes **${lines} lines** (additions + deletions) without linking a prior Lody issue.`,
     '',
-    `It is marked \`${TOO_LARGE_LABEL.name}\`. The PR-body policy gives you seven days from the first invalid-body notice to fix the description. Open an issue, wait for maintainers to explicitly agree on the scope and approach, then add its full URL to \`## Related issue\`. Creating an issue yourself is not approval.`,
+    `It is marked \`${TOO_LARGE_LABEL.name}\`. The PR-body policy gives you seven days from the first invalid-body notice to fix the description. Open an Issue, wait for maintainers to explicitly agree on the scope and approach, then add \`Closes #123\` to \`## Related issue\` (or \`Refs #123\` if the Issue must remain open). Creating an Issue yourself is not approval.`,
     '',
-    'The size warning clears automatically after a valid Issue URL is linked. If the PR body remains invalid for seven days, the shared expiry policy closes the PR and requires a new submission; automation verifies the URL but maintainers decide whether prior agreement is sufficient.',
+    'The size warning clears automatically after a valid Issue reference is linked. If the PR body remains invalid for seven days, the shared expiry policy closes the PR and requires a new submission; automation verifies the reference but maintainers decide whether prior agreement is sufficient.',
   ].join('\n');
 }
 

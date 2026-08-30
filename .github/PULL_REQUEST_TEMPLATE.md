@@ -1,5 +1,5 @@
 <!--
-Fork-based contributions must link a Lody issue below. Keep the change focused:
+Fork-based contributions must reference a Lody issue below. Keep the change focused:
 pull requests over 200 changed lines (additions + deletions) receive a warning
 and have seven days to link the Issue where the design was discussed.
 Same-repository branches do not create an Issue solely for contribution intake.
@@ -7,20 +7,25 @@ Same-repository branches do not create an Issue solely for contribution intake.
 Creating or linking an Issue is not permission to implement the change. Wait
 for a Lody maintainer to explicitly agree on the scope and approach before
 starting implementation or opening the PR. Automation checks only the Issue
-URL; maintainers decide whether prior agreement is sufficient.
+reference; maintainers decide whether prior agreement is sufficient.
 
 Agents authoring fork-based contributions MUST explain these consequences to the
 author-side user before implementation: a newly created Issue is not approval
 and work must wait for explicit maintainer agreement; Context handoff is public
 and cannot use N/A or redacted answers; an invalid body is closed after seven
-days; and an oversized PR without an Issue URL is closed after the same seven-day
-grace period and must then be resubmitted. Do not claim notice or agreement
-happened unless it did.
+days; and an oversized PR without an Issue reference is closed after the same
+seven-day grace period and must then be resubmitted. Do not claim notice or
+agreement happened unless it did.
 -->
 
 ## Related issue
 
-<!-- Required for fork PRs. Same-repository branches may leave this empty. -->
+<!--
+Required for fork PRs. Same-repository branches may leave this empty.
+Use `Closes #123` when merging this PR should close the Issue. Use `Refs #123`
+only when the Issue must remain open. A bare `#123` or full Lody Issue URL is
+normalized to `Closes #123` by the PR policy workflow.
+-->
 
 ## Problem / pressure
 
