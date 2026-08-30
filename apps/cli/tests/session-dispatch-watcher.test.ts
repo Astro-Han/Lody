@@ -3419,4 +3419,76 @@ describe('SessionDispatchWatcher', () => {
     expect(startSession).not.toHaveBeenCalled();
     expect(continueSession).not.toHaveBeenCalled();
   });
+
+  it('does not accuse a turn published while the stale pointer was being settled', async () => {
+    const sessionId = 'session-settle-race' as SessionId;
+    // The outer read sees the stale pair; by the time settling re-reads meta a
+    // producer has published turn-c, whose entry has not synced yet. Settling
+    // must stand down rather than hand turn-c to missing-history recovery.
+    const staleMeta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      latestUserMsgId: 'turn-a',
+      lastHandledUserMsgId: 'turn-b',
+    };
+    const freshMeta: SessionMeta = { ...staleMeta, latestUserMsgId: 'turn-c' };
+    const history: SessionHistoryInput[] = [
+      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
+      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
+    ];
+
+    const upsertDocMeta = vi.fn(async () => {});
+    const recordChatFailure = vi.fn(async () => {});
+    const sessionDoc = {
+      roomId: `session-${sessionId}`,
+      mirror: { subscribe: vi.fn(() => vi.fn()) },
+      getMetaState: vi.fn(async () => staleMeta),
+      getHistory: vi.fn(async () => history),
+      setStatus: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => true),
+      ensureDocRoomJoined: vi.fn(async () => {}),
+      getDocRoomStatus: vi.fn(() => 'joined'),
+      onDocRoomStatusChange: vi.fn(() => vi.fn()),
+      rejoinDocRoom: vi.fn(async () => {}),
+    };
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {
+        repo: { getDocMeta: vi.fn(async () => ({ meta: freshMeta })), upsertDocMeta },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        cleanSessionDoc: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession: vi.fn(async () => {}),
+        startSession: vi.fn(async () => {}),
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+      recordChatFailure,
+    } as unknown as WatcherDeps);
+
+    // The wait runs its full window for turn-c, so bound this on the wait being
+    // entered rather than on the whole call returning.
+    void runMaybeHandleSession(watcher, sessionId);
+    await vi.waitFor(() => {
+      expect(sessionDoc.ensureDocRoomJoined).toHaveBeenCalled();
+    });
+
+    // turn-c gets the grace window, and nothing was written against it.
+    expect(recordChatFailure).not.toHaveBeenCalled();
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+    watcher.stop?.();
+  });
 });

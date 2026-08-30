@@ -2210,8 +2210,10 @@ export class SessionDispatchWatcher {
     // check above just judged it and declined: waiting cannot change that, and
     // the recovery that follows would accuse a turn that already ran. Settling
     // the pointer instead keeps that path for genuinely undelivered turns.
-    if (!isActivationAwaitingHistory(await sessionDoc.getHistory(), pendingUserTurnId)) {
-      await this.settleTerminalActivation(sessionId, pendingUserTurnId);
+    if (
+      !isActivationAwaitingHistory(await sessionDoc.getHistory(), pendingUserTurnId) &&
+      (await this.settleTerminalActivation(sessionId, pendingUserTurnId))
+    ) {
       return null;
     }
     if (!isActive()) {
@@ -2240,14 +2242,14 @@ export class SessionDispatchWatcher {
   private async settleTerminalActivation(
     sessionId: SessionId,
     terminalUserTurnId: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     const roomId = getSessionRoomId(sessionId);
     const record = await this.deps.workspaceDocument.repo.getDocMeta(roomId);
     const meta = isLoroRepoDocDeleted(record)
       ? undefined
       : (record?.meta as SessionMeta | undefined);
     if (!meta) {
-      return;
+      return false;
     }
     const patch: Partial<SessionMeta> = {};
     if (meta.processingUserMsgId === terminalUserTurnId) {
@@ -2257,12 +2259,17 @@ export class SessionDispatchWatcher {
       patch.latestUserMsgId = meta.lastHandledUserMsgId;
     }
     if (Object.keys(patch).length === 0) {
-      return;
+      // A producer moved the activation while we were reading history. Report
+      // "not settled" so the caller waits on that FRESH turn instead of falling
+      // into missing-history recovery, which re-reads meta and would accuse a
+      // message published seconds ago of never having been delivered.
+      return false;
     }
     this.deps.logger.debug(
       `[${sessionId}] Settling stale activation ${terminalUserTurnId}; its history entry is already terminal`
     );
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, patch);
+    return true;
   }
 
   /**
