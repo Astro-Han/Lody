@@ -1175,8 +1175,8 @@ export class SessionDispatchWatcher {
           this.deps.logger.debug(`[${sessionId}] Unwatching idle session (no pending work)`);
         }
         // A session with no pending work has nothing to retry. If a turn were still
-        // waiting on access verification, latestUserMsgId !== lastHandledUserMsgId
-        // would keep sessionNeedsActiveWatch() true and we would not reach here.
+        // waiting on access verification, its activation would keep
+        // sessionNeedsActiveWatch() true and we would not reach here.
         this.interruptAccessRetry(sessionId);
         return;
       }

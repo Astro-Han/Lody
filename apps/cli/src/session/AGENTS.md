@@ -52,7 +52,13 @@ delegation proofs or a shared-machine gate without a new product and security de
   That slot may be replaced freely (the turn it names is terminal, so nothing can
   revive it). Settling reports the session settled only when NO activation survives the
   patch; a surviving one must reach the ordinary history wait, or recovery accuses a
-  turn published seconds ago. A late-arriving history entry is NEVER
+  turn published seconds ago. Because BOTH slots retire an activation while leaving the
+  pointers unequal on purpose, "does this session still owe a turn?" has exactly one
+  answer — `hasPendingUserTurnActivation` in `@lody/shared` — and dispatch, idle GC
+  (`hasPendingUserWork`), auto review, and MCP status all read it. A consumer that
+  compares `latestUserMsgId` to `lastHandledUserMsgId` itself sees pending work forever:
+  auto review waits on a finished session, GC never reclaims it, MCP reports a phantom
+  queued turn. `tests/dispatch-activation-predicate.test.ts` fails on any new one. A late-arriving history entry is NEVER
   re-dispatched — no path revives the old turn. The renderer derives a visible
   "not delivered" label for that exact entry from the marker plus its non-terminal
   status (no CLI repair write, no schema change), and recovery is a fresh send:

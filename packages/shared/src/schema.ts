@@ -895,6 +895,45 @@ export type SessionMeta = {
   autoReview?: SessionAutoReviewMeta;
 };
 
+/**
+ * Resolve the dispatch activation a machine still owes work for.
+ *
+ * The pointer pair alone is NOT the answer: two suppression slots retire an
+ * activation without rewriting the producer-owned pointers, so raw
+ * `latestUserMsgId !== lastHandledUserMsgId` reports pending work forever once
+ * either fires. `lastMissingHistoryUserMsgId` is a permanent negative ack for a
+ * turn whose payload never synced; `settledActivationUserMsgId` retires a turn
+ * whose history entry is already terminal. Every consumer that asks "does this
+ * session still owe a turn?" — dispatch, idle GC, auto review, MCP status —
+ * must go through here, or they disagree with the watcher and hang.
+ */
+export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
+  const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
+  const settledUserTurnId = meta.settledActivationUserMsgId;
+  if (
+    typeof meta.processingUserMsgId === 'string' &&
+    meta.processingUserMsgId.length > 0 &&
+    meta.processingUserMsgId !== missingUserTurnId &&
+    meta.processingUserMsgId !== settledUserTurnId
+  ) {
+    return meta.processingUserMsgId;
+  }
+  if (
+    typeof meta.latestUserMsgId === 'string' &&
+    meta.latestUserMsgId.length > 0 &&
+    meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
+    meta.latestUserMsgId !== missingUserTurnId &&
+    meta.latestUserMsgId !== settledUserTurnId
+  ) {
+    return meta.latestUserMsgId;
+  }
+  return undefined;
+}
+
+export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {
+  return getPendingUserTurnActivationId(meta) !== undefined;
+}
+
 export type SessionLegacyMetaFields = {
   /** Deprecated legacy snapshot; new writes keep goal state in session history. */
   latestGoal?: Extract<MessageContent, { type: 'goal' }> | null;

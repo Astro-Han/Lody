@@ -14,6 +14,8 @@ import {
   normalizeSessionInputBlocks,
   getLocalProjectHistoryProviderKey,
   resolveSessionHistoryStatus,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
   type MachineId,
   type SessionHistoryInput,
   type SessionInputBlock,
@@ -44,44 +46,10 @@ export type SessionWatchSnapshot = {
   hasAccessRetry: boolean;
 };
 
-/**
- * Resolve the metadata activation whose payload the machine still needs to consume.
- *
- * `lastMissingHistoryUserMsgId` is a negative acknowledgement for one exact
- * activation. Keeping the producer-owned pointers intact avoids racing a later
- * producer write; comparing ids makes the acknowledgement harmless as soon as a
- * different turn is published. The marker is a PERMANENT one-shot negative ack
- * for that exact turn: a late-arriving history entry is never re-dispatched by
- * any path (the renderer shows it as "not delivered" and offers resending the
- * same content as a NEW message instead); only a different producer id wakes
- * the session again.
- */
-export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
-  const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
-  const settledUserTurnId = meta.settledActivationUserMsgId;
-  if (
-    typeof meta.processingUserMsgId === 'string' &&
-    meta.processingUserMsgId.length > 0 &&
-    meta.processingUserMsgId !== missingUserTurnId &&
-    meta.processingUserMsgId !== settledUserTurnId
-  ) {
-    return meta.processingUserMsgId;
-  }
-  if (
-    typeof meta.latestUserMsgId === 'string' &&
-    meta.latestUserMsgId.length > 0 &&
-    meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
-    meta.latestUserMsgId !== missingUserTurnId &&
-    meta.latestUserMsgId !== settledUserTurnId
-  ) {
-    return meta.latestUserMsgId;
-  }
-  return undefined;
-}
-
-export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {
-  return getPendingUserTurnActivationId(meta) !== undefined;
-}
+// The activation predicate is SessionMeta vocabulary shared with idle GC, auto
+// review, and MCP status, so it lives in @lody/shared. Re-exported here because
+// this module is the watcher's decision surface.
+export { getPendingUserTurnActivationId, hasPendingUserTurnActivation };
 
 /**
  * Whether an activation can still be explained by history that has not synced.

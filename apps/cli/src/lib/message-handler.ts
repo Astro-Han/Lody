@@ -170,6 +170,7 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
@@ -9829,11 +9830,10 @@ export class MessageHandler {
       return false;
     }
 
-    if (meta.processingUserMsgId) {
-      return true;
-    }
-
-    return Boolean(meta.latestUserMsgId && meta.latestUserMsgId !== meta.lastHandledUserMsgId);
+    // Same predicate the dispatch watcher uses: a retired activation leaves the
+    // pointers unequal on purpose, and a raw comparison would pin the session
+    // in memory forever.
+    return hasPendingUserTurnActivation(meta);
   }
 
   /**

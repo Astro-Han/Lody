@@ -77,6 +77,35 @@ describe('shouldWatchSession', () => {
     ).toBe('turn-new');
   });
 
+  it('suppresses a settled activation and keeps the pointers intact', () => {
+    // `settleTerminalActivation` deliberately leaves both producer pointers in
+    // place, so every consumer must go through this predicate rather than
+    // comparing them directly.
+    const settledMeta = {
+      ...baseMeta,
+      latestUserMsgId: 'turn-a',
+      lastHandledUserMsgId: 'turn-b',
+      settledActivationUserMsgId: 'turn-a',
+    };
+    expect(settledMeta.latestUserMsgId).not.toBe(settledMeta.lastHandledUserMsgId);
+    expect(hasPendingUserTurnActivation(settledMeta)).toBe(false);
+    expect(decide(settledMeta)).toBe(false);
+    // A newer publication is unaffected by the retired id.
+    expect(getPendingUserTurnActivationId({ ...settledMeta, latestUserMsgId: 'turn-c' })).toBe(
+      'turn-c'
+    );
+    // And a settled processing slot does not mask a live latest pointer.
+    expect(
+      getPendingUserTurnActivationId({
+        ...baseMeta,
+        processingUserMsgId: 'turn-a',
+        latestUserMsgId: 'turn-c',
+        lastHandledUserMsgId: 'turn-a',
+        settledActivationUserMsgId: 'turn-a',
+      })
+    ).toBe('turn-c');
+  });
+
   it('opens rooms for process-local RPC, access-retry, and cancel signals', () => {
     expect(decide(baseMeta, { hasRpcTurnOffer: true })).toBe(true);
     expect(decide(baseMeta, { hasAccessRetry: true })).toBe(true);

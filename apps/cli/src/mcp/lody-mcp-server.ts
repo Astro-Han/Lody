@@ -74,6 +74,7 @@ import {
   REVIEW_SEVERITY_VALUES,
   REVIEW_VERDICT_VALUES,
   ReviewSubmissionSchema,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import { makeLocalControlClientAuto } from '@lody/shared/node/local-ipc';
 import {
@@ -1497,11 +1498,10 @@ const readSessionExecutionSnapshot = async (
   });
 };
 
+// Same predicate the dispatch watcher uses, so MCP never reports a turn as
+// queued after its activation was retired.
 const hasPendingDispatchPointer = (session: SessionMeta): boolean =>
-  Boolean(
-    session.processingUserMsgId ||
-    (session.latestUserMsgId && session.latestUserMsgId !== session.lastHandledUserMsgId)
-  );
+  hasPendingUserTurnActivation(session);
 
 /**
  * Resolve whether a session is "currently working" by fusing, in precedence order:
