@@ -149,6 +149,17 @@ export function OnboardingOverlay({
           agentConfigId={draft.provider.agentConfigId}
           project={draft.project}
           onBack={() => advanceTo('projects')}
+          onAgentConfigChange={(config) => {
+            setDraft((previous) => ({
+              ...previous,
+              provider: {
+                kind: 'agentConfig',
+                agentConfigId: config.id,
+                agentName: config.name,
+              },
+            }));
+          }}
+          onSkip={() => onCompleted({})}
           onContinue={() => onCompleted({})}
           onSessionStarted={onCompleted}
         />

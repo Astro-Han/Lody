@@ -29,10 +29,7 @@ export function SummaryScreen({
         : t('onboarding.summary.exploreTitle', 'Explore Lody');
   const description =
     agentState === 'ready'
-      ? t(
-          'onboarding.summary.description',
-          'You can add providers and projects later from Settings.'
-        )
+      ? t('onboarding.summary.description', 'You can add Agents and projects later from Settings.')
       : agentState === 'preparing'
         ? t(
             'onboarding.summary.preparingDescription',
