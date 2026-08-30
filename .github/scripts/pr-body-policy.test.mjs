@@ -25,14 +25,14 @@ const forkPullRequest = {
   head: { repo: { id: 200, full_name: 'contributor/Lody' } },
 };
 
-describe('external pull request policy', () => {
-  it('bypasses same-repository branches regardless of author association', () => {
+void describe('external pull request policy', () => {
+  void it('bypasses same-repository branches regardless of author association', () => {
     assert.equal(isExternalPullRequest(sameRepositoryPullRequest), false);
     assert.equal(shouldEnforcePullRequest(sameRepositoryPullRequest), false);
     assert.equal(shouldWarnPullRequestSize(sameRepositoryPullRequest), false);
   });
 
-  it('enforces fork branches regardless of author association', () => {
+  void it('enforces fork branches regardless of author association', () => {
     for (const authorAssociation of ['OWNER', 'MEMBER', 'COLLABORATOR', 'NONE']) {
       const pullRequest = { ...forkPullRequest, author_association: authorAssociation };
       assert.equal(isExternalPullRequest(pullRequest), true);
@@ -41,12 +41,12 @@ describe('external pull request policy', () => {
     }
   });
 
-  it('fails closed when either repository identity is missing', () => {
+  void it('fails closed when either repository identity is missing', () => {
     assert.equal(isExternalPullRequest({ ...forkPullRequest, head: { repo: null } }), true);
     assert.equal(isExternalPullRequest({ ...forkPullRequest, base: { repo: null } }), true);
   });
 
-  it('does not trust matching repository names with different ids', () => {
+  void it('does not trust matching repository names with different ids', () => {
     const pullRequest = {
       ...forkPullRequest,
       head: { repo: { id: 200, full_name: 'LodyAI/Lody' } },
@@ -55,7 +55,7 @@ describe('external pull request policy', () => {
     assert.equal(shouldEnforcePullRequest(pullRequest), true);
   });
 
-  it('preserves bot and explicit-label exemptions for fork branches', () => {
+  void it('preserves bot and explicit-label exemptions for fork branches', () => {
     assert.equal(
       shouldEnforcePullRequest({ ...forkPullRequest, user: { login: 'renovate[bot]' } }),
       false
