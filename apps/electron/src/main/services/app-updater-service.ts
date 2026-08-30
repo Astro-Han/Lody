@@ -13,6 +13,7 @@ import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
 import { formatUnknownError } from '../utils'
 import { setAppQuitting } from '../window-state'
 import { readUpdaterReleaseMetadata } from './app-updater-metadata'
+import { sparkleEventToStatePatch } from './app-updater-sparkle-events'
 import {
   resolveSparkleAddonPath,
   resolveSparkleAppcastUrl,
@@ -105,6 +106,7 @@ export class AppUpdaterService {
     const sparkleBridge = this.tryLoadSparkleBridge()
     if (sparkleBridge) {
       this.sparkleBridge = sparkleBridge
+      this.attachSparkleEventHandler(sparkleBridge)
       sparkleBridge.setAutomaticChecks(true)
       return
     }
@@ -152,6 +154,15 @@ export class AppUpdaterService {
     }
     if (this.sparkleBridge) {
       try {
+        this.setState({
+          phase: 'checking',
+          error: undefined,
+          checkedAtMs: Date.now(),
+          percent: undefined,
+          bytesPerSecond: undefined,
+          transferred: undefined,
+          total: undefined
+        })
         this.sparkleBridge.checkForUpdates()
         return { started: true }
       } catch (error) {
@@ -312,6 +323,21 @@ export class AppUpdaterService {
       return null
     }
     return bridge
+  }
+
+  private attachSparkleEventHandler(bridge: SparkleBridge): void {
+    if (typeof bridge.setEventHandler !== 'function') {
+      console.log('[sparkle] native bridge has no event handler; renderer progress will not update')
+      return
+    }
+    bridge.setEventHandler((event) => {
+      try {
+        const patch = sparkleEventToStatePatch(event, Date.now())
+        if (patch) this.setState(patch)
+      } catch (error) {
+        console.log(`[sparkle] event handler failed: ${formatUnknownError(error)}`)
+      }
+    })
   }
 
   private isUpdaterEnabled(): boolean {

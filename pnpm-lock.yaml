@@ -456,8 +456,8 @@ importers:
         specifier: ^1.0.2
         version: 1.0.2(electron@39.5.1)
       electron-sparkle-updater:
-        specifier: 0.2.0
-        version: 0.2.0(electron@39.5.1)
+        specifier: 0.3.0
+        version: 0.3.0(electron@39.5.1)
       electron-updater:
         specifier: ^6.3.9
         version: 6.7.3
@@ -7696,8 +7696,8 @@ packages:
   electron-publish@26.15.3:
     resolution: {integrity: sha512-g/2bn8YTavY4cuS5F+jOS7zmZbXXBV8KZ8yHKfJjFPoKtzBqrpCdNPxBd3tqdBwP7BVd0lGzf7Bk2s0KesWZ4Q==}
 
-  electron-sparkle-updater@0.2.0:
-    resolution: {integrity: sha512-4CgzRwjohJT4/eXaghg5tHf3zrw4aNpH3vYVb450COMNsbakFhsoNwZBuHehxtw0fiw41A73domD1iJgSJ2tWQ==}
+  electron-sparkle-updater@0.3.0:
+    resolution: {integrity: sha512-4wR351ieXCN8gPHqf50r5v7yYVofy1nd7fDQv72N19zyR2A76enJW7US5upERLSlexnbxhVXe/cXXqXeakNS/A==}
     engines: {node: '>=20.19'}
     hasBin: true
     peerDependencies:
@@ -19736,7 +19736,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron-sparkle-updater@0.2.0(electron@39.5.1):
+  electron-sparkle-updater@0.3.0(electron@39.5.1):
     dependencies:
       node-addon-api: 8.9.1
       node-gyp: 13.0.2

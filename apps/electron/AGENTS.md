@@ -144,7 +144,8 @@ Root `AGENTS.md` also applies.
   `Innei/electron-sparkle-updater/action@v1` against this release's zips only
   (`publish: false`); the Action fetches the two previous `v*` zip releases as
   delta bases. Previous zips stay out of the published asset list. Sparkle load
-  failure falls back to electron-updater.
+  failure falls back to electron-updater. Sparkle UI stays silent; progress and
+  ready-to-install go through `ElectronUpdaterState` for the renderer banner.
 - Artifact names must stay space-free. GitHub Releases rewrites spaces to periods,
   which desynchronizes `latest*.yml` and Sparkle enclosures. Do not use
   `${productName}` in `artifactName`.
