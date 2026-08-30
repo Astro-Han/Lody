@@ -831,6 +831,14 @@ export type SessionMeta = {
    * payload never synced. It suppresses only a matching producer pointer.
    */
   lastMissingHistoryUserMsgId?: string;
+  /**
+   * Exact dispatch activation retired because its history entry is already
+   * terminal — the turn ran, only the pointer was stale. Recorded beside the
+   * producer-owned pointers instead of rewriting them, because there is no CAS
+   * against a concurrent send. It suppresses only a matching pointer, and the
+   * turn it names is terminal, so a later settlement may replace it freely.
+   */
+  settledActivationUserMsgId?: string;
   /** Goal thread id the user dismissed from the banner after it reached a terminal state.
    *  The banner stays hidden until a goal with a different threadId arrives. */
   dismissedGoalThreadId?: string;

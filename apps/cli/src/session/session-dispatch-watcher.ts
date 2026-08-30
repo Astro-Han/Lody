@@ -2230,14 +2230,24 @@ export class SessionDispatchWatcher {
   /**
    * Retire an activation whose turn is already terminal in history.
    *
-   * Collapses the stale pointer itself rather than co-opting
-   * `lastMissingHistoryUserMsgId`. That marker is a SINGLE slot reserved for a
-   * turn the user was told was never delivered; writing this turn into it would
-   * unprotect the turn already recorded there, whose late-arriving `pending`
-   * entry would then dispatch again and repeat its side effects.
+   * Records the settlement in its own slot rather than rewriting the pointers.
+   * `latestUserMsgId` is producer-owned and there is no CAS against a Loro LWW
+   * map, so a send published between this read and this write would otherwise be
+   * overwritten — and a fresh turn whose entry has not synced yet would lose its
+   * activation entirely, going unwatched and silently unrun. `settledActivationUserMsgId`
+   * suppresses only a matching pointer, and the turn it names is already
+   * terminal, so a later settlement may replace it freely — unlike
+   * `lastMissingHistoryUserMsgId`, whose eviction would revive a pending turn.
    *
-   * Re-read and compare before writing, because `latestUserMsgId` is
-   * producer-owned: a send published while we were reading history must win.
+   * `processingUserMsgId` is different: it is execution-owned, dispatch is
+   * serialized per session, and we only reach here with no active turn, so
+   * clearing a slot whose turn is verifiably terminal is safe and repairs a
+   * crashed-mid-turn leftover.
+   *
+   * Returns whether the session is now settled. A patch that retires THIS
+   * activation while a different one survives must report false, or the caller
+   * short-circuits into missing-history recovery and accuses that survivor of
+   * never being delivered.
    */
   private async settleTerminalActivation(
     sessionId: SessionId,
@@ -2256,20 +2266,16 @@ export class SessionDispatchWatcher {
       patch.processingUserMsgId = undefined;
     }
     if (meta.latestUserMsgId === terminalUserTurnId) {
-      patch.latestUserMsgId = meta.lastHandledUserMsgId;
+      patch.settledActivationUserMsgId = terminalUserTurnId;
     }
     if (Object.keys(patch).length === 0) {
-      // A producer moved the activation while we were reading history. Report
-      // "not settled" so the caller waits on that FRESH turn instead of falling
-      // into missing-history recovery, which re-reads meta and would accuse a
-      // message published seconds ago of never having been delivered.
       return false;
     }
     this.deps.logger.debug(
       `[${sessionId}] Settling stale activation ${terminalUserTurnId}; its history entry is already terminal`
     );
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, patch);
-    return true;
+    return !hasPendingUserTurnActivation({ ...meta, ...patch });
   }
 
   /**

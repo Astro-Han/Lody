@@ -58,10 +58,12 @@ export type SessionWatchSnapshot = {
  */
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
   const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
+  const settledUserTurnId = meta.settledActivationUserMsgId;
   if (
     typeof meta.processingUserMsgId === 'string' &&
     meta.processingUserMsgId.length > 0 &&
-    meta.processingUserMsgId !== missingUserTurnId
+    meta.processingUserMsgId !== missingUserTurnId &&
+    meta.processingUserMsgId !== settledUserTurnId
   ) {
     return meta.processingUserMsgId;
   }
@@ -69,7 +71,8 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
     typeof meta.latestUserMsgId === 'string' &&
     meta.latestUserMsgId.length > 0 &&
     meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
-    meta.latestUserMsgId !== missingUserTurnId
+    meta.latestUserMsgId !== missingUserTurnId &&
+    meta.latestUserMsgId !== settledUserTurnId
   ) {
     return meta.latestUserMsgId;
   }
