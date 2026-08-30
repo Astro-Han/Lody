@@ -49,13 +49,19 @@ function invalidCommentMarker(invalidSince) {
 }
 
 export function shouldEnforcePullRequest(pullRequest) {
-  const association = pullRequest.author_association;
   const login = pullRequest.user?.login ?? '';
   return (
-    association !== 'OWNER' &&
-    association !== 'MEMBER' &&
+    isExternalPullRequest(pullRequest) &&
     !login.endsWith('[bot]') &&
     !hasPullRequestLabel(pullRequest, BYPASS_PR_POLICY_LABEL.name)
+  );
+}
+
+export function isExternalPullRequest(pullRequest) {
+  const baseRepositoryId = pullRequest.base?.repo?.id;
+  const headRepositoryId = pullRequest.head?.repo?.id;
+  return (
+    baseRepositoryId == null || headRepositoryId == null || baseRepositoryId !== headRepositoryId
   );
 }
 
@@ -106,7 +112,7 @@ export function buildInvalidBodyComment({ author, findings, invalidSince }) {
     '',
     `If the body remains invalid for ${GRACE_PERIOD_DAYS} days, this PR will be closed and marked \`${EXPIRED_BODY_LABEL.name}\`. To contribute after that, open a new pull request using the current template.`,
     '',
-    'Every external PR must link a Lody issue and provide a complete public Context handoff with concise, PR-specific review instructions. `N/A` and redacted context are not accepted because maintainers need enough provenance, scope, and risk information to assess the contribution.',
+    'Every fork-based PR must link a Lody issue and provide a complete public Context handoff with concise, PR-specific review instructions. `N/A` and redacted context are not accepted because maintainers need enough provenance, scope, and risk information to assess the contribution.',
     '',
     '<details><summary>Checker findings</summary>',
     '',

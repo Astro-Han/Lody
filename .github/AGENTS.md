@@ -8,16 +8,20 @@
   those layers.
 - Changes to required PR template headings must update the checker in the same
   commit and validate representative complete and rejected bodies locally.
-- Every external PR links a full Lody issue URL and retains the complete Context
+- `gh pr create --body` silently skips `PULL_REQUEST_TEMPLATE.md`. Draft the PR
+  body from the template and validate it with
+  `node .github/scripts/check-pr-body.mjs --body-file <file>`.
+- Every fork-based PR links a full Lody issue URL and retains the complete Context
   handoff block and its markers. Each Authoring context field is a concise public
   summary; `N/A` and redacted values are not accepted because maintainers need
   enough provenance, scope, and risk information to assess the contribution.
-- An authoring Agent does not treat creating an Issue as approval. It tells its
-  author-side user about the policy and waits for explicit maintainer agreement
-  on scope and approach before implementation or an external PR. It also warns
-  that Context handoff is public, invalid bodies close after seven days, and
-  oversized PRs without an Issue URL get the same grace period. Never invent
-  notice or agreement that did not happen.
+- An Agent preparing a fork-based contribution does not treat creating an Issue
+  as approval. It tells its author-side user about the policy and waits for
+  explicit maintainer agreement on scope and approach before implementation or
+  a PR. It also warns that Context handoff is public, invalid bodies close after
+  seven days, and oversized PRs without an Issue URL get the same grace period.
+  Never invent notice or agreement that did not happen. An Agent preparing a
+  same-repository branch does not create or require an Issue solely for intake.
 - Review instructions are a PR-specific handoff to the organization owners'
   reviewing Agent. Require concise review focus, decisions to challenge, and
   plausible failures or evidence gaps; fixed generic reviewer boilerplate and
@@ -32,10 +36,11 @@
   confirmations in both Issue Forms. Non-owner, non-bot issues that bypass or
   remove them receive the warning-only `status:needs-issue-body` state; regular
   organization members are not exempt. A valid edit clears the bot-owned state.
-- External pull request body enforcement is based on the PR author's
-  `author_association`. Only `OWNER`, `MEMBER`, and automated bot accounts are
-  exempt by default; outside collaborators and prior contributors remain subject
-  to it. Repository owners may explicitly exempt an exceptional PR with
+- External pull request enforcement compares GitHub's numeric `head.repo.id`
+  and `base.repo.id`. Same-repository branches are internal regardless of author;
+  fork branches are external regardless of `author_association`, and missing
+  repository identity fails closed. Automated bot accounts remain exempt, and
+  repository owners may explicitly exempt an exceptional fork PR with
   `status:pr-policy-bypass`; adding or removing it immediately reconciles both
   body and size policy state.
 - `workflows/pr-policy.yml` is the only event entry point for external PR body,
@@ -56,7 +61,7 @@
   external PR keeps its original timer across edits and pushes; only a valid body
   or explicit exemption clears the state. Before closing, the scheduled workflow
   must re-read and revalidate the latest body.
-- External PR size enforcement counts additions plus deletions. A change over
+- Fork-based PR size enforcement counts additions plus deletions. A change over
   200 lines without a full Lody issue URL is labeled `status:pr-too-large` and
   shares the PR-body seven-day correction window; adding a valid URL clears the
   warning, while body expiry performs the eventual closure. Automation does not
