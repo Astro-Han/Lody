@@ -42,7 +42,11 @@ delegation proofs or a shared-machine gate without a new product and security de
   instead. The marker is a PERMANENT one-shot negative ack for the exact turn id:
   watch activation and turn selection (history AND the RPC stash) suppress pointers
   only when their id matches that marker; a different producer id wakes the session
-  without any read-await-clear race. A late-arriving history entry is NEVER
+  without any read-await-clear race. That slot holds exactly ONE turn, so nothing
+  may write an unrelated id into it: evicting the recorded turn unprotects it and its
+  late `pending` entry dispatches again, repeating side effects. A stale activation
+  whose entry is already terminal is settled by collapsing the POINTER
+  (`settleTerminalActivation`), never by claiming the marker. A late-arriving history entry is NEVER
   re-dispatched — no path revives the old turn. The renderer derives a visible
   "not delivered" label for that exact entry from the marker plus its non-terminal
   status (no CLI repair write, no schema change), and recovery is a fresh send:

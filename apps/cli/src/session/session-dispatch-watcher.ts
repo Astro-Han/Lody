@@ -2211,17 +2211,7 @@ export class SessionDispatchWatcher {
     // the recovery that follows would accuse a turn that already ran. Settling
     // the pointer instead keeps that path for genuinely undelivered turns.
     if (!isActivationAwaitingHistory(await sessionDoc.getHistory(), pendingUserTurnId)) {
-      // Retire it through the existing marker: no new field, no rewrite of the
-      // producer-owned pointer, and `markMissingUserTurnRecovery` re-reads meta
-      // and returns early once this lands — which is what keeps the delivery
-      // notice out of this path. The renderer's "not delivered" label needs the
-      // marker AND a non-terminal entry, so a turn that ran stays unlabeled.
-      this.deps.logger.debug(
-        `[${sessionId}] Activation ${pendingUserTurnId} already has a terminal history entry; settling the pointer without dispatch recovery`
-      );
-      await this.deps.workspaceDocument.repo.upsertDocMeta?.(sessionDoc.roomId, {
-        lastMissingHistoryUserMsgId: pendingUserTurnId,
-      } satisfies Partial<SessionMeta>);
+      await this.settleTerminalActivation(sessionId, pendingUserTurnId);
       return null;
     }
     if (!isActive()) {
@@ -2233,6 +2223,46 @@ export class SessionDispatchWatcher {
       meta,
       lifecycleGeneration
     );
+  }
+
+  /**
+   * Retire an activation whose turn is already terminal in history.
+   *
+   * Collapses the stale pointer itself rather than co-opting
+   * `lastMissingHistoryUserMsgId`. That marker is a SINGLE slot reserved for a
+   * turn the user was told was never delivered; writing this turn into it would
+   * unprotect the turn already recorded there, whose late-arriving `pending`
+   * entry would then dispatch again and repeat its side effects.
+   *
+   * Re-read and compare before writing, because `latestUserMsgId` is
+   * producer-owned: a send published while we were reading history must win.
+   */
+  private async settleTerminalActivation(
+    sessionId: SessionId,
+    terminalUserTurnId: string
+  ): Promise<void> {
+    const roomId = getSessionRoomId(sessionId);
+    const record = await this.deps.workspaceDocument.repo.getDocMeta(roomId);
+    const meta = isLoroRepoDocDeleted(record)
+      ? undefined
+      : (record?.meta as SessionMeta | undefined);
+    if (!meta) {
+      return;
+    }
+    const patch: Partial<SessionMeta> = {};
+    if (meta.processingUserMsgId === terminalUserTurnId) {
+      patch.processingUserMsgId = undefined;
+    }
+    if (meta.latestUserMsgId === terminalUserTurnId) {
+      patch.latestUserMsgId = meta.lastHandledUserMsgId;
+    }
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+    this.deps.logger.debug(
+      `[${sessionId}] Settling stale activation ${terminalUserTurnId}; its history entry is already terminal`
+    );
+    await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, patch);
   }
 
   /**

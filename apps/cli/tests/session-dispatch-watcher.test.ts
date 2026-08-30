@@ -3340,4 +3340,83 @@ describe('SessionDispatchWatcher', () => {
     // instead of re-checking this same stale pair forever.
     expect(hasPendingUserTurnActivation(storedMeta)).toBe(false);
   });
+
+  it('settles a stale pointer without unprotecting an already-acknowledged turn', async () => {
+    const sessionId = 'session-stale-with-marker' as SessionId;
+    // `lastMissingHistoryUserMsgId` is a SINGLE slot. Turn X was acknowledged as
+    // undelivered and its payload has since arrived as `pending`; only the
+    // marker keeps it out of dispatch. Settling the unrelated stale pointer A
+    // must not evict X from that slot.
+    let storedMeta: SessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      latestUserMsgId: 'turn-a',
+      lastHandledUserMsgId: 'turn-b',
+      lastMissingHistoryUserMsgId: 'turn-x',
+    };
+    const history: SessionHistoryInput[] = [
+      createPendingUserTurn('turn-x', 'never delivered'),
+      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
+      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
+    ];
+
+    const startSession = vi.fn(async () => {});
+    const continueSession = vi.fn(async () => {});
+    const sessionDoc = {
+      roomId: `session-${sessionId}`,
+      mirror: { subscribe: vi.fn(() => vi.fn()) },
+      getMetaState: vi.fn(async () => storedMeta),
+      getHistory: vi.fn(async () => history),
+      setStatus: vi.fn(async () => {}),
+      waitUntilSynced: vi.fn(async () => true),
+      ensureDocRoomJoined: vi.fn(async () => {}),
+      getDocRoomStatus: vi.fn(() => 'joined'),
+      onDocRoomStatusChange: vi.fn(() => vi.fn()),
+      rejoinDocRoom: vi.fn(async () => {}),
+    };
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: {
+        repo: {
+          getDocMeta: vi.fn(async () => ({ meta: storedMeta })),
+          upsertDocMeta: vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+            storedMeta = { ...storedMeta, ...patch };
+          }),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        cleanSessionDoc: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        continueSession,
+        startSession,
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    await runMaybeHandleSession(watcher, sessionId);
+
+    // X keeps the slot, so it stays undispatchable...
+    expect(storedMeta.lastMissingHistoryUserMsgId).toBe('turn-x');
+    expect(findNextDispatchableUserTurn(history, storedMeta)).toBeNull();
+    // ...and the stale pointer still settled.
+    expect(hasPendingUserTurnActivation(storedMeta)).toBe(false);
+
+    // A second pass must not resurrect X either.
+    await runMaybeHandleSession(watcher, sessionId);
+    expect(startSession).not.toHaveBeenCalled();
+    expect(continueSession).not.toHaveBeenCalled();
+  });
 });
