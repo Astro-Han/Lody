@@ -355,8 +355,9 @@ describe('Lody.registerAgent', () => {
     expect(updateAcpCapabilities).not.toHaveBeenCalled();
   });
 
-  // 用户在本机删掉的内置 provider 不应被下次启动的自动注册补回来。列表里没有它,
-  // 但那是删除的结果,不是「没建过」。
+  // A builtin provider the user removed on this machine must not come back through the next
+  // startup auto-registration. It is not in the list, but that is the result of the removal,
+  // not "never created".
   it('does not recreate a builtin agent the user removed on this machine', async () => {
     const hasAgentConfig = vi.fn(async () => false);
     const createAgentConfig = vi.fn(async () => 'agent-config-id');
@@ -388,14 +389,15 @@ describe('Lody.registerAgent', () => {
     await lody.registerAgent(['kimi', 'codex']);
     await flushMicrotasks();
 
-    // 被删过的类型不会被创建。
+    // The removed type is not created.
     expect(createAgentConfig).not.toHaveBeenCalledWith(
       'builtin',
       'kimi',
       'machine-1',
       expect.anything()
     );
-    // 没删过的类型照常注册,证明跳过是按类型精确生效,不是整段被跳掉。
+    // Types that were never removed still register, proving the skip is per type and does not
+    // bail out of the whole loop.
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
 });

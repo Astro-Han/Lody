@@ -25,7 +25,7 @@ export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
 };
 
-/** 本机被用户主动删掉、不该在启动时自动补回来的托管内置 provider 类型。 */
+/** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
 export async function readMachineBuiltinAgentOptOuts(
   repo: LoroRepo,
   workspaceId: WorkspaceId,
@@ -118,7 +118,7 @@ export async function upsertMachineAgentConfig(
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, config.machineId));
-  // 写行的同时收回同类型墓碑，两者同一次 commit（见 writeAgentConfigToFlock）。
+  // Writing the row also retracts the same-type opt-out, both in one commit (see writeAgentConfigToFlock).
   const changed = writeAgentConfigToFlock(handle.flock, config);
   if (!changed) {
     await deleteLoroRepoMetaAgentConfigIfPresent(repo, config.id);
@@ -142,7 +142,7 @@ export async function deleteMachineAgentConfig(
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, config.machineId));
-  // 删行的同时按需立墓碑，两者同一次 commit（见 deleteAgentConfigFromFlock）。
+  // Deleting the row also records an opt-out when needed, both in one commit (see deleteAgentConfigFromFlock).
   const changed = deleteAgentConfigFromFlock(handle.flock, config, getServerNow());
   if (!changed) {
     await deleteLoroRepoMetaAgentConfigIfPresent(repo, config.id);

@@ -221,8 +221,9 @@ export class Lody {
       return false;
     }
 
-    // 「列表里没有」区分不了「从没建过」和「用户刚删掉」。删除意图记在这张单子上,
-    // 不查它就会把用户删掉的 provider 每次启动补回来。
+    // "Not in the list" cannot tell "never created" from "just removed by the user".
+    // Removal intent lives in this set; skipping it adds a removed provider back on
+    // every startup.
     const optedOut = await this.documentManager.getBuiltinAgentOptOuts(this.machineId);
 
     for (const cliType of cliTypes) {

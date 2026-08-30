@@ -1329,7 +1329,7 @@ export class LoroDocumentManager {
     return false;
   }
 
-  /** 本机被用户主动删掉、不该在启动时自动补回来的托管内置 provider 类型。 */
+  /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
   async getBuiltinAgentOptOuts(machineId: MachineId): Promise<Set<ManagedBuiltinAgentType>> {
     return await readMachineBuiltinAgentOptOuts(this.repo, this.workspaceId, machineId);
   }

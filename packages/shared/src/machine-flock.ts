@@ -205,12 +205,13 @@ export type ProviderSetupCancellation = {
 };
 
 /**
- * 用户在本机主动删掉某个托管内置 provider 的记录。
+ * Record that the user removed a managed builtin provider on this machine.
  *
- * 启动时的内置 provider 自动注册只知道「列表里现在有没有」，区分不了「从没建过」
- * 和「用户刚删掉」。没有这条记录，删掉的 Kimi/Grok/Claude/Codex 下次启动就会被
- * 重新补回来。用户重新添加同类型 provider 时这条记录必须清掉——显式添加就是收回
- * 之前的删除意图。
+ * Startup auto-registration of builtin providers only knows whether a config is
+ * currently in the list; it cannot tell "never created" from "just removed by the
+ * user". Without this record a removed Kimi/Grok/Claude/Codex comes back on the
+ * next start. Re-adding a provider of the same type must clear the record --
+ * adding it explicitly retracts the earlier removal.
  */
 export type BuiltinAgentOptOut = {
   v: 1;
@@ -786,7 +787,8 @@ export function applyProviderSetupCancellationToFlock(
     flock.delete(machineFlockKeys.providerSetup(cancellation.id), nowMs);
   }
   if (config) {
-    // 取消已发布的 setup 也是用户在删这个 provider，和从列表里删一样要留删除意图。
+    // Cancelling a published setup is the user removing this provider, so it needs
+    // the same removal record as deleting it from the list.
     const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
     if (optOut) {
       flock.set(optOut.key, optOut.value, nowMs);
@@ -808,7 +810,7 @@ export function getMachineFlockRateLimits(rows: MachineFlockRowMap): Record<stri
   return rateLimits;
 }
 
-/** 本机被用户主动删掉、因而不该自动补回来的托管内置 provider 类型。 */
+/** Managed builtin provider types the user removed on this machine, so they must not be auto-registered again. */
 export function getMachineFlockBuiltinAgentOptOuts(
   rows: MachineFlockRowMap
 ): Set<ManagedBuiltinAgentType> {
@@ -822,7 +824,7 @@ export function getMachineFlockBuiltinAgentOptOuts(
   return optedOut;
 }
 
-/** 配置指向的托管内置 provider 类型；自定义、registry、DeepSeek 等不参与启动自动注册的一律返回 null。 */
+/** The managed builtin provider type this config points at; returns null for custom, registry, DeepSeek and anything else outside startup auto-registration. */
 export function getBuiltinAgentOptOutAgentType(
   config: AgentConfigMeta
 ): ManagedBuiltinAgentType | null {
@@ -833,11 +835,13 @@ export function getBuiltinAgentOptOutAgentType(
 }
 
 /**
- * 删掉 `config` 之后本机要不要记一条「用户删过这类 provider」。
+ * Whether removing `config` should record a "user removed this provider type" opt-out.
  *
- * 只在同类型的最后一个配置被删时才记：还剩别的同类型配置就谈不上「删掉了」，启动
- * 自动注册也不会补。已经有墓碑就不再重写——墓碑里带时间戳，每次重写都会当成一次
- * 变更广播给所有 peer。行本身不存在也照样记：删除意图不依赖行是否还在。
+ * Only the last config of that type counts: while another config of the same type
+ * remains, nothing was really removed and startup auto-registration will not add
+ * anything back. An existing opt-out is never rewritten -- it carries a timestamp,
+ * so every rewrite broadcasts a change to every peer. A missing row is still
+ * recorded: the removal intent does not depend on the row being there.
  */
 export function planBuiltinAgentOptOutForDeletedConfig(
   rows: MachineFlockRowMap,
@@ -865,8 +869,10 @@ export function planBuiltinAgentOptOutForDeletedConfig(
 }
 
 /**
- * 写入 `config` 要收回的墓碑 key。显式添加内置 provider 就是收回之前的删除意图，
- * 否则本机会一直记着「用户不要这个 provider」，而列表里明明有一个。没墓碑返回 null。
+ * The opt-out key that writing `config` must retract. Adding a builtin provider
+ * explicitly retracts the earlier removal; otherwise this machine keeps recording
+ * "the user does not want this provider" while the list plainly holds one.
+ * Returns null when there is no opt-out.
  */
 export function findBuiltinAgentOptOutToRetract(
   rows: MachineFlockRowMap,
@@ -880,7 +886,7 @@ export function findBuiltinAgentOptOutToRetract(
   return serializeMachineFlockKey(key) in rows ? key : null;
 }
 
-/** 写入 agentConfig 行并收回同类型墓碑，同一次 commit 落下。返回是否有变更。 */
+/** Write the agentConfig row and retract the same-type opt-out in one commit. Returns whether anything changed. */
 export function writeAgentConfigToFlock(
   flock: MachineFlockWritableFlock,
   config: AgentConfigMeta,
@@ -915,9 +921,11 @@ export function writeAgentConfigToFlock(
 }
 
 /**
- * 删除 agentConfig 行并按需立墓碑，同一次 commit 落下。删除是硬删，行本身不留痕迹；
- * 托管内置 provider 不记删除意图，下次启动的自动注册只会看到「列表里没有」，把它当
- * 没建过又补回来。返回是否有变更。
+ * Delete the agentConfig row and record an opt-out when needed, in one commit.
+ * The delete is a hard delete and leaves no trace of the row, so without a removal
+ * record for a managed builtin provider the next startup auto-registration only
+ * sees "not in the list", treats it as never created and adds it back.
+ * Returns whether anything changed.
  */
 export function deleteAgentConfigFromFlock(
   flock: MachineFlockWritableFlock,

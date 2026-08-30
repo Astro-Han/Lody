@@ -57,8 +57,8 @@ export async function writeAgentConfigToMachineFlock(
     ...readMachineFlockRowsFromFlock(handle.flock),
     [serializeMachineFlockKey(key)]: { key, value: config },
   };
-  // 显式添加内置 provider 就是收回之前的删除意图。先看本地镜像里有没有墓碑，
-  // 没有就不多发一次 writer 往返（稳态下墓碑基本不存在）。
+  // Adding a builtin provider explicitly retracts the earlier removal. Check the
+  // local mirror first so the steady state (no opt-out) costs no extra writer round trip.
   const optOutKey = findBuiltinAgentOptOutToRetract(rows, config);
   if (optOutKey) {
     await runtime.writer.flockRowDelete(flockDocId, optOutKey);
@@ -75,9 +75,10 @@ async function deleteAgentConfigFromMachineFlock(
   const key = machineFlockKeys.agentConfig(config.id);
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   const rows: MachineFlockRowMap = { ...readMachineFlockRowsFromFlock(handle.flock) };
-  // 删除是硬删,行本身不留痕迹。托管内置 provider 必须单独记一条删除意图,否则 CLI
-  // 下次启动的自动注册只会看到「列表里没有」,把它当没建过又补回来。先写墓碑再删行,
-  // 中途断掉也不会退化成「删了但没记住」。
+  // The delete is a hard delete and leaves no trace of the row, so a managed builtin
+  // provider needs its own removal record; otherwise the next CLI startup only sees
+  // "not in the list", treats it as never created and adds it back. Record first, then
+  // delete, so an interruption cannot degrade into "removed but not remembered".
   const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, getServerNow());
   if (optOut) {
     await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
@@ -119,6 +120,11 @@ async function cancelProviderSetupInMachineFlock(
   const setupKey = machineFlockKeys.providerSetup(setup.id);
   const configKey = machineFlockKeys.agentConfig(setup.id);
 
+  // The durable marker is the cancellation accept boundary. The target CLI can
+  // reconcile both rows from it even if either best-effort cleanup is interrupted.
+  // Nothing is read from the mirror before it, so the boundary is never delayed.
+  await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
+
   const handle = await runtime.repo.openFlockDoc(flockDocId);
   const rows: MachineFlockRowMap = {
     ...readMachineFlockRowsFromFlock(handle.flock),
@@ -128,17 +134,14 @@ async function cancelProviderSetupInMachineFlock(
       value: cancellation,
     },
   };
-  // setup 已发布成 agentConfig 时，取消就是用户在删这个 provider，和从列表里删一样
-  // 要留删除意图，否则 CLI 下次启动又把它补回来。
+  // Once the setup is published as an agentConfig, cancelling is the user removing this
+  // provider and needs the same removal record as deleting it from the list, or the next
+  // CLI startup adds it back.
   const publishedConfigs = getMachineFlockAgentConfigs(rows);
   const optOut =
     setup.id in publishedConfigs
       ? planBuiltinAgentOptOutForDeletedConfig(rows, publishedConfigs[setup.id], cancelledAt)
       : null;
-
-  // The durable marker is the cancellation accept boundary. The target CLI can
-  // reconcile both rows from it even if either best-effort cleanup is interrupted.
-  await runtime.writer.flockRowPut(flockDocId, cancellationKey, cancellation);
   if (optOut) {
     await runtime.writer.flockRowPut(flockDocId, optOut.key, optOut.value);
     rows[serializeMachineFlockKey(optOut.key)] = optOut;
@@ -359,7 +362,8 @@ export const cmdCreateAgentConfigAtom = atom(
     if (!runtime) throw new Error('Runtime not ready');
     if (!config.machineId) throw new Error('machineId is required to create an agent config');
     const rows = await writeAgentConfigToMachineFlock(runtime, config);
-    // 用 replace 而不是 merge：merge 删不掉 key，收回的墓碑会留在缓存里直到下次同步。
+    // Replace rather than merge: merge cannot drop a key, so a retracted opt-out would
+    // linger in the cache until the next sync.
     _set(setMachineFlockRowsForMachineAtom, {
       workspaceId: runtime.workspaceId,
       machineId: config.machineId,

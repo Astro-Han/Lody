@@ -17,7 +17,7 @@ import {
 const workspaceId = 'workspace-1' as WorkspaceId;
 const machineId = 'machine-1' as MachineId;
 
-/** 最小内存版 flock：只做 key → value 存取,足够验证行和墓碑的写/删。 */
+/** Minimal in-memory flock: plain key -> value storage, enough to check row and opt-out writes/deletes. */
 class FakeFlock {
   readonly rows = new Map<string, { key: MachineFlockKey; value: unknown }>();
 
@@ -78,7 +78,8 @@ describe('machine flock agent config opt-out', () => {
 
     await deleteMachineAgentConfig(repo, workspaceId, kimiConfig);
 
-    // 行没了,墓碑在——下次启动的自动注册靠这条墓碑才知道「用户删过」。
+    // Row gone, opt-out kept -- that record is how the next startup auto-registration
+    // knows the user removed it.
     expect(await readMachineAgentConfigs(repo, workspaceId, machineId)).toEqual({});
     expect(await readMachineBuiltinAgentOptOuts(repo, workspaceId, machineId)).toEqual(
       new Set(['kimi'])
@@ -95,7 +96,8 @@ describe('machine flock agent config opt-out', () => {
       new Set(['kimi'])
     );
 
-    // 重新添加就是收回删除意图,墓碑必须跟着消失,否则列表里有它、启动却仍当它被删了。
+    // Adding it back retracts the removal, so the opt-out has to disappear with it, or
+    // the list holds it while startup still treats it as removed.
     await upsertMachineAgentConfig(repo, workspaceId, {
       ...kimiConfig,
       id: 'agent-config-kimi-2',
@@ -112,13 +114,14 @@ describe('machine flock agent config opt-out', () => {
     await upsertMachineAgentConfig(repo, workspaceId, customConfig);
     await deleteMachineAgentConfig(repo, workspaceId, customConfig);
 
-    // 自定义 provider 不参与启动自动注册,不需要也不该留墓碑。
+    // Custom providers are outside startup auto-registration, so no opt-out is needed or wanted.
     expect(await readMachineBuiltinAgentOptOuts(repo, workspaceId, machineId)).toEqual(new Set());
   });
 
   it('records an opt-out even when the config row is already gone', async () => {
     const { repo } = createFakeRepo();
-    // 行本来就不存在,删除只改了墓碑——这次变更也必须落盘,不能被「行没变」的早退吞掉。
+    // The row never existed, so the delete only writes the opt-out -- that change still has
+    // to be persisted and must not be swallowed by the "row unchanged" early return.
     await deleteMachineAgentConfig(repo, workspaceId, kimiConfig);
 
     expect(await readMachineBuiltinAgentOptOuts(repo, workspaceId, machineId)).toEqual(

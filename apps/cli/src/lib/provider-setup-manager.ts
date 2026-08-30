@@ -371,8 +371,9 @@ export class ProviderSetupManager {
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
     flock.set(machineFlockKeys.agentConfig(setupId), setup.config, now);
-    // 发布就是用户显式添加，之前的同类型删除意图要一并收回，否则列表里有它、
-    // 启动却仍当它被删了。
+    // Publishing is the user adding the provider explicitly, so the earlier same-type
+    // removal intent has to be retracted too, or the list holds it while startup still
+    // treats it as removed.
     const optOutKey = findBuiltinAgentOptOutToRetract(rows, setup.config);
     if (optOutKey) {
       flock.delete(optOutKey, now);

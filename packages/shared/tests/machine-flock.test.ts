@@ -597,8 +597,9 @@ describe('machine Flock helpers', () => {
       expect(
         writeMachineFlockRowToFlock(flock, {
           key: machineFlockKeys.builtinAgentOptOut('kimi'),
-          // 值里的 agentType 与 key 不一致,写入必须失败——否则跳过逻辑会按 key 生效,
-          // 却对着一条内容对不上的记录。
+          // The agentType in the value disagrees with the key, so the write must fail --
+          // otherwise the skip logic keys off the key while pointing at a record whose
+          // contents do not match.
           value: { v: 1, agentType: 'codex', machineId, removedAt: 1700 },
         } as never)
       ).toBe(false);
@@ -631,7 +632,8 @@ describe('machine Flock helpers', () => {
     });
 
     it('deleting one of several configs of a type does not record an opt-out', () => {
-      // 还剩一个 Kimi，用户没有「删掉 Kimi」，启动也不会补，不该记删除意图。
+      // One Kimi is left, so the user did not remove Kimi, startup adds nothing back and no
+      // opt-out should be recorded.
       const flock = new FakeMachineFlock();
       writeAgentConfigToFlock(flock, kimi('a'));
       writeAgentConfigToFlock(flock, kimi('b'));
@@ -642,7 +644,8 @@ describe('machine Flock helpers', () => {
     });
 
     it('does not rewrite an existing opt-out on repeated deletes', () => {
-      // 墓碑带时间戳，重写会被当成变更广播给所有 peer；行已不在、墓碑已在时必须无变更。
+      // The opt-out carries a timestamp, so a rewrite broadcasts a change to every peer; with
+      // the row already gone and the opt-out already there, nothing must change.
       const flock = new FakeMachineFlock();
       deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
 
@@ -674,7 +677,8 @@ describe('machine Flock helpers', () => {
     });
 
     it('cancelling a published provider setup records the opt-out', () => {
-      // 取消已发布的 setup 也是在删 provider，不记墓碑的话 CLI 下次启动又补回来。
+      // Cancelling a published setup is also removing the provider; without the opt-out the CLI
+      // adds it back on the next startup.
       const flock = new FakeMachineFlock();
       writeAgentConfigToFlock(flock, kimi('setup-1'));
 
@@ -690,7 +694,7 @@ describe('machine Flock helpers', () => {
     });
 
     it('cancelling an unpublished provider setup records no opt-out', () => {
-      // 从没发布过，列表里本来就没有，不存在「删掉」一说。
+      // It was never published, so it was never in the list and there is nothing to remove.
       const flock = new FakeMachineFlock();
       applyProviderSetupCancellationToFlock(flock, {
         v: 1,
@@ -703,7 +707,8 @@ describe('machine Flock helpers', () => {
     });
 
     it('rejects an agentType that has no managed runtime', () => {
-      // deepseek 是内置 provider,但不参与启动自动注册,不该有删除意图记录。
+      // deepseek is a builtin provider but stays outside startup auto-registration, so it must
+      // have no opt-out record.
       expect(parseMachineFlockKey(['builtinAgentOptOut', 'deepseek'])).toBeUndefined();
       expect(parseMachineFlockKey(['builtinAgentOptOut', 'kimi'])).toEqual({
         kind: 'builtinAgentOptOut',
