@@ -2193,7 +2193,7 @@ export class SessionDispatchWatcher {
     const isActive = () => this.isLifecycleActive(lifecycleGeneration);
     // Phase 1: check immediately with whatever data we have locally
     // (history → queue → RPC stash).
-    const turn = await this.checkHistoryAndQueue(sessionDoc, meta, isActive);
+    const { turn, history } = await this.checkHistoryAndQueue(sessionDoc, meta, isActive);
     if (!isActive()) {
       return null;
     }
@@ -2211,7 +2211,7 @@ export class SessionDispatchWatcher {
     // the recovery that follows would accuse a turn that already ran. Settling
     // the pointer instead keeps that path for genuinely undelivered turns.
     if (
-      !isActivationAwaitingHistory(await sessionDoc.getHistory(), pendingUserTurnId) &&
+      !isActivationAwaitingHistory(history, pendingUserTurnId) &&
       (await this.settleTerminalActivation(sessionId, pendingUserTurnId))
     ) {
       return null;
@@ -2357,7 +2357,7 @@ export class SessionDispatchWatcher {
           try {
             while (checkRequested) {
               checkRequested = false;
-              const turn = await this.checkHistoryAndQueue(sessionDoc, currentMeta, isActive);
+              const { turn } = await this.checkHistoryAndQueue(sessionDoc, currentMeta, isActive);
               if (settled || !isActive()) {
                 finish(null);
                 return;
@@ -2640,15 +2640,21 @@ export class SessionDispatchWatcher {
    * Shared by the initial check and every wait loop, so a stashed RPC payload
    * is picked up wherever the watcher would otherwise sit waiting for the
    * history CRDT.
+   *
+   * Also hands back the history snapshot it judged, so a caller that needs to
+   * reason about the same entries does not read them a second time. That
+   * snapshot predates queue promotion, but every path that appends also returns
+   * a turn — so it is accurate whenever `turn` is null, which is the only case
+   * a caller can act on it.
    */
   private async checkHistoryAndQueue(
     sessionDoc: Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>,
     meta: SessionMeta,
     isActive: () => boolean = () => true
-  ): Promise<SessionHistoryInput | null> {
+  ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
     const history = await sessionDoc.getHistory();
     if (!isActive()) {
-      return null;
+      return { turn: null, history };
     }
     const turn = findNextDispatchableUserTurn(history, meta);
     if (turn) {
@@ -2660,20 +2666,20 @@ export class SessionDispatchWatcher {
       }
       // The history copy is authoritative once it syncs; drop the RPC copy.
       this.consumeStashedRpcTurn(meta.id, turn.id);
-      return turn;
+      return { turn, history };
     }
     if (!isActive()) {
-      return null;
+      return { turn: null, history };
     }
     const promoted = await this.promoteNextQueuedMessage(sessionDoc, meta, history);
     if (!isActive()) {
-      return null;
+      return { turn: null, history };
     }
     if (promoted) {
       this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
-      return promoted;
+      return { turn: promoted, history };
     }
-    return this.peekStashedRpcTurn(meta.id, meta, history);
+    return { turn: this.peekStashedRpcTurn(meta.id, meta, history), history };
   }
 
   /**
