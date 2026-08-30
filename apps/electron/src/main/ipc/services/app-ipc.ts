@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
+import { BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
@@ -22,6 +22,12 @@ import {
 } from '../../renderer-recovery'
 import { applyResolvedWindowTheme, resolveNativeWindowTheme } from '../../window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from '../../utils'
+import {
+  applyAutoLaunchSettings,
+  getAutoLaunchEnabled,
+  getHideWindowOnAutoLaunchEnabled,
+  setHideWindowOnAutoLaunchEnabled
+} from '../../auto-launch-settings'
 
 const autoLaunchSupported = process.platform === 'darwin' || process.platform === 'win32'
 
@@ -29,21 +35,22 @@ function getAutoLaunchStatus() {
   if (!autoLaunchSupported) {
     return {
       supported: false,
-      enabled: false
+      enabled: false,
+      hideWindowOnAutoLaunch: false
     }
   }
   try {
-    const settings = app.getLoginItemSettings()
+    const enabled = getAutoLaunchEnabled()
     return {
       supported: true,
-      enabled: Boolean(settings.openAtLogin),
-      openAtLogin: Boolean(settings.openAtLogin),
-      openAsHidden: Boolean(settings.openAsHidden)
+      enabled,
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled()
     }
   } catch (error) {
     return {
       supported: true,
       enabled: false,
+      hideWindowOnAutoLaunch: getHideWindowOnAutoLaunchEnabled(),
       error: error instanceof Error ? error.message : String(error)
     }
   }
@@ -126,6 +133,7 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: 'invalid_enabled_flag'
       }
     }
@@ -134,19 +142,18 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: false,
         enabled: false,
+        hideWindowOnAutoLaunch: false,
         error: 'unsupported_platform'
       }
     }
     try {
-      app.setLoginItemSettings({
-        openAtLogin: enabledRaw,
-        openAsHidden: enabledRaw
-      })
+      applyAutoLaunchSettings(enabledRaw)
       const status = getAutoLaunchStatus()
       return {
         ok: true,
         supported: status.supported,
-        enabled: status.enabled
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
       }
     } catch (error) {
       const status = getAutoLaunchStatus()
@@ -154,6 +161,56 @@ export class AppIpc extends IpcService {
         ok: false,
         supported: status.supported,
         enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
+  @IpcMethod()
+  async setAutoLaunchHideWindow(enabledRaw: boolean) {
+    if (typeof enabledRaw !== 'boolean') {
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
+        error: 'invalid_enabled_flag'
+      }
+    }
+    if (!autoLaunchSupported) {
+      return {
+        ok: false,
+        supported: false,
+        enabled: false,
+        hideWindowOnAutoLaunch: false,
+        error: 'unsupported_platform'
+      }
+    }
+
+    const previous = getHideWindowOnAutoLaunchEnabled()
+    try {
+      setHideWindowOnAutoLaunchEnabled(enabledRaw)
+      const status = getAutoLaunchStatus()
+      return {
+        ok: true,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch
+      }
+    } catch (error) {
+      try {
+        setHideWindowOnAutoLaunchEnabled(previous)
+      } catch {
+        // Preserve the original failure for the renderer.
+      }
+      const status = getAutoLaunchStatus()
+      return {
+        ok: false,
+        supported: status.supported,
+        enabled: status.enabled,
+        hideWindowOnAutoLaunch: status.hideWindowOnAutoLaunch,
         error: error instanceof Error ? error.message : String(error)
       }
     }
