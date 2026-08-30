@@ -212,11 +212,12 @@ export type ProviderSetupCancellation = {
  * user". Without this record a removed Kimi/Grok/Claude/Codex comes back on the
  * next start. Re-adding a provider of the same type must clear the record --
  * adding it explicitly retracts the earlier removal.
+ *
+ * The provider type lives in the key and the machine is the flock doc itself, so
+ * the value carries only the timestamp.
  */
 export type BuiltinAgentOptOut = {
   v: 1;
-  agentType: ManagedBuiltinAgentType;
-  machineId: MachineId;
   removedAt: number;
 };
 
@@ -864,7 +865,7 @@ export function planBuiltinAgentOptOutForDeletedConfig(
   }
   return {
     key,
-    value: { v: 1, agentType, machineId: config.machineId, removedAt: nowMs },
+    value: { v: 1, removedAt: nowMs },
   };
 }
 
@@ -1140,9 +1141,7 @@ export function parseMachineFlockRow(
       return isRecord(value) ? { key: parsedKey.key, value: value as RateLimit } : undefined;
     case 'builtinAgentOptOut': {
       const optOut = normalizeBuiltinAgentOptOut(value);
-      return optOut && optOut.agentType === parsedKey.agentType
-        ? { key: parsedKey.key, value: optOut }
-        : undefined;
+      return optOut ? { key: parsedKey.key, value: optOut } : undefined;
     }
     case 'sessionLaunchConfig': {
       const config = normalizeSessionLaunchConfig(value);
@@ -1520,20 +1519,12 @@ const normalizeBuiltinAgentOptOut = (value: unknown): BuiltinAgentOptOut | undef
   if (
     !isRecord(value) ||
     value.v !== 1 ||
-    typeof value.agentType !== 'string' ||
-    !isManagedBuiltinAgentType(value.agentType) ||
-    !isNonEmptyString(value.machineId) ||
     typeof value.removedAt !== 'number' ||
     !Number.isFinite(value.removedAt)
   ) {
     return undefined;
   }
-  return {
-    v: 1,
-    agentType: value.agentType,
-    machineId: value.machineId as MachineId,
-    removedAt: value.removedAt,
-  };
+  return { v: 1, removedAt: value.removedAt };
 };
 
 const normalizeAgentConfigListSummary = (value: unknown): AgentConfigListSummary | undefined => {

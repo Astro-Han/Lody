@@ -85,7 +85,7 @@ describe('machine flock agent config opt-out', () => {
       new Set(['kimi'])
     );
     const optOutRow = flock.rows.get(JSON.stringify(machineFlockKeys.builtinAgentOptOut('kimi')));
-    expect(optOutRow?.value).toMatchObject({ v: 1, agentType: 'kimi', machineId });
+    expect(optOutRow?.value).toEqual({ v: 1, removedAt: expect.any(Number) });
   });
 
   it('clears the opt-out when the same builtin type is added back', async () => {

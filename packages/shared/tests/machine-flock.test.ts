@@ -573,7 +573,7 @@ describe('machine Flock helpers', () => {
       expect(
         writeMachineFlockRowToFlock(flock, {
           key,
-          value: { v: 1, agentType: 'kimi', machineId, removedAt: 1700 },
+          value: { v: 1, removedAt: 1700 },
         })
       ).toBe(true);
 
@@ -591,16 +591,15 @@ describe('machine Flock helpers', () => {
       ).toEqual(new Set());
     });
 
-    it('rejects a row whose agentType does not match its key', () => {
+    it('rejects a row whose key names a provider type outside startup auto-registration', () => {
       const flock = new FakeMachineFlock();
 
+      // The provider type lives only in the key, so the key is the single thing
+      // that can be wrong: a type the startup skip logic never checks must not be stored.
       expect(
         writeMachineFlockRowToFlock(flock, {
-          key: machineFlockKeys.builtinAgentOptOut('kimi'),
-          // The agentType in the value disagrees with the key, so the write must fail --
-          // otherwise the skip logic keys off the key while pointing at a record whose
-          // contents do not match.
-          value: { v: 1, agentType: 'codex', machineId, removedAt: 1700 },
+          key: ['builtinAgentOptOut', 'deepseek'],
+          value: { v: 1, removedAt: 1700 },
         } as never)
       ).toBe(false);
     });
