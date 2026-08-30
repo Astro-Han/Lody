@@ -153,6 +153,7 @@ import { getAppShareUrl } from '@/lib/app-location';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
   buildPathLauncherLaunchInput,
+  buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
   getPathLauncherId,
   PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT,
@@ -5192,8 +5193,6 @@ export const SessionChatInterface = memo(
     );
     const openInIdePath = openInIdeTarget?.path ?? null;
     const openInIdePathSource = openInIdeTarget?.source ?? null;
-    const shouldShowOpenInIdeButton = Boolean(openInIdePath);
-
     const resolveOpenInIdePath = useCallback(async (): Promise<string | null> => {
       return openInIdePath;
     }, [openInIdePath]);
@@ -5225,7 +5224,7 @@ export const SessionChatInterface = memo(
       typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
     const electronPathLauncherPlatform =
       typeof window !== 'undefined' ? window.__LODY_PLATFORM__?.os : undefined;
-    const pathLauncherOptions = useMemo(
+    const launcherCandidates = useMemo(
       () =>
         getAvailablePathLauncherOptions({
           customLaunchers: pathLauncherPreference.customLaunchers,
@@ -5238,6 +5237,54 @@ export const SessionChatInterface = memo(
         pathLauncherPreference.customLaunchers,
       ]
     );
+    const [availableLauncherIds, setAvailableLauncherIds] = useState(new Set<string>());
+    useEffect(() => {
+      if (!isElectronRendererForPathLaunch || !openInIdePath) {
+        setAvailableLauncherIds(new Set());
+        return undefined;
+      }
+      const services = getIpcServices();
+      if (!services) return undefined;
+
+      let cancelled = false;
+      const launchers = buildPathLauncherProbes(
+        launcherCandidates,
+        openInIdePath,
+        electronPathLauncherPlatform
+      );
+      void services.app
+        .probePathLaunchers({
+          launchers,
+        })
+        .then(
+          (result) => {
+            if (!cancelled) {
+              setAvailableLauncherIds(new Set(result.availableIds));
+            }
+          },
+          () => {
+            // A failed probe must not advertise launchers whose presence could
+            // not be established.
+            if (!cancelled) setAvailableLauncherIds(new Set());
+          }
+        );
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      launcherCandidates,
+      electronPathLauncherPlatform,
+      isElectronRendererForPathLaunch,
+      openInIdePath,
+    ]);
+    const pathLauncherOptions = useMemo(
+      () =>
+        launcherCandidates.filter((launcher) =>
+          availableLauncherIds.has(getPathLauncherId(launcher))
+        ),
+      [availableLauncherIds, launcherCandidates]
+    );
+    const shouldShowOpenInIdeButton = Boolean(openInIdePath) && pathLauncherOptions.length > 0;
     const selectedPathLauncher = useMemo(
       () =>
         resolveSelectedPathLauncher(pathLauncherPreference.selectedLauncherId, pathLauncherOptions),
