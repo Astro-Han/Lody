@@ -132,6 +132,7 @@ import type {
 } from '@/commands/session-output';
 import { MAX_AGENT_FEEDBACK_LENGTH, submitAgentFeedback } from '@/lib/feedback';
 import {
+  getLodyOperationStorePath,
   LodyOperationStore,
   LodyOperationStoreError,
   runWithOperationStoreBusyRetry,
@@ -909,16 +910,31 @@ const getSessionContext = (): McpSessionContext =>
     taskToolsEnabled: readOptionalEnv('LODY_MCP_TASK_TOOLS_ENABLED') === '1',
   };
 
-// One connection for the whole MCP server process, opened without the
-// maintenance writes (the daemon-side coordinator owns those). Per-call
-// open/close made every tool call a burst of write transactions plus a
-// checkpoint-on-close against the shared machine-level WAL store, which is
-// exactly the contention that surfaces as "database is locked".
-let sharedOperationStore: LodyOperationStore | undefined;
+// One connection per machine-level store for the whole MCP server process,
+// opened without the maintenance writes (the daemon-side coordinator owns
+// those). Per-call open/close made every tool call a burst of write
+// transactions plus a checkpoint-on-close against the shared machine-level WAL
+// store, which is exactly the contention that surfaces as "database is locked".
+//
+// The store path MUST come from the session context's machineId, never from
+// this process's environment: the daemon-hosted HTTP transport carries its
+// context in per-request AsyncLocalStorage, and its process has no
+// LODY_MCP_MACHINE_ID, so the env fallback silently selects the 'local' store
+// that no daemon coordinator watches — Operations accepted there are never
+// finalized and their completion is never delivered back to the requester.
+const sharedOperationStores = new Map<string, LodyOperationStore>();
+
+const resolveOperationStorePathForContext = (): string =>
+  getLodyOperationStorePath(getSessionContext().machineId);
 
 const getSharedOperationStore = (): LodyOperationStore => {
-  sharedOperationStore ??= new LodyOperationStore(undefined, undefined, { maintenance: false });
-  return sharedOperationStore;
+  const storePath = resolveOperationStorePathForContext();
+  let store = sharedOperationStores.get(storePath);
+  if (!store) {
+    store = new LodyOperationStore(storePath, undefined, { maintenance: false });
+    sharedOperationStores.set(storePath, store);
+  }
+  return store;
 };
 
 const withOperationStore = <T>(fn: (store: LodyOperationStore) => T): Promise<T> =>
@@ -3779,6 +3795,7 @@ export const __lodyMcpServerInternals = {
   startSessionChatOperation,
   startSessionChatManyOperation,
   getSessionContext,
+  resolveOperationStorePathForContext,
   postFileUpload,
   postImageUpload,
   postPreviewCandidate,
