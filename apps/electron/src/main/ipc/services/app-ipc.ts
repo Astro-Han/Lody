@@ -1,3 +1,5 @@
+import { access } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 import { BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
@@ -261,6 +263,24 @@ export class AppIpc extends IpcService {
     } catch (error) {
       return { opened: false, url: externalUrl, error: formatUnknownError(error) }
     }
+  }
+
+  @IpcMethod()
+  async revealLocalPath(pathRaw: unknown) {
+    if (typeof pathRaw !== 'string') {
+      return { revealed: false as const, error: 'invalid_path' }
+    }
+    const targetPath = pathRaw.trim()
+    if (!targetPath || !isAbsolute(targetPath)) {
+      return { revealed: false as const, error: 'invalid_path' }
+    }
+    try {
+      await access(targetPath)
+    } catch {
+      return { revealed: false as const, error: 'not_found' }
+    }
+    shell.showItemInFolder(targetPath)
+    return { revealed: true as const }
   }
 
   @IpcMethod()
