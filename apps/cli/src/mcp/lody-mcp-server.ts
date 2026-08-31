@@ -74,6 +74,7 @@ import {
   REVIEW_SEVERITY_VALUES,
   REVIEW_VERDICT_VALUES,
   ReviewSubmissionSchema,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import { makeLocalControlClientAuto } from '@lody/shared/node/local-ipc';
 import {
@@ -1489,19 +1490,13 @@ const readSessionExecutionSnapshot = async (
   ]);
   const activeTurnId = resolveActiveAssistantTurnId(history);
   const queuedTurnCount =
-    docState?.mq?.length ?? (hasPendingDispatchPointer(session) && !activeTurnId ? 1 : 0);
+    docState?.mq?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
   return resolveSessionExecutionSnapshot({
     live,
     ...(activeTurnId ? { activeTurnId } : {}),
     queuedTurnCount,
   });
 };
-
-const hasPendingDispatchPointer = (session: SessionMeta): boolean =>
-  Boolean(
-    session.processingUserMsgId ||
-    (session.latestUserMsgId && session.latestUserMsgId !== session.lastHandledUserMsgId)
-  );
 
 /**
  * Resolve whether a session is "currently working" by fusing, in precedence order:
@@ -1540,7 +1535,7 @@ const resolveSessionLiveWorking = (
       ...viewedField,
     };
   }
-  if (hasPendingDispatchPointer(session)) {
+  if (hasPendingUserTurnActivation(session)) {
     const dispatchedAtMs = session.lastMessageAt ?? Date.parse(session.createdAt);
     if (Number.isFinite(dispatchedAtMs) && opts.nowMs - dispatchedAtMs < MCP_PRE_START_WINDOW_MS) {
       return { working: true, status: 'initializing', source: 'pointer', ...viewedField };

@@ -2613,6 +2613,30 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     }
   }
 
+  /**
+   * Append a user turn and publish its dispatch pointer as ONE operation.
+   *
+   * Both writes are a single fact — "this turn is waiting to run" — split across
+   * two documents, because the pointer lives in workspace meta (the activation
+   * index startup scans) and so cannot be derived from history. Pairing them by
+   * convention leaves every producer one forgotten line from a turn that runs
+   * without advancing `latestUserMsgId`; see `../../session/AGENTS.md` for what
+   * that costs. History is written first so the content lands before the pointer
+   * that advertises it, and `lastMissingHistoryUserMsgId` is left alone: clearing
+   * it belongs to producers that first supersede the acknowledged entry.
+   */
+  async appendUserTurn(entry: SessionHistoryInput): Promise<void> {
+    if (entry.role !== 'user') {
+      throw new Error(
+        `appendUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
+      );
+    }
+    await this.updateHistory((history) => [...history, entry]);
+    await this.repo.upsertDocMeta(this.roomId, {
+      latestUserMsgId: entry.id,
+    } satisfies Partial<SessionMeta>);
+  }
+
   private summarizeHistoryTailForDiagnostics(
     history: SessionHistoryInput[]
   ): Record<string, unknown> {
