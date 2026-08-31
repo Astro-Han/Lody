@@ -35,6 +35,7 @@ import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '@/atoms/runti
 import type { TaskListTask } from '@/components/task-list';
 import type { SessionDiffChangeEntry } from '@/components/sessions/session-diff-summary';
 import type { LodyAuthClient } from '@/lib/auth';
+import { createTourRepo } from './tour-repo';
 
 // The data the tour's app runs on.
 //
@@ -762,6 +763,11 @@ export function buildTourHistory({
 const tourRuntime = {
   workspaceId: TOUR_WORKSPACE_ID,
   workspaceSlug: TOUR_WORKSPACE_SLUG,
+  // The reused product components DO read: the composer opens the workspace
+  // catalog and machine Flock documents through the repo. `createTourRepo` is
+  // the read-only stand-in for that plane, the way `TourCloudBoundary` is the
+  // stand-in for the cloud one.
+  repo: createTourRepo(),
   // Nothing in the tour writes. A runtime that threw on read would take the
   // whole overlay down; one that silently accepted writes would let a scripted
   // surface believe it had persisted something.
