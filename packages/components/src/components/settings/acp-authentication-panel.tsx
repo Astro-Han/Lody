@@ -271,8 +271,12 @@ export function AcpAuthenticationPanel({
               {t('common.cancel', 'Cancel')}
             </Button>
           </>
-        ) : /* While choosing, the method buttons below are the whole affordance. */
-        phase === 'choosing' ? null : (
+        ) : phase === 'choosing' ? (
+          <Button type="button" size="sm" variant="ghost" onClick={() => setPhase('idle')}>
+            <Square className="h-3.5 w-3.5" />
+            {t('common.cancel', 'Cancel')}
+          </Button>
+        ) : (
           <Button
             type="button"
             size="sm"
@@ -348,6 +352,31 @@ function AcpAuthenticationMethodChooser({
         {methods.map((method) => {
           const methodId = method.id;
           if (!methodId) return null;
+          const label = method.name ?? methodId;
+          // An `env_var` method is configured on the agent, not signed into, so
+          // it is stated rather than offered as a button that only round-trips
+          // to the same instruction.
+          if (method.type === 'env_var') {
+            return (
+              <div
+                key={methodId}
+                className="rounded-md border border-dashed px-2.5 py-1.5 text-left"
+              >
+                <p className="text-xs font-medium">{label}</p>
+                <p className="text-xs font-normal text-muted-foreground">
+                  {method.description
+                    ? `${method.description} — ${t(
+                        'agents.authentication.envVarMethod',
+                        "set it in this agent's environment variables."
+                      )}`
+                    : t(
+                        'agents.authentication.envVarMethod',
+                        "set it in this agent's environment variables."
+                      )}
+                </p>
+              </div>
+            );
+          }
           return (
             <Button
               key={methodId}
@@ -358,7 +387,7 @@ function AcpAuthenticationMethodChooser({
               onClick={() => onSelect(methodId)}
             >
               <span className="flex min-w-0 flex-col items-start">
-                <span className="text-xs font-medium">{method.name ?? methodId}</span>
+                <span className="text-xs font-medium">{label}</span>
                 {method.description ? (
                   <span className="text-xs font-normal text-muted-foreground">
                     {method.description}

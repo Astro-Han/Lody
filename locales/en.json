@@ -5,6 +5,7 @@
   "agents.acpCapabilities.refreshSuccessWithOptions": "Capabilities refreshed: {{options}}",
   "agents.acpCapabilities.refreshTimeout": "Refresh timed out, please try again",
   "agents.acpCapabilities.title": "ACP Capabilities",
+  "agents.authentication.envVarMethod": "set it in this agent's environment variables.",
   "agents.authentication.failed": "Authentication failed",
   "agents.authentication.authorizationCode": "Authorization code",
   "agents.authentication.authorizationCodeHelp": "Only needed if the browser shows a code instead of returning automatically.",

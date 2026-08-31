@@ -15,6 +15,7 @@ import {
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
   serializeCustomAcpLaunchSpec,
+  machineSupportsAcpProtocolAuthentication,
   supportsBuiltinAuthentication,
   usesAcpProtocolAuthentication,
   usesAcpProvidedSessionTitle,
@@ -969,7 +970,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // Registry and custom providers authenticate through the standard ACP
   // exchange, but only the agent knows whether it has anything to sign into —
   // so their panel appears once a live probe reported that auth is required.
-  const usesProtocolAuthentication = usesAcpProtocolAuthentication(formData.cliType);
+  // The exchange runs entirely on the daemon, so a machine that predates it
+  // answers "Authentication is not supported"; do not offer a button that can
+  // only fail.
+  const usesProtocolAuthentication =
+    usesAcpProtocolAuthentication(formData.cliType) &&
+    machineSupportsAcpProtocolAuthentication(machine);
   const showAuthenticationPanel =
     mode.kind === 'edit'
       ? supportsBuiltinAuthentication({

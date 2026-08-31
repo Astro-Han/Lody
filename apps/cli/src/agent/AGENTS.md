@@ -199,6 +199,13 @@ arrive: context/message-flow.md "Upstream".
   which renders the consent page onto stdout; one rendered empty form field,
   `[    ]`, is a valid JSON array, which the connection rejects as a JSON-RPC
   batch and closes. Verified against Google Antigravity's `agy_acp_server`.
+  The picked `methodId` must travel on BOTH transports. The local plane forwards
+  the whole control message, but Streams RPC re-declares its own strict param
+  schema, so a field added only to `message-schemas.ts` is silently dropped on
+  remote machines — and an agent advertising several methods then answers
+  `method-required` forever. Clients gate the workflow on the
+  `acpProtocolAuthentication` capability rather than offering a sign-in an older
+  daemon will refuse.
 - `acp-binary-manager.ts` — registry binary-distribution agents. It follows the same
   consumer-lease cancellation rule as managed runtimes: one shared install, abort only after
   the last consumer leaves, and never reuse an aborted generation while it is cleaning up. Tar

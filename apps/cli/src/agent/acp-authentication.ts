@@ -439,6 +439,7 @@ export class AcpAuthenticationManager {
     const preparationInterruption = interruptedResult();
     if (preparationInterruption) return preparationInterruption;
 
+    options.onProgress?.({ status: 'starting' });
     return await this.runLoginProcess({
       ...ctx,
       displayName,
@@ -600,8 +601,9 @@ export class AcpAuthenticationManager {
       acceptsAuthorizationCodeOnStdin: boolean;
     }
   ): Promise<AcpAuthenticationResult> {
+    // `starting` is emitted by the caller: the terminal-method path already
+    // announced itself before the discovery process ran.
     const { options, running, interruptedResult, displayName } = ctx;
-    options.onProgress?.({ status: 'starting' });
     const child = this.spawnProcess(ctx.command, ctx.args, {
       cwd: os.homedir(),
       env: ctx.env,
