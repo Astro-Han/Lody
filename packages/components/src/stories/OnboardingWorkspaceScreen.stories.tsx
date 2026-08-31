@@ -58,6 +58,7 @@ function InteractiveWorkspaceScreen({
       newName={newName}
       newSlug={newSlug}
       newSlugChecking={false}
+      newSlugCheckStale={false}
       newSlugError={null}
       canResetSlug={manuallyEditedSlug && newSlug !== suggestedSlug}
       onNewNameChange={setNewName}
@@ -70,6 +71,9 @@ function InteractiveWorkspaceScreen({
         setManualSlug(suggestedSlug);
       }}
       saving={saving}
+      createError={null}
+      workspacesStatus="ready"
+      workspacesError={null}
       onSelectWorkspace={setSelectedId}
       onConfirmSelection={() => {
         if (selectedId === null) return;
@@ -102,6 +106,10 @@ const meta = {
   },
   tags: ['autodocs'],
   args: {
+    createError: null,
+    workspacesStatus: 'ready',
+    workspacesError: null,
+    newSlugCheckStale: false,
     onStartCreate: fn(),
     onCancelCreate: fn(),
     onNewNameChange: fn(),
@@ -233,6 +241,52 @@ export const Saving: Story = {
     newSlugError: null,
     canResetSlug: false,
     saving: true,
+  },
+};
+
+export const Loading: Story = {
+  args: {
+    workspaces: [],
+    selectedWorkspaceId: null,
+    creating: false,
+    newName: '',
+    newSlug: '',
+    newSlugChecking: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+    workspacesStatus: 'loading',
+  },
+};
+
+export const LoadFailed: Story = {
+  args: {
+    workspaces: [],
+    selectedWorkspaceId: null,
+    creating: false,
+    newName: '',
+    newSlug: '',
+    newSlugChecking: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+    workspacesStatus: 'error',
+    workspacesError: 'network request failed',
+  },
+};
+
+export const CreateFailed: Story = {
+  args: {
+    workspaces: [],
+    selectedWorkspaceId: null,
+    creating: true,
+    newName: 'Loro Lab',
+    newSlug: 'loro-lab',
+    newSlugChecking: false,
+    newSlugError: null,
+    canResetSlug: false,
+    saving: false,
+    createError: 'rate limited: too many workspaces created this hour',
   },
 };
 

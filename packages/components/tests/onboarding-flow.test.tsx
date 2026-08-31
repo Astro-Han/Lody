@@ -217,10 +217,12 @@ describe('desktop onboarding flow', () => {
           connectingGitHub={false}
           canImportLocal
           canConnectGitHub={false}
+          loadingRepos={false}
           selectedProjectKey={`local:${selectedMachine}:${selectedProject}`}
           onAddLocal={vi.fn()}
           onConnectGitHub={vi.fn()}
           onBack={vi.fn()}
+          onSkip={vi.fn()}
           onComplete={onComplete}
         />
       );
@@ -244,7 +246,7 @@ describe('desktop onboarding flow', () => {
       root?.render(
         <TestCloudPlatformProvider>
           <Provider store={store}>
-            <ProjectsScreen onBack={vi.fn()} onComplete={vi.fn()} />
+            <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
           </Provider>
         </TestCloudPlatformProvider>
       );

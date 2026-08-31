@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import { Check, Clock3, Minus } from 'lucide-react';
+import { Check, Clock3, Minus, XCircle } from 'lucide-react';
 import { Table, TableBody, TableCell, TableRow } from '@/ui/table';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 
-export type OnboardingSummaryAgentState = 'ready' | 'preparing' | 'missing';
+export type OnboardingSummaryAgentState = 'ready' | 'preparing' | 'failed' | 'missing';
 
-type SummaryStatus = 'ready' | 'preparing' | 'missing';
+type SummaryStatus = 'ready' | 'preparing' | 'failed' | 'missing';
 
 export function SummaryScreen({
   agentState,
@@ -26,7 +26,9 @@ export function SummaryScreen({
       ? t('onboarding.summary.title', 'Lody is ready')
       : agentState === 'preparing'
         ? t('onboarding.summary.preparingTitle', 'Ready to enter Lody')
-        : t('onboarding.summary.exploreTitle', 'Explore Lody');
+        : agentState === 'failed'
+          ? t('onboarding.summary.failedTitle', 'Agent setup needs attention')
+          : t('onboarding.summary.exploreTitle', 'Explore Lody');
   const description =
     agentState === 'ready'
       ? t('onboarding.summary.description', 'You can add Agents and projects later from Settings.')
@@ -35,10 +37,15 @@ export function SummaryScreen({
             'onboarding.summary.preparingDescription',
             'Your Agent setup is still in progress. You can enter Lody now and check its status in Settings.'
           )
-        : t(
-            'onboarding.summary.exploreDescription',
-            'Enter Lody now and connect a coding agent from Settings when you are ready.'
-          );
+        : agentState === 'failed'
+          ? t(
+              'onboarding.summary.failedDescription',
+              'Your Agent could not finish setup. You can enter Lody now and retry from Settings.'
+            )
+          : t(
+              'onboarding.summary.exploreDescription',
+              'Enter Lody now and connect a coding agent from Settings when you are ready.'
+            );
 
   const resolvedAgentName =
     agentName ??
@@ -100,7 +107,9 @@ function SummaryRow({
       ? t('onboarding.summary.statusReady', 'Ready')
       : status === 'preparing'
         ? t('onboarding.summary.statusPreparing', 'Setting up')
-        : t('onboarding.summary.statusLater', 'Set up later');
+        : status === 'failed'
+          ? t('onboarding.summary.statusFailed', 'Setup failed')
+          : t('onboarding.summary.statusLater', 'Set up later');
 
   return (
     <TableRow className="hover:bg-transparent">
@@ -112,6 +121,8 @@ function SummaryRow({
             <Check className="size-3.5 text-primary" />
           ) : status === 'preparing' ? (
             <Clock3 className="size-3.5 text-primary" />
+          ) : status === 'failed' ? (
+            <XCircle className="size-3.5 text-destructive" />
           ) : (
             <Minus className="size-3.5" />
           )}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { usePlatformCapability } from '@lody/platform/react';
 import type { ManagedBuiltinAgentType } from '@lody/shared';
 import {
@@ -7,6 +7,7 @@ import {
   desktopOnboardingPhaseAtom,
   type DesktopOnboardingResumePhase,
 } from '@/atoms/onboarding';
+import { getAllProviderSetupsAtom } from '@/atoms/agents';
 import { getDesktopOnboardingSteps, OnboardingStepsProvider } from './onboarding-steps';
 import { OnboardingCeremony } from './ceremony/ceremony';
 import { useOnboardingAudio } from './ceremony/use-onboarding-audio';
@@ -39,7 +40,8 @@ export function resolveDesktopOnboardingPhase(
 export function OnboardingOverlay({
   onCompleted,
 }: {
-  onCompleted: (completion: DesktopOnboardingCompletion) => void;
+  /** Resolves to whether completion fully succeeded; failures are retryable. */
+  onCompleted: (completion: DesktopOnboardingCompletion) => Promise<boolean>;
 }) {
   const cloudAccount = usePlatformCapability('cloudAccount');
   const multiWorkspace = usePlatformCapability('multiWorkspace');
@@ -85,6 +87,23 @@ export function OnboardingOverlay({
     () => advanceTo(multiWorkspace ? 'workspace' : cloudAccount ? 'login' : 'ceremony'),
     [advanceTo, cloudAccount, multiWorkspace]
   );
+
+  // The summary must tell the truth about a pending setup: a failed task is
+  // not "still progressing", and a deleted one is no longer pending at all.
+  const providerSetups = useAtomValue(getAllProviderSetupsAtom);
+  const selectedSetupId =
+    draft.provider?.kind === 'providerSetup' ? draft.provider.providerSetupId : null;
+  const selectedSetup = providerSetups.find((setup) => setup.id === selectedSetupId);
+  const summaryAgentState =
+    draft.provider?.kind === 'agentConfig'
+      ? ('ready' as const)
+      : draft.provider?.kind === 'providerSetup'
+        ? selectedSetup === undefined
+          ? ('missing' as const)
+          : selectedSetup.status === 'failed'
+            ? ('failed' as const)
+            : ('preparing' as const)
+        : ('missing' as const);
 
   useEffect(() => {
     if (phase === 'ceremony') {
@@ -133,6 +152,10 @@ export function OnboardingOverlay({
       <ProjectsScreen
         key="projects"
         onBack={() => advanceTo('providers')}
+        onSkip={() => {
+          setDraft((previous) => ({ ...previous, project: null }));
+          advanceTo('summary');
+        }}
         onComplete={(project) => {
           setDraft((previous) => ({ ...previous, project }));
           advanceTo(
@@ -160,25 +183,25 @@ export function OnboardingOverlay({
               },
             }));
           }}
-          onSkip={() => onCompleted({})}
-          onContinue={() => onCompleted({})}
+          onSkip={() => {
+            void onCompleted({});
+          }}
+          onContinue={() => {
+            void onCompleted({});
+          }}
           onSessionStarted={onCompleted}
         />
       ) : null,
     summary: (
       <SummaryScreen
         key="summary"
-        agentState={
-          draft.provider?.kind === 'agentConfig'
-            ? 'ready'
-            : draft.provider?.kind === 'providerSetup'
-              ? 'preparing'
-              : 'missing'
-        }
+        agentState={summaryAgentState}
         agentName={draft.provider?.agentName}
         projectName={draft.project?.name}
         onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
-        onComplete={() => onCompleted({})}
+        onComplete={() => {
+          void onCompleted({});
+        }}
       />
     ),
   };

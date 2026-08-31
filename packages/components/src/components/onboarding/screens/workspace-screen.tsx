@@ -32,6 +32,10 @@ export interface WorkspaceListEntry {
 export interface WorkspaceScreenViewProps {
   /** All workspaces the current user is a member of. */
   workspaces: WorkspaceListEntry[];
+  /** Load state of the workspace list itself; non-ready never looks like "empty". */
+  workspacesStatus: 'loading' | 'error' | 'ready';
+  /** Detail for `workspacesStatus === 'error'`, shown verbatim. */
+  workspacesError: string | null;
   /** Highlighted (clicked, not yet confirmed) workspace id. */
   selectedWorkspaceId: string | null;
   /** True when the user has clicked "Create new" and the form is open. */
@@ -45,6 +49,8 @@ export interface WorkspaceScreenViewProps {
   newName: string;
   newSlug: string;
   newSlugChecking: boolean;
+  /** True when the availability check has been pending too long; stops blocking. */
+  newSlugCheckStale: boolean;
   newSlugError: SlugError | null;
   canResetSlug: boolean;
   onNewNameChange: (next: string) => void;
@@ -53,6 +59,8 @@ export interface WorkspaceScreenViewProps {
 
   /** True while we're awaiting setActive / create. */
   saving: boolean;
+  /** Last create failure detail, shown inline until the input changes. */
+  createError: string | null;
 
   /** Highlight a workspace in the list — does not advance. */
   onSelectWorkspace: (id: string) => void;
@@ -66,6 +74,8 @@ export interface WorkspaceScreenViewProps {
 
 export function WorkspaceScreenView({
   workspaces,
+  workspacesStatus,
+  workspacesError,
   selectedWorkspaceId,
   creating,
   onStartCreate,
@@ -73,12 +83,14 @@ export function WorkspaceScreenView({
   newName,
   newSlug,
   newSlugChecking,
+  newSlugCheckStale,
   newSlugError,
   canResetSlug,
   onNewNameChange,
   onNewSlugChange,
   onResetNewSlug,
   saving,
+  createError,
   onSelectWorkspace,
   onConfirmSelection,
   onSubmitCreate,
@@ -106,7 +118,7 @@ export function WorkspaceScreenView({
   const canSubmitCreate =
     creating &&
     !saving &&
-    !newSlugChecking &&
+    !(newSlugChecking && !newSlugCheckStale) &&
     newNameError === null &&
     newSlugError === null &&
     newSlug.length > 0;
@@ -128,15 +140,19 @@ export function WorkspaceScreenView({
               'onboarding.workspace.createDescription',
               'Give it a name — your team will see this everywhere.'
             )
-          : hasWorkspaces
-            ? t(
-                'onboarding.workspace.description',
-                'Pick the workspace you want to start with, or create a new one.'
-              )
-            : t(
-                'onboarding.workspace.descriptionEmpty',
-                'Create your first workspace to get started.'
-              )
+          : workspacesStatus === 'loading'
+            ? t('onboarding.workspace.loadingDescription', 'Loading your workspaces…')
+            : workspacesStatus === 'error'
+              ? t('onboarding.workspace.errorDescription', 'Your workspaces could not be loaded.')
+              : hasWorkspaces
+                ? t(
+                    'onboarding.workspace.description',
+                    'Pick the workspace you want to start with, or create a new one.'
+                  )
+                : t(
+                    'onboarding.workspace.descriptionEmpty',
+                    'Create your first workspace to get started.'
+                  )
       }
       previewIdentity={previewWorkspaceName ? { workspaceName: previewWorkspaceName } : undefined}
       previewState={{
@@ -219,10 +235,17 @@ export function WorkspaceScreenView({
                       {t('organization.workspaceSlugReset', 'Reset')}
                     </button>
                   ) : null}
-                  {newSlugChecking ? (
+                  {newSlugChecking && !newSlugCheckStale ? (
                     <span className="inline-flex items-center gap-1">
                       <Loader2 className="h-3 w-3 animate-spin" />
                       {t('organization.workspaceSlugChecking', 'Checking…')}
+                    </span>
+                  ) : newSlugChecking && newSlugCheckStale ? (
+                    <span className="text-muted-foreground">
+                      {t(
+                        'organization.workspaceSlugCheckStale',
+                        'Could not verify — you can still continue'
+                      )}
                     </span>
                   ) : !newSlugError && newSlug.length > 0 ? (
                     <span className="text-primary">
@@ -247,6 +270,20 @@ export function WorkspaceScreenView({
                 )}
               </p>
             </div>
+
+            {createError !== null ? (
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <p>
+                  {t('onboarding.workspace.createFailed', 'Could not create workspace. Try again.')}
+                </p>
+                {createError.length > 0 ? (
+                  <p className="mt-1 break-words opacity-90">{createError}</p>
+                ) : null}
+              </div>
+            ) : null}
           </motion.div>
         ) : (
           <motion.div
@@ -257,20 +294,38 @@ export function WorkspaceScreenView({
             transition={{ duration: 0.25 }}
             className="flex flex-col gap-3"
           >
-            {hasWorkspaces ? (
+            {workspacesStatus === 'loading' ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t('onboarding.workspace.loading', 'Loading workspaces…')}
+              </div>
+            ) : workspacesStatus === 'error' ? (
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                <p>{t('onboarding.workspace.loadFailed', 'Could not load workspaces.')}</p>
+                {workspacesError ? (
+                  <p className="mt-1 break-words opacity-90">{workspacesError}</p>
+                ) : null}
+              </div>
+            ) : hasWorkspaces ? (
               // ~6 rows visible (each row ≈ 64px incl. gap); longer lists scroll
               // inside the card with the transparent-track style.
               <div className="scrollbar-pro -mx-1 max-h-[420px] overflow-y-auto overscroll-contain px-1 py-2">
                 <div className="flex flex-col gap-2">
                   {workspaces.map((workspace) => {
                     const isSelected = workspace.id === selectedWorkspaceId;
+                    // A workspace without a slug cannot be confirmed downstream;
+                    // show why instead of letting Next die silently.
+                    const hasSlug = workspace.slug.length > 0;
                     return (
                       <motion.button
                         key={workspace.id}
                         type="button"
-                        whileHover={saving ? undefined : { y: -1 }}
-                        whileTap={saving ? undefined : { scale: 0.99 }}
-                        disabled={saving}
+                        whileHover={saving || !hasSlug ? undefined : { y: -1 }}
+                        whileTap={saving || !hasSlug ? undefined : { scale: 0.99 }}
+                        disabled={saving || !hasSlug}
                         onClick={() => onSelectWorkspace(workspace.id)}
                         aria-pressed={isSelected}
                         className={cn(
@@ -297,7 +352,12 @@ export function WorkspaceScreenView({
                             {workspace.name}
                           </span>
                           <div className="truncate text-xs text-muted-foreground">
-                            /{workspace.slug}
+                            {hasSlug
+                              ? `/${workspace.slug}`
+                              : t(
+                                  'onboarding.workspace.slugMissing',
+                                  'No handle yet — open workspace settings to set one.'
+                                )}
                           </div>
                         </div>
                         {isSelected ? (
@@ -323,20 +383,22 @@ export function WorkspaceScreenView({
               </div>
             ) : null}
 
-            <button
-              type="button"
-              disabled={saving}
-              onClick={onStartCreate}
-              className={cn(
-                'group flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-4 text-sm font-medium transition-all',
-                'border-border/60 text-muted-foreground hover:border-primary/60 hover:bg-primary/[0.04] hover:text-foreground',
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-                'disabled:opacity-50'
-              )}
-            >
-              <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
-              {t('onboarding.workspace.createNew', 'Create a new workspace')}
-            </button>
+            {workspacesStatus === 'ready' ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={onStartCreate}
+                className={cn(
+                  'group flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-4 text-sm font-medium transition-all',
+                  'border-border/60 text-muted-foreground hover:border-primary/60 hover:bg-primary/[0.04] hover:text-foreground',
+                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
+                  'disabled:opacity-50'
+                )}
+              >
+                <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
+                {t('onboarding.workspace.createNew', 'Create a new workspace')}
+              </button>
+            ) : null}
           </motion.div>
         )}
       </AnimatePresence>
@@ -351,6 +413,9 @@ interface WorkspaceScreenProps {
 
 // We deliberately do not edit existing names/slugs here — that's handled in
 // workspace settings, where it can be undone.
+/** Bounds the slug availability wait; the server remains the final authority. */
+const SLUG_CHECK_STALE_MS = 8_000;
+
 export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const { t } = useTranslation();
   const platform = usePlatform();
@@ -381,9 +446,18 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     [setWorkspaceContext]
   );
 
-  const [creating, setCreating] = useState(workspaces.length === 0);
+  const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(activeWorkspaceId);
+
+  // Only a READY empty list opens the create form; while the list is loading
+  // or failed, the form must not pose as "you have no workspaces".
+  const workspacesReadyEmpty =
+    workspaceState.status === 'ready' && workspaceState.workspaces.length === 0;
+  useEffect(() => {
+    if (workspacesReadyEmpty) setCreating(true);
+  }, [workspacesReadyEmpty]);
 
   // Default-select the active workspace once it loads, so the user can
   // immediately confirm and proceed without an extra click.
@@ -409,18 +483,28 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   );
   const newSlugChecking =
     creating && shouldCheckAvailability && canCheckAvailability && availability === undefined;
-  const newSlugIsAvailable = canCheckAvailability && Boolean(availability?.available);
+  const [newSlugCheckStale, setNewSlugCheckStale] = useState(false);
+  useEffect(() => {
+    if (!newSlugChecking) {
+      setNewSlugCheckStale(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setNewSlugCheckStale(true), SLUG_CHECK_STALE_MS);
+    return () => clearTimeout(timer);
+  }, [newSlugChecking]);
 
   const newSlugError = useMemo<SlugError | null>(() => {
     if (!creating) return null;
     if (!newSlug) return 'required';
     const ruleError = getWorkspaceSlugRuleError(newSlug);
     if (ruleError) return ruleError;
-    if (shouldCheckAvailability && !newSlugChecking && !newSlugIsAvailable) {
+    // Only a resolved answer can condemn a slug; a pending or stale check must
+    // never look like "taken", and the server stays the final authority.
+    if (shouldCheckAvailability && availability !== undefined && !availability.available) {
       return 'unavailable';
     }
     return null;
-  }, [creating, newSlug, shouldCheckAvailability, newSlugChecking, newSlugIsAvailable]);
+  }, [creating, newSlug, shouldCheckAvailability, availability]);
 
   const handleConfirmSelection = useCallback(() => {
     if (selectedWorkspaceId === null) return;
@@ -442,7 +526,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         commitWorkspaceContext(activeWorkspace);
         toast.error(
           t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
-          { description: error instanceof Error ? error.message : undefined }
+          { description: error instanceof Error ? error.message : String(error) }
         );
       } finally {
         setSaving(false);
@@ -461,8 +545,9 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
 
   const handleSubmitCreate = useCallback(() => {
     const trimmedName = newName.trim();
-    if (!trimmedName || newSlugError !== null || newSlugChecking) return;
+    if (!trimmedName || newSlugError !== null || (newSlugChecking && !newSlugCheckStale)) return;
     setSaving(true);
+    setCreateError(null);
     commitWorkspaceContext(null);
     void (async () => {
       try {
@@ -479,10 +564,9 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
         onNext();
       } catch (error) {
         commitWorkspaceContext(activeWorkspace);
-        toast.error(
-          t('onboarding.workspace.createFailed', 'Could not create workspace. Try again.'),
-          { description: error instanceof Error ? error.message : undefined }
-        );
+        // The error stays inline in the form: a toast disappears and leaves a
+        // user with no workspaces without any visible way forward.
+        setCreateError(error instanceof Error ? error.message : String(error));
       } finally {
         setSaving(false);
       }
@@ -493,35 +577,52 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     newName,
     newSlug,
     newSlugChecking,
+    newSlugCheckStale,
     newSlugError,
     onNext,
     platform.workspaces,
-    t,
   ]);
 
   return (
     <WorkspaceScreenView
       workspaces={workspaces}
+      workspacesStatus={workspaceState.status}
+      workspacesError={workspaceState.status === 'error' ? workspaceState.message : null}
       selectedWorkspaceId={selectedWorkspaceId}
       creating={creating}
       onStartCreate={() => {
         setCreating(true);
         setNewName('');
         setSlugDraft(null);
+        setCreateError(null);
       }}
       onCancelCreate={() => {
-        if (workspaces.length === 0) return; // No list to fall back to.
+        setCreateError(null);
+        if (workspaces.length === 0) {
+          // No list to fall back to — cancel leaves the step instead of
+          // trapping the user in a form they cannot complete.
+          onBack();
+          return;
+        }
         setCreating(false);
       }}
       newName={newName}
       newSlug={newSlug}
       newSlugChecking={newSlugChecking}
+      newSlugCheckStale={newSlugCheckStale}
       newSlugError={newSlugError}
       canResetSlug={slugDraft !== null && slugDraft !== suggestedSlug}
-      onNewNameChange={setNewName}
-      onNewSlugChange={(next) => setSlugDraft(normalizeWorkspaceSlugInput(next))}
+      onNewNameChange={(next) => {
+        setCreateError(null);
+        setNewName(next);
+      }}
+      onNewSlugChange={(next) => {
+        setCreateError(null);
+        setSlugDraft(normalizeWorkspaceSlugInput(next));
+      }}
       onResetNewSlug={() => setSlugDraft(null)}
       saving={saving}
+      createError={createError}
       onSelectWorkspace={setSelectedWorkspaceId}
       onConfirmSelection={handleConfirmSelection}
       onSubmitCreate={handleSubmitCreate}

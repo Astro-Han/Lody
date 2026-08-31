@@ -44,6 +44,9 @@ export function getSelectedFirstTaskAgentConfig(
   return availableConfigs.find((candidate) => candidate.id === agentConfigId) ?? null;
 }
 
+/** Bounds the session-create wait so a hung write cannot freeze the screen. */
+const START_SESSION_STALE_MS = 20_000;
+
 export function FirstTaskScreen({
   agentConfigId,
   project,
@@ -59,7 +62,7 @@ export function FirstTaskScreen({
   onAgentConfigChange: (config: AgentConfigMeta) => void;
   onSkip: () => void;
   onContinue: () => void;
-  onSessionStarted: (input: { sessionId: string; workspaceSlug: string }) => void;
+  onSessionStarted: (input: { sessionId: string; workspaceSlug: string }) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const user = useAtomValue(userAtom);
@@ -132,23 +135,34 @@ export function FirstTaskScreen({
           inputBlocks: undefined,
         });
         if (!entry) throw new Error('Could not build the first turn');
-        const result = await startSession(
-          {
-            sessionId: uuidv4() as SessionId,
-            userId: user.id,
-            cliType: config.cliType,
-            agentType: config.agentType,
-            customAcp: config.customAcp,
-            runtimeOverrides: config.runtimeOverrides,
-            machineId: project.machineId,
-            agentConfigId: config.id,
-            env: config.env,
-            project: projectRef,
-            title: trimmedPrompt.slice(0, 50),
-            titleSource: 'draft',
-          },
-          entry
-        );
+        // A hung write must not lock every button forever. If the write lands
+        // after the timeout, the Session still exists and appears in the
+        // product; only the onboarding navigation is skipped.
+        const result = await Promise.race([
+          startSession(
+            {
+              sessionId: uuidv4() as SessionId,
+              userId: user.id,
+              cliType: config.cliType,
+              agentType: config.agentType,
+              customAcp: config.customAcp,
+              runtimeOverrides: config.runtimeOverrides,
+              machineId: project.machineId,
+              agentConfigId: config.id,
+              env: config.env,
+              project: projectRef,
+              title: trimmedPrompt.slice(0, 50),
+              titleSource: 'draft',
+            },
+            entry
+          ),
+          new Promise<never>((_resolve, reject) => {
+            setTimeout(
+              () => reject(new Error('Starting the session timed out')),
+              START_SESSION_STALE_MS
+            );
+          }),
+        ]);
         // The Session and its first turn are already durable. Dispatch is only
         // acceleration; normal recovery can pick up the pointer if this request
         // fails, so it must not turn a successful first Session into a failure.
@@ -158,7 +172,21 @@ export function FirstTaskScreen({
         }).catch((dispatchError: unknown) => {
           console.error('Failed to accelerate the first onboarding session', dispatchError);
         });
-        onSessionStarted({ sessionId: result.sessionId, workspaceSlug: resolvedWorkspaceSlug });
+        const completed = await onSessionStarted({
+          sessionId: result.sessionId,
+          workspaceSlug: resolvedWorkspaceSlug,
+        });
+        if (!completed) {
+          // The Session is durable; only the completion step failed. Unlock the
+          // screen so Enter Lody can retry instead of stranding a finished run.
+          setError(
+            t(
+              'onboarding.firstTask.completionFailed',
+              'The session was created, but setup could not finish. Try entering Lody again.'
+            )
+          );
+          setSubmitting(false);
+        }
       } catch (submitError) {
         console.error('Failed to start the first onboarding session', submitError);
         setError(
