@@ -5,7 +5,11 @@ import {
   type PersistedSidePanelState,
   type PersistedViewerTab,
 } from './session-draft-tabs';
-import { parseSessionTabSearch } from './session-tab-url';
+import {
+  formatSessionTabSearch,
+  parseSessionTabSearch,
+  type ParsedSessionTabSearch,
+} from './session-tab-url';
 
 const DEFAULT_SIDE_PANEL_STATE: PersistedSidePanelState = {
   open: false,
@@ -69,4 +73,47 @@ export const getSessionDetailInitialTabState = (
     activeViewerTabId: viewerTab?.id ?? null,
     sidePanel: persistedState?.sidePanel ?? DEFAULT_SIDE_PANEL_STATE,
   };
+};
+
+/**
+ * Entry-scoped `?tab` restoration decision for `SessionDetail`.
+ *
+ * `defer` — navigation is not possible yet (the workspace slug atom can still
+ * be null on a cold start: React runs the descendant's layout effect before
+ * the ancestor publishes the slug). The entry must NOT be claimed, so the
+ * effect retries once the slug is ready instead of silently losing the
+ * persisted tab.
+ * `noop` — this session entry was already claimed; nothing to do.
+ * `claim` — claim the entry without navigating (an explicit URL tab is
+ * present, or nothing worth restoring is persisted).
+ * `restore` — claim the entry and issue the single replace navigation to
+ * `tab`.
+ */
+export type SessionEntryTabRestoration =
+  | { kind: 'defer' }
+  | { kind: 'noop' }
+  | { kind: 'claim' }
+  | { kind: 'restore'; tab: string };
+
+export const resolveSessionEntryTabRestoration = (options: {
+  canNavigate: boolean;
+  claimedSessionId: string | null;
+  sessionId: string;
+  urlTabKind: ParsedSessionTabSearch['kind'];
+  readPersistedTabId: () => string | undefined;
+}): SessionEntryTabRestoration => {
+  if (options.claimedSessionId === options.sessionId) {
+    return { kind: 'noop' };
+  }
+  if (!options.canNavigate) {
+    return { kind: 'defer' };
+  }
+  if (options.urlTabKind !== 'missing') {
+    return { kind: 'claim' };
+  }
+  const persistedTabId = options.readPersistedTabId();
+  const tab = persistedTabId
+    ? formatSessionTabSearch(persistedTabId, options.sessionId)
+    : undefined;
+  return tab === undefined ? { kind: 'claim' } : { kind: 'restore', tab };
 };

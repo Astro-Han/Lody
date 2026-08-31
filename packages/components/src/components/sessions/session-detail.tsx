@@ -228,7 +228,10 @@ import {
   getSessionNavigationLocation,
   type SessionNavigationTarget,
 } from '@/lib/session-navigation';
-import { getSessionDetailInitialTabState } from '@/lib/session-detail-initial-state';
+import {
+  getSessionDetailInitialTabState,
+  resolveSessionEntryTabRestoration,
+} from '@/lib/session-detail-initial-state';
 import {
   resolveSessionFileProviderOpenPath,
   type SessionFileProviderOpenPathResolution,
@@ -2564,26 +2567,33 @@ const SessionDetail = ({
 
   /* Entry-scoped restoration: arriving on a session with no explicit `?tab`
      restores the last active tab as ONE replace navigation. This is the only
-     `?tab` write not caused by a user action; claiming the session id on the
-     first run keeps it one-shot per entry, so a later user navigation back to
-     the parent (a `missing` value on the same session) is respected rather
-     than re-restored. Layout effect so the write lands before paint instead
-     of flashing the parent tab for a frame. */
+     `?tab` write not caused by a user action; claiming the session id keeps
+     it one-shot per entry, so a later user navigation back to the parent (a
+     `missing` value on the same session) is respected rather than
+     re-restored. The claim happens only once navigation is actually possible
+     — on a cold start this layout effect runs BEFORE the ancestor workspace
+     route publishes `currentWorkspaceSlugAtom`, and claiming while
+     `replaceSessionUrlTab` would early-return on the null slug loses the
+     persisted tab for good (`resolveSessionEntryTabRestoration` owns that
+     ordering rule). Layout effect so the write lands before paint instead of
+     flashing the parent tab for a frame. */
   const restoredEntryTabSessionIdRef = useRef<SessionId | null>(null);
   useLayoutEffect(() => {
-    if (restoredEntryTabSessionIdRef.current === sessionId) {
+    const restoration = resolveSessionEntryTabRestoration({
+      canNavigate: Boolean(workspaceSlug),
+      claimedSessionId: restoredEntryTabSessionIdRef.current,
+      sessionId,
+      urlTabKind: parsedUrlTab.kind,
+      readPersistedTabId: () => readStoredLastActiveTabState(sessionId)?.sessionTabId,
+    });
+    if (restoration.kind === 'noop' || restoration.kind === 'defer') {
       return;
     }
     restoredEntryTabSessionIdRef.current = sessionId;
-    if (parsedUrlTab.kind !== 'missing') {
-      return;
+    if (restoration.kind === 'restore') {
+      replaceSessionUrlTab(restoration.tab);
     }
-    const persistedTabId = readStoredLastActiveTabState(sessionId)?.sessionTabId;
-    if (!persistedTabId || persistedTabId === sessionId) {
-      return;
-    }
-    replaceSessionUrlTab(formatSessionTabSearch(persistedTabId, sessionId));
-  }, [parsedUrlTab.kind, replaceSessionUrlTab, sessionId]);
+  }, [parsedUrlTab.kind, replaceSessionUrlTab, sessionId, workspaceSlug]);
 
   /* Mobile keeps one active surface: a `?tab` change dismisses the file
      viewer, matching what explicit tab selection does. Ref-compared so the
