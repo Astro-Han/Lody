@@ -550,7 +550,16 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
     };
 
     return (
-      <div className={cn('flex items-center gap-2 px-2.5 py-1.5', className)}>
+      <div
+        className={cn('flex items-center gap-2 px-2.5 py-1.5', className)}
+        onClick={(event) => {
+          event.stopPropagation();
+          inputRef.current?.focus();
+        }}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+        }}
+      >
         <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <input
           ref={(node) => {
@@ -562,6 +571,12 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
           onKeyDown={handleKeyDown}
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
           placeholder={placeholder}
           aria-label={ariaLabel ?? placeholder}
           className="min-w-0 flex-1 border-none bg-transparent text-[0.8rem] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
