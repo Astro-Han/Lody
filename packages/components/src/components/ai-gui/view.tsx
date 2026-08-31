@@ -94,6 +94,7 @@ import {
   Brain,
   BrushCleaning,
   Check,
+  X,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -144,6 +145,14 @@ import {
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks } from './subagent-task-panel';
 import { UserMessageEditor } from './user-message-editor';
+import { hasUnansweredPlanApproval, resolvePermissionRecord } from './permission-record';
+import {
+  CONVERSATION_PANEL_BODY_CLASS,
+  CONVERSATION_PANEL_FRAME_CLASS,
+  CONVERSATION_PANEL_HEADER_CLASS,
+  CONVERSATION_PANEL_HEADER_RULE_CLASS,
+  CONVERSATION_PANEL_TITLE_CLASS,
+} from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
 import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
@@ -2982,7 +2991,9 @@ const AssistantTurnConfigInfoButton = ({
                 type="button"
                 className={cn(
                   'inline-flex shrink-0 items-center justify-center rounded-sm',
-                  'text-muted-foreground/80 transition-colors',
+                  /* Rest tone matches every other icon in the turn; hover is
+                     what brightens. */
+                  'text-muted-foreground transition-colors',
                   'hover:bg-hover/50 hover:text-foreground',
                   'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                   className
@@ -3040,9 +3051,14 @@ const AssistantTurnConfigInfoButton = ({
    step under it — one size, one color so the stack reads as one list. */
 const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-medium leading-snug text-muted-foreground';
 const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground';
-const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5 opacity-90');
+/* One tone for every icon in a turn — see `ACTIVITY_PROCESS_ICON_CLASS`. Only
+   the optical nudge is local; no per-icon opacity. */
+const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
+/* `-mx-1` + `px-1`: the hover pill still bleeds a little past the text, but the
+   icon starts ON the rail. A plain `px-1` pushed every expanded step 4px right
+   of the group header that owns it. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
-  'min-h-7 items-start rounded-md px-1 py-1 hover:bg-hover/40',
+  '-mx-1 min-h-7 items-start rounded-md px-1 py-1 hover:bg-hover/40',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
 const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
@@ -3164,7 +3180,7 @@ const WorkedGroupHeader = ({
     >
       <ChevronRight
         className={cn(
-          'h-3.5 w-3.5 flex-none shrink-0 opacity-60 transition-transform duration-200 group-hover:opacity-100',
+          'h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground transition-transform duration-200',
           expanded && 'rotate-90'
         )}
       />
@@ -3188,7 +3204,9 @@ function ActivityProcessStep({
   return (
     <div
       className={cn(
-        'flex w-full min-h-7 items-start gap-1.5 px-1 py-1',
+        /* No horizontal shell pad: a step inside an expanded region starts on
+           the rail, like the group header above it. */
+        'flex w-full min-h-7 items-start gap-1.5 py-1',
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
@@ -3260,6 +3278,23 @@ const AssistantSubagentTasksRow = ({ message }: { message: SessionHistoryParsed 
   const tasks = useMemo(() => collectSubagentTasks(message.items), [message.items]);
   return <SubagentTaskPanel tasks={tasks} />;
 };
+
+/**
+ * Does this top-level block paint a surface (card, attachment, plan) rather than
+ * flow as prose? Surfaces are separate objects and take `cardSiblingGap`; prose
+ * takes the tighter `turnSiblingGap` because its leading already separates it.
+ */
+const CARD_CONTENT_TYPES = new Set<MessageContent['type']>([
+  'tool_call',
+  'proposed_plan',
+  'plan',
+  'image',
+  'image_group',
+  'file',
+]);
+
+const isCardContentBlock = (block: AssistantTurnRenderBlock): boolean =>
+  block.kind === 'content' && CARD_CONTENT_TYPES.has(block.entry.content.type);
 
 const isAssistantToolCallActivityEntry = (
   entry: AssistantActivityRenderItem
@@ -3783,6 +3818,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
           isStreaming: message.finished !== true,
           onFilePathClick,
           conversationFontSize,
+          planAwaitingDecision: hasUnansweredPlanApproval(message.items),
         });
       }
       case 'activity_group_header':
@@ -3798,29 +3834,27 @@ const AssistantChatItem = memo(function AssistantChatItem({
         );
       case 'activity_detail': {
         const { entry } = content;
-        /* Indent under the group header so steps read as children. */
-        return (
-          <div className="pl-3 sm:pl-3.5">
-            {isAssistantToolCallActivityEntry(entry) ? (
-              <AssistantToolCallVirtualRow
-                sessionId={row.item.sessionId}
-                messageId={message.id}
-                entry={entry}
-                onFilePathClick={onFilePathClick}
-                fontSize={conversationFontSize}
-              />
-            ) : (
-              <AssistantThoughtVirtualRow
-                messageId={message.id}
-                itemIndex={entry.itemIndex}
-                text={entry.content.text}
-                showLabel={content.showThoughtLabel}
-                isThinking={content.isThinking}
-                isStreaming={message.finished !== true}
-                fontSize={conversationFontSize}
-              />
-            )}
-          </div>
+        /* No indent: expanding a region must not shift its contents off the
+           rail. The disclosure chevron and the group header carry the
+           hierarchy — see `cardSiblingGap` above and `ai-gui/AGENTS.md`. */
+        return isAssistantToolCallActivityEntry(entry) ? (
+          <AssistantToolCallVirtualRow
+            sessionId={row.item.sessionId}
+            messageId={message.id}
+            entry={entry}
+            onFilePathClick={onFilePathClick}
+            fontSize={conversationFontSize}
+          />
+        ) : (
+          <AssistantThoughtVirtualRow
+            messageId={message.id}
+            itemIndex={entry.itemIndex}
+            text={entry.content.text}
+            showLabel={content.showThoughtLabel}
+            isThinking={content.isThinking}
+            isStreaming={message.finished !== true}
+            fontSize={conversationFontSize}
+          />
         );
       }
       case 'subagent_tasks':
@@ -3851,16 +3885,24 @@ const AssistantChatItem = memo(function AssistantChatItem({
      answer so edited-files is not double-spaced by line-height + pt-1. */
   const turnSiblingGap = 'pt-1 pb-0';
   const processSiblingGap = 'pt-0.5 pb-0.5';
+  /* A row that paints a surface needs a real gap, not the prose gap. `pt-1`
+     left cards 4-8px apart while their own padding was 10-12px, so the space
+     BETWEEN objects read tighter than the space inside one and the turn
+     collapsed into a stack of bordered strips. Prose keeps `pt-1`: its line
+     leading already supplies the separation. */
+  const cardSiblingGap = 'pt-3 pb-0';
   const verticalClass = (() => {
     if (isWorkedDetail) {
       return processSiblingGap;
     }
     switch (content.kind) {
+      case 'content':
+        return isCardContentBlock(content.block) ? cardSiblingGap : turnSiblingGap;
+      case 'plan':
+        return cardSiblingGap;
       case 'worked_group_header':
       case 'activity_group_header':
-      case 'content':
       case 'subagent_tasks':
-      case 'plan':
         return turnSiblingGap;
       case 'footer':
         /* No top pad: answer markdown already has leading below the last line.
@@ -3900,8 +3942,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
         <div
           className={cn(
             'max-w-[800px] break-words',
-            /* Same inset the old process rail used, without the border. */
-            isWorkedDetail && 'pl-2.5 sm:pl-3',
+            /* A folded region's contents stay on the rail: expanding "Worked
+               for 12s" must reveal rows, not shift them right. Tone below is
+               what separates process from answer. */
             /* L4 result: full contrast. Process: muted so answer pops. */
             isFinalAnswer || content.kind === 'footer'
               ? 'text-foreground'
@@ -4112,6 +4155,8 @@ const renderAssistantContent = (
     isStreaming?: boolean;
     onFilePathClick?: (filePath: string) => void;
     conversationFontSize?: ConversationFontSize;
+    /** This turn's plan approval is still unanswered — see `ProposedPlanBlock`. */
+    planAwaitingDecision?: boolean;
   }
 ) => {
   const messageId = options?.messageId ?? 'assistant';
@@ -4131,7 +4176,7 @@ const renderAssistantContent = (
       );
     case 'image':
       return (
-        <div className="flex w-full px-2 pt-1">
+        <div className="flex w-full">
           <UserImageBlock
             entry={createSessionImageGalleryEntry({
               sessionId,
@@ -4174,12 +4219,25 @@ const renderAssistantContent = (
           itemIndex={itemIndex}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
+          awaitingDecision={options?.planAwaitingDecision}
         />
       );
     case 'goal':
       return <GoalBlock goal={content} />;
     case 'tool_call':
-      return (
+      /* The plan-approval card has no title of its own to show: the plan is
+         right above it (Codex's `proposed_plan`, moved next to its approval) or
+         inside it (Claude's `content`), and "Implement this plan?" directly over
+         "Yes, implement this plan" asked and answered the same question twice.
+         What is left is the decision. */
+      return content.kind === 'switch_mode' ? (
+        <PlanExitBlock
+          sessionId={sessionId}
+          toolCall={content}
+          onFilePathClick={options?.onFilePathClick}
+          fontSize={conversationFontSize}
+        />
+      ) : (
         <ToolCallCard
           sessionId={sessionId}
           toolCall={content}
@@ -4426,7 +4484,10 @@ const UserImageBlock = ({
     <div
       ref={previewPortalAnchorRef}
       className={cn(
-        'overflow-hidden rounded-lg border border-border/70 bg-muted/20',
+        /* 12px: the shared radius of every top-level conversation card (file
+           card, proposed plan, permission record). An 8px frame beside them
+           read as a different family of object. */
+        'overflow-hidden rounded-xl border border-border/70 bg-muted/20',
         isThumbnail ? thumbnailFrameClass : 'inline-flex max-w-full flex-col'
       )}
     >
@@ -4510,7 +4571,11 @@ export const ImageGroupBubble = ({
   const sessionImagePreview = useContext(SessionImagePreviewContext);
   const previewPortalAnchorRef = useRef<HTMLDivElement>(null);
   const [localActiveImageKey, setLocalActiveImageKey] = useState<string | null>(null);
-  const justifyClass = align === 'end' ? 'justify-end' : 'justify-start';
+  /* An assistant attachment (`align="start"`) is a top-level row on the turn's
+     left rail: no horizontal pad (the gutter belongs to `ConversationColumn`)
+     and no top pad (the row gap belongs to `cardSiblingGap`). The user's own
+     attachments keep hugging the right edge exactly as they did. */
+  const rowClass = align === 'end' ? 'justify-end px-2 pt-1' : 'justify-start';
   const gridMaxWidthClass = thumbnailSize === 'large' ? 'max-w-[32rem]' : 'max-w-[26rem]';
   const entries = useMemo(
     () =>
@@ -4541,7 +4606,7 @@ export const ImageGroupBubble = ({
 
     return (
       <>
-        <div ref={previewPortalAnchorRef} className={cn('flex w-full px-2 pt-1', justifyClass)}>
+        <div ref={previewPortalAnchorRef} className={cn('flex w-full', rowClass)}>
           <UserImageBlock entry={entry} onPreviewRequest={handlePreviewRequest} variant="full" />
         </div>
         {!sessionImagePreview ? (
@@ -4564,7 +4629,7 @@ export const ImageGroupBubble = ({
 
   return (
     <>
-      <div ref={previewPortalAnchorRef} className={cn('flex w-full px-2 pt-1', justifyClass)}>
+      <div ref={previewPortalAnchorRef} className={cn('flex w-full', rowClass)}>
         <div className={cn('grid grid-cols-2 gap-2', gridMaxWidthClass)}>
           {entries.map((entry, index) => (
             <UserImageBlock
@@ -5062,7 +5127,7 @@ const CollapsibleCard = ({
           {canToggle && showDisclosureIcon ? (
             <ChevronRight
               className={cn(
-                'h-3.5 w-3.5 flex-none shrink-0 text-current opacity-70 transition-all duration-200 ease-out group-hover:opacity-100',
+                'h-3.5 w-3.5 flex-none shrink-0 text-current transition-transform duration-200 ease-out',
                 isExpanded ? 'rotate-90' : ''
               )}
             />
@@ -5152,20 +5217,17 @@ export const ProposedPlanBlock = ({
   itemIndex,
   onFilePathClick,
   fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  awaitingDecision = false,
 }: {
   plan: ProposedPlanMessage;
   messageId: string;
   itemIndex: number;
   onFilePathClick?: (filePath: string) => void;
   fontSize?: ConversationFontSize;
+  /** The approval below this plan is still unanswered. */
+  awaitingDecision?: boolean;
 }) => {
   const searchBlockId = getProposedPlanSearchBlockId(messageId, itemIndex);
-  const statusLabel =
-    plan.status === 'delta'
-      ? 'Drafting'
-      : plan.status === 'completed'
-        ? 'Ready for review'
-        : 'Cleared';
   const handleAgentFileLinkClick = useCallback(
     (href: string) => {
       onFilePathClick?.(href);
@@ -5180,56 +5242,120 @@ export const ProposedPlanBlock = ({
     window.setTimeout(() => setDidCopy(false), 1200);
   }, [plan.markdown]);
 
+  /* A plan is long by nature and it now sits near the TOP of its turn, above the
+     work it produced — unclamped it would push everything that happened after it
+     off the screen. So it clamps ONCE IT IS HISTORY. While the plan is still
+     being written, or while its approval is unanswered, it opens in full: a
+     reader asked to approve or reject has to see the whole thing, and hiding
+     two thirds of it behind a chevron is the one moment that is unacceptable.
+     Collapsing then happens on the next render after the decision, never under
+     the reader who just made it (`useState` keeps the mounted value).
+     The toggle only appears when there is actually more to show, so a
+     three-line plan keeps no chrome. */
+  const defaultExpanded = awaitingDecision || plan.status === 'delta';
+  const cachedExpanded = getExpandState(messageId).expandedByIndex[itemIndex];
+  const [expanded, setExpandedState] = useState(cachedExpanded ?? defaultExpanded);
+  // Persisted so Virtua unmounting the row while it scrolls away does not throw
+  // away a reader's manual expansion.
+  const setExpanded = useCallback(
+    (next: boolean) => {
+      setExpandedState(next);
+      const cached = getExpandState(messageId);
+      setExpandState(messageId, {
+        ...cached,
+        expandedByIndex: { ...cached.expandedByIndex, [itemIndex]: next },
+      });
+    },
+    [itemIndex, messageId]
+  );
+  const [overflows, setOverflows] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const searchState = useSessionSearchBlockPrefix(searchBlockId);
+  const forceOpen = searchState.hasActive;
+  const isOpen = expanded || forceOpen;
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (!element) return undefined;
+    const check = () => setOverflows(element.scrollHeight > element.clientHeight + 1);
+    check();
+    return observeResizeOnAnimationFrame(element, check);
+  }, [plan.markdown, isOpen]);
+
   if (!plan.markdown.trim()) {
     return null;
   }
 
+  /* The plan is the same kind of object as the command block and the tool
+     output beside it, so it wears the same panel: lighter header, plain body,
+     no accent. The tinted border/fill made one ordinary panel in the turn look
+     like the turn's alert, and the status pill restated what the surrounding
+     turn already shows (a drafting plan is visibly still growing). */
   return (
-    <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/[0.035] p-3 shadow-xs">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          <FileText className="h-4 w-4 text-primary/80" />
-          <span>Proposed Plan</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span
-            className={cn(
-              'shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
-              plan.status === 'completed'
-                ? 'border-status-success/30 bg-status-success/[0.08] text-status-success'
-                : 'border-border/60 bg-background/60 text-muted-foreground'
-            )}
-          >
-            {statusLabel}
-          </span>
-          <TooltipProvider>
-            <Tooltip delayDuration={500}>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-                  onClick={() => {
-                    void handleCopy();
-                  }}
-                  aria-label="Copy plan"
-                >
-                  {didCopy ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{didCopy ? 'Copied' : 'Copy plan'}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+    <div className={CONVERSATION_PANEL_FRAME_CLASS}>
+      <div className={cn(CONVERSATION_PANEL_HEADER_CLASS, CONVERSATION_PANEL_HEADER_RULE_CLASS)}>
+        {/* The whole header toggles, matching `TerminalComponent`. The chevron is
+            the affordance; it only exists when the body is actually clipped. */}
+        <button
+          type="button"
+          className="-my-1 -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded py-1 pl-1 text-left"
+          onClick={overflows || isOpen ? () => setExpanded(!isOpen) : undefined}
+          aria-expanded={overflows || isOpen ? isOpen : undefined}
+          disabled={!overflows && !isOpen}
+        >
+          {overflows || isOpen ? (
+            <ChevronRight
+              className={cn(
+                'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200',
+                isOpen && 'rotate-90'
+              )}
+            />
+          ) : (
+            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <span className={CONVERSATION_PANEL_TITLE_CLASS}>Proposed Plan</span>
+        </button>
+        <TooltipProvider>
+          <Tooltip delayDuration={500}>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
+                onClick={() => {
+                  void handleCopy();
+                }}
+                aria-label="Copy plan"
+              >
+                {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{didCopy ? 'Copied' : 'Copy plan'}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
-      <div className="rounded-lg bg-background/55 px-2 py-1.5">
-        <MarkdownRenderer
-          text={plan.markdown}
-          size={fontSize}
-          onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
-          searchBlockId={searchBlockId}
-        />
+      <div className="relative">
+        <div
+          ref={bodyRef}
+          className={cn(
+            CONVERSATION_PANEL_BODY_CLASS,
+            !isOpen && 'max-h-56 overflow-hidden',
+            isOpen && 'scrollbar-pro max-h-[32rem] overflow-y-auto'
+          )}
+        >
+          <MarkdownRenderer
+            text={plan.markdown}
+            size={fontSize}
+            onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
+            searchBlockId={searchBlockId}
+          />
+        </div>
+        {!isOpen && overflows ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background/95 to-transparent"
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -5403,7 +5529,11 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const hasOutput = Boolean(toolCall.rawOutput);
   const hasContent = Boolean(contentBlocks?.length);
-  const hasPermission = Boolean(toolCall.permissionRequest);
+  /* A cancelled request records nothing, so it must not count towards the body:
+     otherwise the card stays collapsible and opens onto empty padding. */
+  const hasPermission =
+    Boolean(toolCall.permissionRequest) &&
+    toolCall.permissionRequest?.outcome?.outcome !== 'cancelled';
   const hasDetails = hasOutput || hasContent || hasPermission;
 
   const title = toolCall.title
@@ -5559,9 +5689,16 @@ const ToolCallCard = memo(function ToolCallCard({
       }
 
       nodes.push(
+        /* Inside a folded activity row the block needs its own surface to read as
+           output. At top level the only tool call that gets here is the plan-exit
+           `switch_mode` card, whose content is the plan prose itself — boxing it
+           there stacked a near-invisible frame above the permission card and made
+           one row look like three unrelated objects. Space groups it instead. */
         <div
           key={`${block.type}-${index}`}
-          className="rounded-lg border border-border/60 bg-muted/20 p-2.5"
+          className={cn(
+            isActivityRow && cn(CONVERSATION_PANEL_FRAME_CLASS, CONVERSATION_PANEL_BODY_CLASS)
+          )}
         >
           <ToolCallContentRenderer
             block={block}
@@ -5592,22 +5729,31 @@ const ToolCallCard = memo(function ToolCallCard({
           ? ACTIVITY_STEP_BUTTON_CLASS
           : isTerminalExecuteToolCall
             ? 'rounded-none bg-muted/70 px-3 py-1.5 text-foreground hover:bg-muted/90'
-            : undefined
+            : /* A top-level tool call (the plan-approval `switch_mode` card) is a
+                 SIBLING of the worked headers and the answer prose, so it starts
+                 on the turn's left rail. `CollapsibleCard`'s default `px-1` put
+                 its title 4px right of every chevron in the same column — and 8px
+                 right of its own `px-0` body. */
+              'px-0'
       }
       bodyClassName={cn(
-        isActivityRow ? 'space-y-1.5 pb-1.5 pl-7 pr-1' : 'space-y-3 px-0',
-        !isActivityRow && (isTerminalExecuteToolCall ? 'border-t border-border/60 pb-0' : 'pb-1')
+        /* An expanded body starts on the rail, like every other collapsible
+           region in a turn. It still needs air under the title — they were 0px
+           apart — but not an indent. */
+        isActivityRow
+          ? 'space-y-1.5 px-0 pb-1.5 pt-1'
+          : isTerminalExecuteToolCall
+            ? /* Bordered card: the body is full-bleed to its own frame. */
+              'space-y-3 border-t border-border/60 px-0 pb-0'
+            : 'space-y-2.5 px-0 pb-1 pt-1.5'
       )}
       right={runningIndicator}
       left={
         <div
           className={cn(
             'flex min-w-0 flex-1 items-start gap-1.5',
-            isActivityRow
-              ? titleColorClass
-              : isTerminalExecuteToolCall
-                ? null
-                : titleColorClass + ' ml-1'
+            /* No leading margin: see `buttonClassName` — the rail is shared. */
+            isTerminalExecuteToolCall ? null : titleColorClass
           )}
         >
           <KindIcon className={kindIconClass} />
@@ -5689,13 +5835,18 @@ const ToolCallCard = memo(function ToolCallCard({
               fontSize={fontSize}
             />
           ) : hasOutput ? (
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Output
+            <div className={CONVERSATION_PANEL_FRAME_CLASS}>
+              <div
+                className={cn(
+                  CONVERSATION_PANEL_HEADER_CLASS,
+                  CONVERSATION_PANEL_HEADER_RULE_CLASS
+                )}
+              >
+                <span className={CONVERSATION_PANEL_TITLE_CLASS}>Output</span>
               </div>
               <pre
                 className={cn(
-                  'rounded-md bg-muted/40 p-2',
+                  CONVERSATION_PANEL_BODY_CLASS,
                   inlineOutput ? 'overflow-x-auto' : 'max-h-60 overflow-auto'
                 )}
                 style={conversationMonoFontSizeStyle(fontSize)}
@@ -5947,6 +6098,42 @@ const StandardToolContentBlock = ({
   }
 };
 
+/**
+ * A plan exit (`switch_mode`) renders as the DECISION, nothing else.
+ *
+ * Claude's `ExitPlanMode` carries the plan as a `content` text block, so that
+ * still renders here; Codex puts the plan in `rawInput` (never displayed) and
+ * emits a separate `proposed_plan`, which `buildAssistantMessageRenderItems`
+ * moves directly above this row. Either way the reader gets plan-then-decision,
+ * with no title restating the question the outcome already answers.
+ */
+const PlanExitBlock = ({
+  toolCall,
+  sessionId,
+  fontSize,
+  onFilePathClick,
+}: {
+  toolCall: ToolCallMessage;
+  sessionId: SessionId;
+  fontSize: ConversationFontSize;
+  onFilePathClick?: (filePath: string) => void;
+}) => {
+  const blocks = toolCall.content?.filter((block) => block.type === 'content');
+  return (
+    <div className="space-y-2">
+      {blocks?.map((block, index) => (
+        <ToolCallContentRenderer
+          key={`plan-exit-content-${index}`}
+          block={block}
+          onFilePathClick={onFilePathClick}
+          fontSize={fontSize}
+        />
+      ))}
+      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} />
+    </div>
+  );
+};
+
 const PermissionRequestBlock = ({
   toolCall,
   sessionId,
@@ -5955,6 +6142,7 @@ const PermissionRequestBlock = ({
   sessionId: SessionId;
 }) => {
   const permission = toolCall.permissionRequest;
+  const { t } = useTranslation();
   const { respondToPermission, isReady } = usePermissionResponse();
   const [pendingOptionId, setPendingOptionId] = useState<string | null>(null);
 
@@ -5987,6 +6175,37 @@ const PermissionRequestBlock = ({
     permission.outcome?.outcome === 'selected' ? permission.outcome.optionId : undefined;
   const isResolved = Boolean(permission.outcome);
   const isCancelled = permission.outcome?.outcome === 'cancelled';
+  const record = resolvePermissionRecord(permission);
+
+  // `ToolCallCard` also drops the body for a withdrawn request, so this is the
+  // second gate rather than the only one.
+  if (record.kind === 'withdrawn') {
+    return null;
+  }
+
+  if (record.kind === 'settled') {
+    const label =
+      record.optionName ??
+      (record.allowed
+        ? t('sessions.permissionApproved', 'Permission Approved')
+        : t('sessions.permissionDenied', 'Permission Denied'));
+    const OutcomeIcon = record.allowed ? Check : X;
+    return (
+      <div
+        className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
+      >
+        {/* Check vs cross already carries approved-vs-denied, so the icon keeps
+            the turn's one icon tone instead of introducing a hue no other icon
+            in the row has. */}
+        <OutcomeIcon className={ACTIVITY_STEP_ICON_CLASS} aria-hidden="true" />
+        {/* Truncated like every other process row: an `allow_always` name runs
+            to a full sentence, and the record must stay one line. */}
+        <span className="min-w-0 flex-1 truncate" title={label}>
+          {label}
+        </span>
+      </div>
+    );
+  }
 
   const handleSelect = async (optionId: string) => {
     if (isResolved || isCancelled || !isReady) {
@@ -6012,7 +6231,9 @@ const PermissionRequestBlock = ({
       isReady={isReady}
       pendingOptionId={pendingOptionId}
       selectedOptionId={selectedOptionId}
-      className="ml-4 w-[calc(100%-1rem)] max-w-[43rem]"
+      /* On the rail with the rest of its tool call's body. A private `ml-4`
+         used to put it 16px right of its own siblings. */
+      className="w-full max-w-[43rem]"
       onSelect={(optionId) => {
         void handleSelect(optionId);
       }}
@@ -6034,15 +6255,14 @@ const StructuredObject = ({
   fontSize?: ConversationFontSize;
 }) => {
   return (
-    <div className={cn('space-y-1', dense && 'space-y-0.5')}>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
+    <div className={CONVERSATION_PANEL_FRAME_CLASS}>
+      <div className={cn(CONVERSATION_PANEL_HEADER_CLASS, CONVERSATION_PANEL_HEADER_RULE_CLASS)}>
+        <span className={CONVERSATION_PANEL_TITLE_CLASS}>{label}</span>
       </div>
       <pre
         className={cn(
-          'rounded-md bg-muted/40',
-          unbounded ? 'overflow-x-auto' : 'max-h-60 overflow-auto',
-          dense ? 'p-2' : 'p-3'
+          CONVERSATION_PANEL_BODY_CLASS,
+          unbounded ? 'overflow-x-auto' : 'max-h-60 overflow-auto'
         )}
         style={
           dense ? conversationMonoFontSizeStyle(fontSize) : conversationTextFontSizeStyle(fontSize)
