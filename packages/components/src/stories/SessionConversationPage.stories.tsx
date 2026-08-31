@@ -137,7 +137,7 @@ const storyPlatform = createLocalPlatformProvider({
   }),
 });
 
-type PageState = 'idle' | 'working' | 'permission' | 'question';
+type PageState = 'idle' | 'working' | 'permission' | 'question' | 'plan';
 type DeviceFrame = 'desktop' | 'mobile';
 
 const action = fn();
@@ -307,7 +307,10 @@ const buildSessionId = (state: PageState, frame: DeviceFrame): SessionId =>
 const buildSession = (state: PageState, frame: DeviceFrame): SessionMeta => {
   const sessionId = buildSessionId(state, frame);
   const status =
-    state === 'idle'
+    // `plan` is a FINISHED plan-mode turn, so the session is idle like any
+    // other completed turn — it is the history that is interesting, not a
+    // pending state.
+    state === 'idle' || state === 'plan'
       ? ({ type: 'idle' } as const)
       : state === 'working'
         ? ({ type: 'running' } as const)
@@ -351,6 +354,11 @@ const buildMessage = (
   userId: input.userId,
   items: input.items,
   finished: input.finished,
+  // `endedAt` drives the worked header's duration and `fileDiff` the footer's
+  // edited-files card. Dropping them here silently rendered every finished turn
+  // as "Finished working" with no diff summary.
+  endedAt: input.endedAt,
+  fileDiff: input.fileDiff,
   modelInfo: input.modelInfo,
 });
 
@@ -553,9 +561,191 @@ const questionToolCall = (): MessageContent => ({
   },
 });
 
+const PLAN_MARKDOWN = [
+  '## Goal',
+  '',
+  'Give every framed block in a turn the same panel, and put every row on one left rail.',
+  '',
+  '## Steps',
+  '',
+  '1. Move the frame / header / body tokens into `conversation-panel.ts` so the',
+  '   header always carries the raised fill and the body never does.',
+  '2. Drop the per-shell horizontal pads (`ToolCallCard`, attachments, the',
+  '   permission card) so top-level rows share the column edge.',
+  '3. Collapse a settled permission to one line; keep the pending card actionable.',
+  '',
+  '## Risk',
+  '',
+  'The terminal paints its own VS Code surface, so its header has to step off',
+  '**that** colour rather than the frame.',
+].join('\n');
+
+/**
+ * A finished plan-mode turn, end to end: exploration, the plan-approval card
+ * and its one-line outcome, the approved implementation, the answer, and the
+ * artefacts the agent left behind. This is the shape the bundled adapters emit
+ * (`switch_mode` carries the plan as a `content` text block), and the one place
+ * to look at plan geometry inside the real page chrome.
+ */
+const buildPlanHistory = (): SessionHistoryParsed[] => [
+  buildMessage({
+    id: 'plan-user-1',
+    role: 'user',
+    userId: STORY_USER_ID,
+    timestamp: '2026-07-09T09:31:00.000Z',
+    items: [
+      {
+        type: 'text',
+        text: 'The plan-approval card is styled unlike everything else in the turn. Plan a fix first, then implement it.',
+      },
+    ],
+  }),
+  buildMessage({
+    id: 'plan-assistant-1',
+    role: 'assistant',
+    timestamp: '2026-07-09T09:31:20.000Z',
+    finished: true,
+    endedAt: Date.parse('2026-07-09T09:59:55.000Z'),
+    modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+    fileDiff: [
+      { filePath: 'packages/components/src/components/ai-gui/view.tsx', add: 96, del: 74 },
+      {
+        filePath: 'packages/components/src/components/ai-gui/conversation-panel.ts',
+        add: 34,
+        del: 0,
+      },
+    ],
+    items: [
+      // Pre-plan exploration. Folds under "Finished working": an earlier region
+      // never claims the duration.
+      {
+        type: 'thought',
+        text: 'Read the conversation renderer first, then decide which layer owns the geometry.',
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-read-1',
+        title: 'Read packages/components/src/components/ai-gui/view.tsx',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: 'packages/components/src/components/ai-gui/view.tsx' }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-search-1',
+        title: 'rg "bg-muted/70|bg-secondary/55" packages/components/src',
+        kind: 'search',
+        status: 'completed',
+      },
+      // The plan-approval card. Codex titles it "Implement this plan?"; the
+      // region cut keys on `kind: switch_mode`, never the title.
+      // CODEX shape (this session's `agentType`), copied from
+      // `CodexAcpServer.requestPlanImplementationPermission`: the plan travels
+      // in `rawInput`, which the card does not render, and the readable plan is
+      // the separate `proposed_plan` item below. Claude's `ExitPlanMode` is the
+      // other shape — plan in `content`, no `proposed_plan` — and is covered by
+      // `AssistantTurnAlignment.stories.tsx`. Do not merge the two: a card with
+      // BOTH prints the plan twice, which no adapter actually does.
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-review:plan-1',
+        title: 'Implement this plan?',
+        kind: 'switch_mode',
+        status: 'completed',
+        rawInput: { plan: PLAN_MARKDOWN },
+        permissionRequest: {
+          requestId: 'plan-exit-permission-1',
+          options: [
+            { optionId: 'implement', name: 'Yes, implement this plan', kind: 'allow_once' },
+            {
+              optionId: 'revise',
+              name: 'No, and tell Codex what to do differently',
+              kind: 'reject_once',
+            },
+          ],
+          outcome: { outcome: 'selected', optionId: 'implement' },
+        },
+      },
+      // The approved implementation. Last region, so it owns the duration.
+      {
+        type: 'thought',
+        text: 'Start with the shared panel tokens, then remove the shell pads one file at a time.',
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-edit-1',
+        title: 'Edit packages/components/src/components/ai-gui/conversation-panel.ts',
+        kind: 'edit',
+        status: 'completed',
+        locations: [{ path: 'packages/components/src/components/ai-gui/conversation-panel.ts' }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-edit-2',
+        title: 'Edit packages/components/src/components/ai-gui/view.tsx',
+        kind: 'edit',
+        status: 'completed',
+        locations: [{ path: 'packages/components/src/components/ai-gui/view.tsx' }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'plan-exec-1',
+        title: 'pnpm --filter @lody/components test',
+        kind: 'execute',
+        status: 'completed',
+        content: [
+          {
+            type: 'terminal_command',
+            command: '/bin/bash',
+            args: ['-lc', 'pnpm --filter @lody/components test'],
+            cwd: '/repo',
+          },
+          {
+            type: 'terminal_output',
+            output: [
+              ' Test Files  401 passed (401)',
+              '      Tests  2873 passed (2873)',
+              '   Duration  38.99s',
+            ].join('\n'),
+          },
+        ],
+      },
+      {
+        type: 'text',
+        text: [
+          'Every framed block now uses one panel: the header carries the raised fill and the body sits on the frame.',
+          '',
+          'Measured against the column edge, all top-level rows start at 0 and the header step is +12 in dark / -13 in light.',
+        ].join('\n'),
+      },
+      {
+        type: 'proposed_plan',
+        turnId: 'plan-turn-1',
+        markdown: PLAN_MARKDOWN,
+        status: 'completed',
+        isLatest: true,
+      },
+      {
+        type: 'file',
+        fileId: 'plan-report-1',
+        fileName: 'panel-geometry-report.md',
+        mimeType: 'text/markdown',
+        sizeBytes: 4096,
+        sha256: 'c'.repeat(64),
+        textPreview: true,
+        uploadedAt: Date.parse('2026-07-09T09:59:50.000Z'),
+        transport: 'r2',
+      },
+    ],
+  }),
+];
+
 const buildHistory = (state: PageState, streamChunkCount = 0): SessionHistoryParsed[] => {
   if (state === 'working') {
     return buildWorkingHistory(streamChunkCount);
+  }
+  if (state === 'plan') {
+    return buildPlanHistory();
   }
   const messages = baseMessages();
   if (state === 'permission') {
@@ -625,7 +815,7 @@ function createStoryStore(session: SessionMeta, state: PageState) {
   store.set(sessionMetaCacheAtom, {
     [getSessionRoomId(session.id)]: session,
   });
-  if (state !== 'idle') {
+  if (state !== 'idle' && state !== 'plan') {
     const instanceId = `storybook-${state}` as LodyPresenceInstanceId;
     const status =
       state === 'working'
@@ -1195,6 +1385,24 @@ export const DesktopAgentQuestion: Story = {
   decorators: [withDesktopViewport],
 };
 
+/**
+ * The whole plan-mode round inside the real page chrome: propose → approve →
+ * implement → result. Use this to look at plan geometry rather than the
+ * component stories, which show the pieces without the header, tab bar,
+ * info bar, and composer around them.
+ */
+export const DesktopPlanFlow: Story = {
+  args: { state: 'plan' },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopPlanFlowLight: Story = {
+  args: { state: 'plan' },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
 export const MobileIdle: Story = {
   args: { frame: 'mobile' },
   globals: { theme: 'dark' },
@@ -1218,6 +1426,12 @@ export const MobilePermissionApproval: Story = {
 
 export const MobileAgentQuestion: Story = {
   args: { frame: 'mobile', state: 'question' },
+  globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
+export const MobilePlanFlow: Story = {
+  args: { frame: 'mobile', state: 'plan' },
   globals: { theme: 'dark' },
   decorators: [withMobileViewport],
 };
