@@ -102,6 +102,9 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   card, leaving rows visually glued together. `MobileSettingsSection` renders
   `title`+`actions` on one header line and `description` full-width below it
   (don't squeeze the description into the title column next to wide actions).
+  `workspaceJoinRequestsSlot` already owns its card frame, so wrap it in a
+  `MobileSettingsSection noCard` plus the standard `mx-3` card inset; mounting
+  the slot raw drops both the section rhythm and the shared horizontal edge.
 - Sheets (bottom): `mobile-new-chat-sheet.tsx`,
   `mobile-workspace-switcher-sheet.tsx`, `mobile-create/delete-workspace-sheet`,
   `mobile-worktree-config-sheet.tsx`, `mobile-acp-history-sheet.tsx`,
