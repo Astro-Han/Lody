@@ -18,6 +18,7 @@ import { ProjectsScreen } from './screens/projects-screen';
 import { FirstTaskScreen } from './screens/first-task-screen';
 import { SummaryScreen } from './screens/summary-screen';
 import { useOnboardingBuiltinRuntimePrefetch } from './use-onboarding-builtin-runtime-prefetch';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 
 export type DesktopOnboardingCompletion = {
   sessionId?: string;
@@ -185,6 +186,7 @@ export function OnboardingOverlay({
   return (
     <OnboardingStepsProvider steps={visibleSteps}>
       <div className="fixed inset-0 z-40 overflow-hidden bg-[#f7f5f2] text-slate-950">
+        <WindowDragStrip className="z-30" />
         {phase === 'ceremony' ? (
           <div className="absolute inset-0 z-10">{screens[phase]}</div>
         ) : (

@@ -36,6 +36,7 @@ import { runNativeOAuthSignIn } from '@/lib/native-oauth';
 import { syncNativeAuthSession } from '@/lib/native-auth-session-sync';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { isElectronRenderer as isElectronRendererRuntime } from '@/lib/electron';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getAuthResponseError } from '@/lib/auth-response';
 import { buildEmailVerificationCallbackUrl } from '@/lib/email-verification-callback';
 import { buildEmailSignInInput } from '@/lib/email-sign-in';
@@ -1674,7 +1675,8 @@ export function LoginPage({
   })();
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background p-4">
+    <div className="relative flex h-screen w-full items-center justify-center bg-background p-4">
+      <WindowDragStrip />
       <motion.div
         layout
         transition={VIEW_TRANSITION}

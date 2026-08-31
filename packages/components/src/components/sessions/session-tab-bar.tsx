@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Loader2, X, History, Undo2, Pin, FileDiff } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
+import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
@@ -119,8 +119,7 @@ const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
 const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
 const TAB_INLINE_ACTION_CLASS =
   'ml-auto shrink-0 rounded-sm p-0.5 opacity-70 transition-[opacity,background-color,color] hover:bg-muted-foreground/10 hover:text-tab-hover-foreground hover:opacity-100';
-const TAB_BAR_ACTION_CLASS =
-  'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground';
+const TAB_BAR_ACTION_CLASS = `flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground ${WINDOW_DRAG_EXEMPT_CLASS}`;
 
 function clientPointFromDragEnd(event: DragEndEvent): { x: number; y: number } | null {
   const source = event.activatorEvent;
@@ -233,6 +232,7 @@ function TabContent({
       }
       className={cn(
         TAB_ITEM_CLASS,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS,
         solo
           ? 'text-tab-active-foreground'
           : isActive
@@ -362,6 +362,7 @@ function DraftTabContent({
       aria-label={label}
       className={cn(
         TAB_ITEM_CLASS,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS,
         solo
           ? 'text-tab-active-foreground'
           : isActive
@@ -443,6 +444,7 @@ function ViewerTabContent({
       aria-label={saveStateLabel ? `${tab.label}, ${saveStateLabel}` : tab.label}
       className={cn(
         TAB_ITEM_CLASS,
+        !solo && WINDOW_DRAG_EXEMPT_CLASS,
         solo
           ? 'text-tab-active-foreground'
           : isActive
@@ -552,6 +554,7 @@ export const SessionTabBar = memo(function SessionTabBar({
   onMentionSession,
 }: SessionTabBarProps) {
   const { t } = useTranslation();
+  const windowDragClass = useWindowDragRegionClass();
   useListKeyboardNavigation({ scopeId: WORKSPACE_FOCUS_SCOPES.sessionConversation });
   const defaultTitle = t('sessions.untitled', 'Untitled session');
   const showSessionTabs = variant !== 'viewer';
@@ -743,9 +746,15 @@ export const SessionTabBar = memo(function SessionTabBar({
   ) : null;
 
   return (
-    <div className={cn('flex min-w-0 items-center bg-background', className)}>
+    <div className={cn('flex min-w-0 items-center bg-background', windowDragClass, className)}>
       {leftSlot ? (
-        <div className={cn('flex shrink-0 items-center pl-3', soloTab ? 'pr-0' : 'pr-2')}>
+        <div
+          className={cn(
+            'flex shrink-0 items-center pl-3',
+            WINDOW_DRAG_EXEMPT_CLASS,
+            soloTab ? 'pr-0' : 'pr-2'
+          )}
+        >
           {leftSlot}
         </div>
       ) : null}
@@ -819,11 +828,13 @@ export const SessionTabBar = memo(function SessionTabBar({
       </AdaptiveTabStrip>
       {/* Pinned right cluster: new-tab, then the archived-tabs history (only
           when closed tabs exist), then the caller's toolbar ("…" etc.). */}
-      {newTabButton}
-      {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
-        <ArchivedTabsPopover archivedSessions={archivedChildSessions} onRestore={onTabRestore} />
-      )}
-      {rightSlot}
+      <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>
+        {newTabButton}
+        {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
+          <ArchivedTabsPopover archivedSessions={archivedChildSessions} onRestore={onTabRestore} />
+        )}
+        {rightSlot}
+      </div>
     </div>
   );
 });
