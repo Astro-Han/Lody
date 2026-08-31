@@ -24,6 +24,8 @@ import {
   type SessionTurnInputConfig,
   type WorkspaceId,
   normalizeMcpServerIdSelection,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -37,8 +39,6 @@ import {
 import type { SessionUserResolver, SessionUserProfile } from './session-user-resolver';
 import {
   findNextDispatchableUserTurn,
-  getPendingUserTurnActivationId,
-  hasPendingUserTurnActivation,
   isActivationAwaitingHistory,
   resolveDispatchTurnInput,
   resolveDispatchAcpSessionId,
@@ -784,12 +784,7 @@ export class SessionDispatchWatcher {
           sessionId,
           userTurnId
         ) !== undefined ||
-        history.some(
-          (entry) =>
-            entry.id === userTurnId &&
-            entry.role === 'user' &&
-            (entry.status === 'handled' || entry.status === 'failed' || entry.status === 'canceled')
-        );
+        !isActivationAwaitingHistory(history, userTurnId);
       if (stashed.expiresAtMs <= now || isTerminal) {
         stash.delete(userTurnId);
         continue;
@@ -2133,10 +2128,7 @@ export class SessionDispatchWatcher {
         id: queuedTurnId,
       };
 
-      // Promotion is the producer act for this turn — the moment a queued intent
-      // becomes a real user turn — so it must publish the dispatch pointer a
-      // direct send writes. `appendUserTurn` is the binding that does both
-      // halves; see its contract for what a missing pointer costs.
+      // Promotion is a dispatch producer; `appendUserTurn` publishes the pointer.
       await sessionDoc.appendUserTurn(entry);
       return entry;
     } finally {
@@ -2210,14 +2202,10 @@ export class SessionDispatchWatcher {
     // check above just judged it and declined: waiting cannot change that, and
     // the recovery that follows would accuse a turn that already ran. Settling
     // the pointer instead keeps that path for genuinely undelivered turns.
-    if (
-      !isActivationAwaitingHistory(history, pendingUserTurnId) &&
-      (await this.settleTerminalActivation(sessionId, pendingUserTurnId))
-    ) {
-      return null;
-    }
-    if (!isActive()) {
-      return null;
+    if (!isActivationAwaitingHistory(history, pendingUserTurnId)) {
+      if (await this.settleTerminalActivation(sessionId, pendingUserTurnId)) {
+        return null;
+      }
     }
     return await this.waitForPendingUserTurnHistorySync(
       sessionId,
@@ -2261,14 +2249,13 @@ export class SessionDispatchWatcher {
     if (!meta) {
       return false;
     }
-    const patch: Partial<SessionMeta> = {};
-    if (meta.processingUserMsgId === terminalUserTurnId) {
-      patch.processingUserMsgId = undefined;
-    }
-    if (meta.latestUserMsgId === terminalUserTurnId) {
-      patch.settledActivationUserMsgId = terminalUserTurnId;
-    }
-    if (Object.keys(patch).length === 0) {
+    const clearsProcessing = meta.processingUserMsgId === terminalUserTurnId;
+    const retiresLatest = meta.latestUserMsgId === terminalUserTurnId;
+    const patch: Partial<SessionMeta> = {
+      ...(clearsProcessing ? { processingUserMsgId: undefined } : {}),
+      ...(retiresLatest ? { settledActivationUserMsgId: terminalUserTurnId } : {}),
+    };
+    if (!clearsProcessing && !retiresLatest) {
       return false;
     }
     this.deps.logger.debug(
@@ -2647,9 +2634,7 @@ export class SessionDispatchWatcher {
    * is picked up wherever the watcher would otherwise sit waiting for the
    * history CRDT.
    *
-   * Also hands back the history snapshot it judged, so a caller that needs to
-   * reason about the same entries does not read them a second time. That
-   * snapshot predates queue promotion, but every path that appends also returns
+   * The returned snapshot predates queue promotion, but every path that appends also returns
    * a turn — so it is accurate whenever `turn` is null, which is the only case
    * a caller can act on it.
    */

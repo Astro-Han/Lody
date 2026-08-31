@@ -58,7 +58,7 @@ delegation proofs or a shared-machine gate without a new product and security de
   (`hasPendingUserWork`), auto review, and MCP status all read it. A consumer that
   compares `latestUserMsgId` to `lastHandledUserMsgId` itself sees pending work forever:
   auto review waits on a finished session, GC never reclaims it, MCP reports a phantom
-  queued turn. `tests/dispatch-activation-predicate.test.ts` fails on any new one. A late-arriving history entry is NEVER
+  queued turn. `packages/shared/tests/dispatch-activation-predicate.test.ts` fails on any new one. A late-arriving history entry is NEVER
   re-dispatched — no path revives the old turn. The renderer derives a visible
   "not delivered" label for that exact entry from the marker plus its non-terminal
   status (no CLI repair write, no schema change), and recovery is a fresh send:
@@ -136,11 +136,16 @@ delegation proofs or a shared-machine gate without a new product and security de
   leaves the two permanently unequal, which reads as a pending activation forever:
   the watcher waits out `HISTORY_SYNC_WAIT_TIMEOUT_MS` on a turn whose entry is
   present and terminal, then negatively acknowledges it with a bogus
-  `message_delivery_failed` notice. **Append a user turn only through
-  `SessionDocument.appendUserTurn`**, which writes the history entry and publishes
-  the pointer as one call; the pointer lives in workspace meta (the activation
-  index startup scans) and so cannot be derived from history, which is exactly why
-  a separate hand-written pointer write is one forgotten line away from that bug.
+  `message_delivery_failed` notice. **Publish the pointer in the SAME write as the
+  history append**: the pointer lives in workspace meta (the activation index startup
+  scans) and so cannot be derived from history, which is exactly why a separate
+  hand-written write is one forgotten line away from that bug.
+  `SessionDocument.appendUserTurn` is that binding and is the default. Producers that
+  fold the pointer into a larger meta patch keep doing so deliberately — durable create
+  (`commands/session.ts` `writeDispatchPointer`), dispatch start and steer ownership
+  transfer (`session-execution-service.ts`), and edit-and-resend all bundle status or
+  marker fields into one upsert on a latency-critical path. The renderer authors its own
+  writes and cannot reach `SessionDocument` at all.
   Ordinary turn
   execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; its start,
   success, failure, denial, and cancel paths must never read-await-rewrite

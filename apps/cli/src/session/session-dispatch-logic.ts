@@ -14,7 +14,6 @@ import {
   normalizeSessionInputBlocks,
   getLocalProjectHistoryProviderKey,
   resolveSessionHistoryStatus,
-  getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
   type MachineId,
   type SessionHistoryInput,
@@ -45,11 +44,6 @@ export type SessionWatchSnapshot = {
   hasRpcTurnOffer: boolean;
   hasAccessRetry: boolean;
 };
-
-// The activation predicate is SessionMeta vocabulary shared with idle GC, auto
-// review, and MCP status, so it lives in @lody/shared. Re-exported here because
-// this module is the watcher's decision surface.
-export { getPendingUserTurnActivationId, hasPendingUserTurnActivation };
 
 /**
  * Whether an activation can still be explained by history that has not synced.
@@ -303,6 +297,8 @@ export function findNextDispatchableUserTurn(
     // Recovery already surfaced a delivery failure for this exact activation.
     // A history payload that arrives after the bounded wait must not resurrect
     // the failed turn when an unrelated signal opens the room later.
+    // `settledActivationUserMsgId` needs no twin exclusion here: a settled turn
+    // is terminal in history by construction, so no path below can return it.
     if (entry.id === meta.lastMissingHistoryUserMsgId) {
       continue;
     }

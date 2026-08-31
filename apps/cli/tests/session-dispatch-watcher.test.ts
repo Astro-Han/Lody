@@ -4,13 +4,11 @@ import type { Logger } from '../src/utils/logger';
 import { SessionDispatchWatcher } from '../src/session/session-dispatch-watcher';
 import type { SessionExecutionService } from '../src/session/session-execution-service';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
-import {
-  findNextDispatchableUserTurn,
-  getPendingUserTurnActivationId,
-  hasPendingUserTurnActivation,
-} from '../src/session/session-dispatch-logic';
+import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
 import {
   buildMissingEmail,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
   type MessageContent,
   type SessionHistoryInput,
   type SessionId,
@@ -3266,121 +3264,43 @@ describe('SessionDispatchWatcher', () => {
     }
   });
 
-  it('settles a stale activation pointer instead of accusing a turn that already ran', async () => {
-    const sessionId = 'session-stale-pointer' as SessionId;
-    // The shape a drained message queue used to leave behind: the pointer still
-    // names the first direct send while `lastHandledUserMsgId` has advanced to a
-    // later turn, so the pair never becomes equal on its own.
-    let storedMeta: SessionMeta = {
-      id: sessionId,
-      machineId: 'machine-1',
-      userId: 'user-1',
-      createdAt: new Date().toISOString(),
-      cliType: 'builtin',
-      agentType: 'codex',
-      status: { type: 'idle' },
-      latestUserMsgId: 'turn-a',
-      lastHandledUserMsgId: 'turn-b',
+  /**
+   * The settle tests all need the same shape: an owned idle session whose meta
+   * and history are supplied, with every doc method the wait path would reach so
+   * that entering the wait is observable rather than a five-minute hang.
+   */
+  const createSettleHarness = (
+    sessionId: SessionId,
+    initialMeta: Omit<SessionMeta, 'id' | 'machineId' | 'userId' | 'createdAt' | 'cliType' | 'agentType' | 'status'>,
+    history: SessionHistoryInput[],
+    /** Overrides the repo read only, so a test can land a send mid-settle. */
+    repoMetaOverride?: Partial<SessionMeta>
+  ) => {
+    const state = {
+      meta: {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: new Date().toISOString(),
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        ...initialMeta,
+      } satisfies SessionMeta as SessionMeta,
     };
-    const history: SessionHistoryInput[] = [
-      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
-      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
-    ];
-
-    const sessionDoc = {
-      roomId: `session-${sessionId}`,
-      mirror: { subscribe: vi.fn(() => vi.fn()) },
-      getMetaState: vi.fn(async () => storedMeta),
-      getHistory: vi.fn(async () => history),
-      setStatus: vi.fn(async () => {}),
-      // Reaching any of these would mean the five-minute wait was entered.
-      waitUntilSynced: vi.fn(async () => true),
-      ensureDocRoomJoined: vi.fn(async () => {}),
-      getDocRoomStatus: vi.fn(() => 'joined'),
-      onDocRoomStatusChange: vi.fn(() => vi.fn()),
-      rejoinDocRoom: vi.fn(async () => {}),
-    };
-
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
-      storedMeta = { ...storedMeta, ...patch };
+      state.meta = { ...state.meta, ...patch };
     });
     const recordChatFailure = vi.fn(async () => {});
-    const watcher = createWatcher({
-      logger: createSilentLogger(),
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      workspaceDocument: {
-        repo: {
-          getDocMeta: vi.fn(async () => ({ meta: storedMeta })),
-          upsertDocMeta,
-        },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        cleanSessionDoc: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-      executionService: {
-        getExecutionSnapshot: vi.fn(() => ({
-          hasActiveTurn: false,
-          hasBlockingPendingCreate: false,
-          hasReusableSession: false,
-        })),
-        continueSession: vi.fn(async () => {}),
-        startSession: vi.fn(async () => {}),
-        cancelSession: vi.fn(async () => ({ success: true })),
-      } as unknown as SessionExecutionService,
-      canUseMachine: createAllowMachineAccess(),
-      recordChatFailure,
-    } as unknown as WatcherDeps);
-
-    await runMaybeHandleSession(watcher, sessionId);
-
-    // History already answered for `turn-a`, so no waiting and no accusation.
-    expect(sessionDoc.waitUntilSynced).not.toHaveBeenCalled();
-    expect(recordChatFailure).not.toHaveBeenCalled();
-    // And the activation is retired, so the session can stop being watched
-    // instead of re-checking this same stale pair forever.
-    expect(hasPendingUserTurnActivation(storedMeta)).toBe(false);
-    // Retirement is recorded in its own slot; the producer-owned pointer is
-    // never rewritten, so there is no window in which a concurrent send is
-    // overwritten and left unwatched.
-    expect(storedMeta.settledActivationUserMsgId).toBe('turn-a');
-    expect(storedMeta.latestUserMsgId).toBe('turn-a');
-    for (const [, patch] of upsertDocMeta.mock.calls) {
-      expect(patch).not.toHaveProperty('latestUserMsgId');
-    }
-  });
-
-  it('settles a stale pointer without unprotecting an already-acknowledged turn', async () => {
-    const sessionId = 'session-stale-with-marker' as SessionId;
-    // `lastMissingHistoryUserMsgId` is a SINGLE slot. Turn X was acknowledged as
-    // undelivered and its payload has since arrived as `pending`; only the
-    // marker keeps it out of dispatch. Settling the unrelated stale pointer A
-    // must not evict X from that slot.
-    let storedMeta: SessionMeta = {
-      id: sessionId,
-      machineId: 'machine-1',
-      userId: 'user-1',
-      createdAt: new Date().toISOString(),
-      cliType: 'builtin',
-      agentType: 'codex',
-      status: { type: 'idle' },
-      latestUserMsgId: 'turn-a',
-      lastHandledUserMsgId: 'turn-b',
-      lastMissingHistoryUserMsgId: 'turn-x',
-    };
-    const history: SessionHistoryInput[] = [
-      createPendingUserTurn('turn-x', 'never delivered'),
-      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
-      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
-    ];
-
     const startSession = vi.fn(async () => {});
     const continueSession = vi.fn(async () => {});
     const sessionDoc = {
       roomId: `session-${sessionId}`,
       mirror: { subscribe: vi.fn(() => vi.fn()) },
-      getMetaState: vi.fn(async () => storedMeta),
+      getMetaState: vi.fn(async () => state.meta),
       getHistory: vi.fn(async () => history),
       setStatus: vi.fn(async () => {}),
+      // Reaching any of these means the bounded history wait was entered.
       waitUntilSynced: vi.fn(async () => true),
       ensureDocRoomJoined: vi.fn(async () => {}),
       getDocRoomStatus: vi.fn(() => 'joined'),
@@ -3393,10 +3313,8 @@ describe('SessionDispatchWatcher', () => {
       workspaceId: 'workspace-1' as WorkspaceId,
       workspaceDocument: {
         repo: {
-          getDocMeta: vi.fn(async () => ({ meta: storedMeta })),
-          upsertDocMeta: vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
-            storedMeta = { ...storedMeta, ...patch };
-          }),
+          getDocMeta: vi.fn(async () => ({ meta: { ...state.meta, ...repoMetaOverride } })),
+          upsertDocMeta,
         },
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
         cleanSessionDoc: vi.fn(async () => {}),
@@ -3412,20 +3330,86 @@ describe('SessionDispatchWatcher', () => {
         cancelSession: vi.fn(async () => ({ success: true })),
       } as unknown as SessionExecutionService,
       canUseMachine: createAllowMachineAccess(),
-    });
+      recordChatFailure,
+    } as unknown as WatcherDeps);
 
-    await runMaybeHandleSession(watcher, sessionId);
+    return {
+      watcher,
+      sessionDoc,
+      upsertDocMeta,
+      recordChatFailure,
+      startSession,
+      continueSession,
+      meta: () => state.meta,
+      /** Settlement must never rewrite the producer-owned pointer. */
+      expectPointerNeverRewritten: () => {
+        for (const [, patch] of upsertDocMeta.mock.calls) {
+          expect(patch).not.toHaveProperty('latestUserMsgId');
+        }
+      },
+    };
+  };
+
+  it('settles a stale activation pointer instead of accusing a turn that already ran', async () => {
+    const sessionId = 'session-stale-pointer' as SessionId;
+    // The shape a drained message queue used to leave behind: the pointer still
+    // names the first direct send while `lastHandledUserMsgId` has advanced to a
+    // later turn, so the pair never becomes equal on its own.
+    const h = createSettleHarness(
+      sessionId,
+      { latestUserMsgId: 'turn-a', lastHandledUserMsgId: 'turn-b' },
+      [
+        { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
+        { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
+      ]
+    );
+
+    await runMaybeHandleSession(h.watcher, sessionId);
+
+    // History already answered for `turn-a`, so no waiting and no accusation.
+    expect(h.sessionDoc.waitUntilSynced).not.toHaveBeenCalled();
+    expect(h.recordChatFailure).not.toHaveBeenCalled();
+    // The activation is retired, so the session can stop being watched instead
+    // of re-checking this same stale pair forever.
+    expect(hasPendingUserTurnActivation(h.meta())).toBe(false);
+    expect(h.meta().settledActivationUserMsgId).toBe('turn-a');
+    expect(h.meta().latestUserMsgId).toBe('turn-a');
+    h.expectPointerNeverRewritten();
+  });
+
+  it('settles a stale pointer without unprotecting an already-acknowledged turn', async () => {
+    const sessionId = 'session-stale-with-marker' as SessionId;
+    // `lastMissingHistoryUserMsgId` is a SINGLE slot. Turn X was acknowledged as
+    // undelivered and its payload has since arrived as `pending`; only the
+    // marker keeps it out of dispatch. Settling the unrelated stale pointer A
+    // must not evict X from that slot.
+    const history = [
+      createPendingUserTurn('turn-x', 'never delivered'),
+      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled' as const, read: true },
+      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled' as const, read: true },
+    ];
+    const h = createSettleHarness(
+      sessionId,
+      {
+        latestUserMsgId: 'turn-a',
+        lastHandledUserMsgId: 'turn-b',
+        lastMissingHistoryUserMsgId: 'turn-x',
+      },
+      history
+    );
+
+    await runMaybeHandleSession(h.watcher, sessionId);
 
     // X keeps the slot, so it stays undispatchable...
-    expect(storedMeta.lastMissingHistoryUserMsgId).toBe('turn-x');
-    expect(findNextDispatchableUserTurn(history, storedMeta)).toBeNull();
+    expect(h.meta().lastMissingHistoryUserMsgId).toBe('turn-x');
+    expect(findNextDispatchableUserTurn(history, h.meta())).toBeNull();
     // ...and the stale pointer still settled.
-    expect(hasPendingUserTurnActivation(storedMeta)).toBe(false);
+    expect(hasPendingUserTurnActivation(h.meta())).toBe(false);
 
     // A second pass must not resurrect X either.
-    await runMaybeHandleSession(watcher, sessionId);
-    expect(startSession).not.toHaveBeenCalled();
-    expect(continueSession).not.toHaveBeenCalled();
+    await runMaybeHandleSession(h.watcher, sessionId);
+    expect(h.startSession).not.toHaveBeenCalled();
+    expect(h.continueSession).not.toHaveBeenCalled();
   });
 
   it('does not accuse a newer activation when only part of the pointer state settles', async () => {
@@ -3434,76 +3418,27 @@ describe('SessionDispatchWatcher', () => {
     // terminal status, and turn-c has since been published but has not synced.
     // Retiring turn-a must not report the session settled: turn-c is a real
     // activation and still needs its history-sync window.
-    let storedMeta: SessionMeta = {
-      id: sessionId,
-      machineId: 'machine-1',
-      userId: 'user-1',
-      createdAt: new Date().toISOString(),
-      cliType: 'builtin',
-      agentType: 'codex',
-      status: { type: 'idle' },
-      processingUserMsgId: 'turn-a',
-      latestUserMsgId: 'turn-c',
-      lastHandledUserMsgId: 'turn-a',
-    };
-    const history: SessionHistoryInput[] = [
-      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
-    ];
+    const h = createSettleHarness(
+      sessionId,
+      {
+        processingUserMsgId: 'turn-a',
+        latestUserMsgId: 'turn-c',
+        lastHandledUserMsgId: 'turn-a',
+      },
+      [{ ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true }]
+    );
 
-    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
-      storedMeta = { ...storedMeta, ...patch };
-    });
-    const recordChatFailure = vi.fn(async () => {});
-    const sessionDoc = {
-      roomId: `session-${sessionId}`,
-      mirror: { subscribe: vi.fn(() => vi.fn()) },
-      getMetaState: vi.fn(async () => storedMeta),
-      getHistory: vi.fn(async () => history),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => true),
-      ensureDocRoomJoined: vi.fn(async () => {}),
-      getDocRoomStatus: vi.fn(() => 'joined'),
-      onDocRoomStatusChange: vi.fn(() => vi.fn()),
-      rejoinDocRoom: vi.fn(async () => {}),
-    };
-    const watcher = createWatcher({
-      logger: createSilentLogger(),
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      workspaceDocument: {
-        repo: { getDocMeta: vi.fn(async () => ({ meta: storedMeta })), upsertDocMeta },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        cleanSessionDoc: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-      executionService: {
-        getExecutionSnapshot: vi.fn(() => ({
-          hasActiveTurn: false,
-          hasBlockingPendingCreate: false,
-          hasReusableSession: false,
-        })),
-        continueSession: vi.fn(async () => {}),
-        startSession: vi.fn(async () => {}),
-        cancelSession: vi.fn(async () => ({ success: true })),
-      } as unknown as SessionExecutionService,
-      canUseMachine: createAllowMachineAccess(),
-      recordChatFailure,
-    } as unknown as WatcherDeps);
-
-    void runMaybeHandleSession(watcher, sessionId);
+    void runMaybeHandleSession(h.watcher, sessionId);
     await vi.waitFor(() => {
-      expect(sessionDoc.ensureDocRoomJoined).toHaveBeenCalled();
+      expect(h.sessionDoc.ensureDocRoomJoined).toHaveBeenCalled();
     });
 
     // turn-a is retired, turn-c keeps its activation and its grace window.
-    expect(storedMeta.processingUserMsgId).toBeUndefined();
-    expect(recordChatFailure).not.toHaveBeenCalled();
-    expect(getPendingUserTurnActivationId(storedMeta)).toBe('turn-c');
-    // The producer-owned pointer is never rewritten, so a concurrent send
-    // cannot be clobbered by settlement.
-    for (const [, patch] of upsertDocMeta.mock.calls) {
-      expect(patch).not.toHaveProperty('latestUserMsgId');
-    }
-    watcher.stop?.();
+    expect(h.meta().processingUserMsgId).toBeUndefined();
+    expect(h.recordChatFailure).not.toHaveBeenCalled();
+    expect(getPendingUserTurnActivationId(h.meta())).toBe('turn-c');
+    h.expectPointerNeverRewritten();
+    h.watcher.stop();
   });
 
   it('does not accuse a turn published while the stale pointer was being settled', async () => {
@@ -3511,70 +3446,24 @@ describe('SessionDispatchWatcher', () => {
     // The outer read sees the stale pair; by the time settling re-reads meta a
     // producer has published turn-c, whose entry has not synced yet. Settling
     // must stand down rather than hand turn-c to missing-history recovery.
-    const staleMeta: SessionMeta = {
-      id: sessionId,
-      machineId: 'machine-1',
-      userId: 'user-1',
-      createdAt: new Date().toISOString(),
-      cliType: 'builtin',
-      agentType: 'codex',
-      status: { type: 'idle' },
-      latestUserMsgId: 'turn-a',
-      lastHandledUserMsgId: 'turn-b',
-    };
-    const freshMeta: SessionMeta = { ...staleMeta, latestUserMsgId: 'turn-c' };
-    const history: SessionHistoryInput[] = [
-      { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
-      { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
-    ];
+    const h = createSettleHarness(
+      sessionId,
+      { latestUserMsgId: 'turn-a', lastHandledUserMsgId: 'turn-b' },
+      [
+        { ...createPendingUserTurn('turn-a', 'first'), status: 'handled', read: true },
+        { ...createPendingUserTurn('turn-b', 'second'), status: 'handled', read: true },
+      ],
+      { latestUserMsgId: 'turn-c' }
+    );
 
-    const upsertDocMeta = vi.fn(async () => {});
-    const recordChatFailure = vi.fn(async () => {});
-    const sessionDoc = {
-      roomId: `session-${sessionId}`,
-      mirror: { subscribe: vi.fn(() => vi.fn()) },
-      getMetaState: vi.fn(async () => staleMeta),
-      getHistory: vi.fn(async () => history),
-      setStatus: vi.fn(async () => {}),
-      waitUntilSynced: vi.fn(async () => true),
-      ensureDocRoomJoined: vi.fn(async () => {}),
-      getDocRoomStatus: vi.fn(() => 'joined'),
-      onDocRoomStatusChange: vi.fn(() => vi.fn()),
-      rejoinDocRoom: vi.fn(async () => {}),
-    };
-    const watcher = createWatcher({
-      logger: createSilentLogger(),
-      machineId: 'machine-1',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      workspaceDocument: {
-        repo: { getDocMeta: vi.fn(async () => ({ meta: freshMeta })), upsertDocMeta },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        cleanSessionDoc: vi.fn(async () => {}),
-      } as unknown as LoroDocumentManager,
-      executionService: {
-        getExecutionSnapshot: vi.fn(() => ({
-          hasActiveTurn: false,
-          hasBlockingPendingCreate: false,
-          hasReusableSession: false,
-        })),
-        continueSession: vi.fn(async () => {}),
-        startSession: vi.fn(async () => {}),
-        cancelSession: vi.fn(async () => ({ success: true })),
-      } as unknown as SessionExecutionService,
-      canUseMachine: createAllowMachineAccess(),
-      recordChatFailure,
-    } as unknown as WatcherDeps);
-
-    // The wait runs its full window for turn-c, so bound this on the wait being
-    // entered rather than on the whole call returning.
-    void runMaybeHandleSession(watcher, sessionId);
+    void runMaybeHandleSession(h.watcher, sessionId);
     await vi.waitFor(() => {
-      expect(sessionDoc.ensureDocRoomJoined).toHaveBeenCalled();
+      expect(h.sessionDoc.ensureDocRoomJoined).toHaveBeenCalled();
     });
 
     // turn-c gets the grace window, and nothing was written against it.
-    expect(recordChatFailure).not.toHaveBeenCalled();
-    expect(upsertDocMeta).not.toHaveBeenCalled();
-    watcher.stop?.();
+    expect(h.recordChatFailure).not.toHaveBeenCalled();
+    expect(h.upsertDocMeta).not.toHaveBeenCalled();
+    h.watcher.stop();
   });
 });

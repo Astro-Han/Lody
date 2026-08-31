@@ -1490,18 +1490,13 @@ const readSessionExecutionSnapshot = async (
   ]);
   const activeTurnId = resolveActiveAssistantTurnId(history);
   const queuedTurnCount =
-    docState?.mq?.length ?? (hasPendingDispatchPointer(session) && !activeTurnId ? 1 : 0);
+    docState?.mq?.length ?? (hasPendingUserTurnActivation(session) && !activeTurnId ? 1 : 0);
   return resolveSessionExecutionSnapshot({
     live,
     ...(activeTurnId ? { activeTurnId } : {}),
     queuedTurnCount,
   });
 };
-
-// Same predicate the dispatch watcher uses, so MCP never reports a turn as
-// queued after its activation was retired.
-const hasPendingDispatchPointer = (session: SessionMeta): boolean =>
-  hasPendingUserTurnActivation(session);
 
 /**
  * Resolve whether a session is "currently working" by fusing, in precedence order:
@@ -1540,7 +1535,7 @@ const resolveSessionLiveWorking = (
       ...viewedField,
     };
   }
-  if (hasPendingDispatchPointer(session)) {
+  if (hasPendingUserTurnActivation(session)) {
     const dispatchedAtMs = session.lastMessageAt ?? Date.parse(session.createdAt);
     if (Number.isFinite(dispatchedAtMs) && opts.nowMs - dispatchedAtMs < MCP_PRE_START_WINDOW_MS) {
       return { working: true, status: 'initializing', source: 'pointer', ...viewedField };

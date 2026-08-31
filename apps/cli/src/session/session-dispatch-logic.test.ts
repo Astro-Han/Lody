@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   SessionStatusFactory,
+  getPendingUserTurnActivationId,
+  hasPendingUserTurnActivation,
   type MachineId,
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
 import {
   findNextDispatchableUserTurn,
-  getPendingUserTurnActivationId,
-  hasPendingUserTurnActivation,
   resolveSessionDispatchAction,
   shouldWatchSession,
 } from './session-dispatch-logic';
