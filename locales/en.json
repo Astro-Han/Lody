@@ -491,7 +491,7 @@
   "codexMessage.plan.status.pending": "Pending",
   "codexReset.chanceLabel": "chance of a reset",
   "codexReset.chanceUnknown": "Reset watch in effect",
-  "codexReset.disclaimer": "Third-party forecast from codex-resets.com. For reference only.",
+  "codexReset.disclaimer": "Third-party forecast from <source>codex-resets.com</source>. For reference only.",
   "codexReset.entry": "Reset forecast",
   "codexReset.entryWithChance": "Reset forecast {{percent}}%",
   "codexReset.expired": "The last forecast has expired.",

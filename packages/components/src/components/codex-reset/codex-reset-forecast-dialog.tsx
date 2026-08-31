@@ -1,5 +1,5 @@
-import { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useCallback, type ReactNode } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
 import { enUS, zhCN } from 'date-fns/locale';
 import { ExternalLink, Loader2, TimerReset } from 'lucide-react';
@@ -22,6 +22,7 @@ import type { CodexResetForecastState } from '@/lib/codex-reset-forecast-store';
  * dark theme, so a tint of the foreground plus a hairline is what actually reads.
  */
 const SUBTLE_FIELD = 'rounded-md border border-border/60 bg-foreground/[0.03]';
+const CODEX_RESETS_ATTRIBUTION_URL = 'https://codex-resets.com/?utm_source=lody';
 
 export type CodexResetForecastDialogProps = {
   open: boolean;
@@ -110,10 +111,18 @@ export function CodexResetForecastDialog({
         </div>
 
         <DialogDescription className="-mt-1 border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
-          {t(
-            'codexReset.disclaimer',
-            'Third-party forecast from codex-resets.com. For reference only.'
-          )}
+          <Trans
+            i18nKey="codexReset.disclaimer"
+            defaults="Third-party forecast from <source>codex-resets.com</source>. For reference only."
+            components={{
+              source: (
+                <ExternalTextLink
+                  url={CODEX_RESETS_ATTRIBUTION_URL}
+                  className="align-baseline underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground"
+                />
+              ),
+            }}
+          />
         </DialogDescription>
       </DialogContent>
     </Dialog>
@@ -280,12 +289,11 @@ function SourceBlock({ text, source }: { text: string; source: CodexResetSource 
       ) : null}
       {source ? (
         <figcaption>
-          <ExternalTextLink
-            url={source.url}
-            label={t('codexReset.viewSource', 'View the source post by @{{author}}', {
+          <ExternalTextLink url={source.url}>
+            {t('codexReset.viewSource', 'View the source post by @{{author}}', {
               author: source.author,
             })}
-          />
+          </ExternalTextLink>
         </figcaption>
       ) : null}
     </figure>
@@ -299,11 +307,11 @@ function SourceBlock({ text, source }: { text: string; source: CodexResetSource 
  */
 function ExternalTextLink({
   url,
-  label,
+  children,
   className,
 }: {
   url: string;
-  label: string;
+  children?: ReactNode;
   className?: string;
 }) {
   return (
@@ -317,11 +325,11 @@ function ExternalTextLink({
         void openExternalUrl(url);
       }}
       className={cn(
-        'inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:underline',
+        'inline-flex w-fit items-center gap-1 rounded-sm text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         className
       )}
     >
-      {label}
+      {children}
       <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
     </a>
   );
