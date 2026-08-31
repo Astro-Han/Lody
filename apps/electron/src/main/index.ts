@@ -2,6 +2,7 @@ import { app, BrowserWindow, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import dns from 'node:dns'
 import icon from '../../resources/icon.png?asset'
+import macIcon from '../../build/icon-mac.padded.png?asset'
 import { acquireSingleInstanceLock, registerOpenUrlHandler } from './deep-link'
 import { registerLodyProtocolClient } from './protocol-client'
 import { registerIpcServices } from './ipc/register-services'
@@ -153,6 +154,8 @@ if (hasSingleInstanceLock) {
 
 if (hasSingleInstanceLock) {
   void app.whenReady().then(() => {
+    if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
+
     logDeepLinkDebug('app.whenReady resolved', {
       isDefaultProtocolClient: app.isDefaultProtocolClient(LODY_PROTOCOL),
       protocol: LODY_PROTOCOL
