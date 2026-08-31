@@ -6,8 +6,7 @@ import { LoroAppSidebar } from './loro-app-sidebar';
 import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
 import { sidebarCollapsedAtom, sidebarLastWidthAtom, WORKSPACE_FOCUS_SCOPES } from '../atoms';
-import { cn } from '@/lib/utils';
-import { isSettingsRoute, NATIVE_KEYBOARD_OFFSET_CLASS } from './workspace-layout-utils';
+import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 
@@ -31,12 +30,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
 
   if (isSettingsRoute(pathname)) {
     return (
-      <div
-        className={cn(
-          'relative flex h-svh w-full overflow-hidden bg-background',
-          NATIVE_KEYBOARD_OFFSET_CLASS
-        )}
-      >
+      <div className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true })}>
         <WindowDragStrip />
         <div className="min-h-0 flex-1 overflow-hidden">
           <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
@@ -57,12 +51,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     (sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_SIDEBAR_WIDTH) + SIDEBAR_GUTTER;
 
   return (
-    <div
-      className={cn(
-        'flex h-svh w-full overflow-hidden bg-background',
-        NATIVE_KEYBOARD_OFFSET_CLASS
-      )}
-    >
+    <div className={getWebWorkspaceLayoutRootClassName()}>
       <AnimatePresence initial={false}>
         {!sidebarCollapsed && (
           <motion.div

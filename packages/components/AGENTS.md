@@ -61,6 +61,14 @@ mobile surfaces.
   the user picks an action. Copy re-encodes to PNG (the one format the system
   clipboard takes); save keeps the original encoding. Without the preload
   bridge the right-click must fall through to the browser's own menu.
+- The iPad native shell renders the DESKTOP layout (`detectAppDeviceClass()` is
+  `tablet`, viewport >= 768) with `viewport-fit=cover`, so `web-workspace-layout.tsx`
+  owns the top and side safe-area inset for every desktop surface
+  (`getWebWorkspaceLayoutRootClassName`). It stops at the sides: the bottom inset
+  belongs to the surface that sits against it — the composer shell already pads
+  itself by `env(safe-area-inset-bottom)` — and the mobile layout insets per
+  surface instead. `env()` is `0px` everywhere else, so this stays a no-op on
+  Electron, the browser, and in Split View / Stage Manager.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.
