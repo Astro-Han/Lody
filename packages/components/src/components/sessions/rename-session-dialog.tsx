@@ -96,7 +96,7 @@ export function RenameSessionDialogView({
   // only input that changes here — the heights written back never alter it —
   // so re-measuring on an unchanged width would be pure churn.
   useEffect(() => {
-    if (!titleField) return;
+    if (!titleField) return undefined;
     return observeResizeOnAnimationFrame(titleField, () => {
       if (titleField.clientWidth === measuredWidthRef.current) return;
       resizeTitle(titleField);
