@@ -55,7 +55,7 @@ import {
   type WorkspaceId,
   getSessionLaunchConfigLegacyFields,
   getSessionRoomId,
-  isManagedBuiltinAgentType,
+  supportsAuthenticationWhenRequired,
   type CommentReferencePayload,
   type VisualAnnotationReferencePayload,
   sanitizeGoalObjective,
@@ -2368,13 +2368,17 @@ const ChatFailedNoticeView = ({
         />
       ) : null}
       {meta?.reason === 'acp_auth_required' &&
-      sessionMeta?.cliType === 'builtin' &&
-      isManagedBuiltinAgentType(sessionMeta.agentType) ? (
+      sessionMeta &&
+      supportsAuthenticationWhenRequired({
+        cliType: sessionMeta.cliType,
+        agentType: sessionMeta.agentType,
+      }) ? (
         <AcpAuthenticationPanel
           machineId={sessionMeta.machineId}
           configId={sessionMeta.agentConfigId}
           cliType={sessionMeta.cliType}
           agentType={sessionMeta.agentType}
+          providerName={agentConfig?.name}
           customAcp={agentConfig?.customAcp ?? sessionLaunch?.customAcp}
           runtimeOverrides={agentConfig?.runtimeOverrides ?? sessionLaunch?.runtimeOverrides}
           env={agentConfig?.env ?? sessionLaunch?.env}
