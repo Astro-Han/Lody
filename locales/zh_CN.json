@@ -491,7 +491,7 @@
   "codexMessage.plan.status.pending": "待执行",
   "codexReset.chanceLabel": "概率发生重置",
   "codexReset.chanceUnknown": "重置观察中",
-  "codexReset.disclaimer": "第三方预测，来自 <source>codex-resets.com</source>，仅供参考。",
+  "codexReset.disclaimer": "第三方预测，来自 <website>codex-resets.com</website>，仅供参考。",
   "codexReset.entry": "重置预测",
   "codexReset.entryWithChance": "重置预测 {{percent}}%",
   "codexReset.expired": "上一次预测已过期。",

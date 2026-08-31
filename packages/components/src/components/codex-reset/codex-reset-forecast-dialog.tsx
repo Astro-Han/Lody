@@ -113,9 +113,9 @@ export function CodexResetForecastDialog({
         <DialogDescription className="-mt-1 border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
           <Trans
             i18nKey="codexReset.disclaimer"
-            defaults="Third-party forecast from <source>codex-resets.com</source>. For reference only."
+            defaults="Third-party forecast from <website>codex-resets.com</website>. For reference only."
             components={{
-              source: (
+              website: (
                 <ExternalTextLink
                   url={CODEX_RESETS_ATTRIBUTION_URL}
                   className="align-baseline underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground"
