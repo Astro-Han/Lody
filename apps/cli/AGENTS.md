@@ -61,6 +61,12 @@ Two things the dev build does deliberately, both load-bearing:
 - Preview targets are untrusted. Keep automatic candidates loopback-only and
   require explicit recent user approval before accepting a private literal IP;
   validate path-relative targets at the CLI boundary.
+- The local preview proxy must never forward an OBSERVED WebSocket close code into a
+  Close frame. RFC 6455 reserves 1005/1006 for local observation, so `ws` throws from a
+  TCP callback and kills the CLI with the active Agent session. Mirror the shape instead
+  (`mirrorWebSocketClose` in `preview/local-preview-proxy.ts`): `terminate()` for 1006,
+  code-less `close()` for 1005. Both directions, plus the local-socket `error` handler,
+  which must not pre-empt that mirror once the connection is open.
 - Embedded CLI packaging invariants (native deps, ABI, child runtime env) live in
   [apps/electron/AGENTS.md](../electron/AGENTS.md). Read them before changing runtime
   deps/bundle externals or spawning `process.execPath` with a filtered environment.
