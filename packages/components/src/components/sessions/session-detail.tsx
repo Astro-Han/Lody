@@ -232,7 +232,10 @@ import {
   getSessionDetailInitialTabState,
   resolveSessionEntryTabRestoration,
 } from '@/lib/session-detail-initial-state';
-import { useWorkspaceRouteTargetSlug } from '@/providers/workspace-route-target';
+/* Relative, not `@/providers/*`: the Electron web tsconfig maps only an
+   allowlist of `@/` subpaths and has no `@/providers/*` entry, so the alias
+   spelling type-checks here but breaks `@lody/electron`. */
+import { useWorkspaceRouteTargetSlug } from '../../providers/workspace-route-target';
 import {
   resolveSessionFileProviderOpenPath,
   type SessionFileProviderOpenPathResolution,
