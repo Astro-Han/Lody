@@ -14,6 +14,7 @@ import {
   getSessionIdFromRoomId,
   AgentConfigId,
   MachineId,
+  ManagedBuiltinAgentType,
   SessionHistoryInput,
   isCodeCollabFileIndexFlockDocId,
   isCodeCollabFileIndexSignalFlockDocId,
@@ -97,6 +98,7 @@ import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-bind
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   listMergedAgentConfigs,
+  readMachineBuiltinAgentOptOuts,
   readMergedAgentConfigById,
   upsertMachineAgentConfig,
 } from '@/lib/agent-config-machine-flock';
@@ -1328,6 +1330,11 @@ export class LoroDocumentManager {
       }
     }
     return false;
+  }
+
+  /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
+  async getBuiltinAgentOptOuts(machineId: MachineId): Promise<Set<ManagedBuiltinAgentType>> {
+    return await readMachineBuiltinAgentOptOuts(this.repo, this.workspaceId, machineId);
   }
 
   async getAgentConfigById(
