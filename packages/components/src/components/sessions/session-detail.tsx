@@ -87,7 +87,16 @@ import {
 } from '@/components/terminal/terminal-controller';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { useTabStatus, type TabStatus } from '@/hooks/use-tab-status';
 import {
@@ -189,6 +198,7 @@ import {
   isDraftSessionTabId,
   mergeTabOrderGroup,
   readPersistedDraftTabs,
+  readStoredLastActiveTabState,
   readStoredTabOrder,
   removeTabOrderId,
   replaceTabOrderId,
@@ -209,8 +219,10 @@ import {
 } from '@/lib/session-workspace-path';
 import {
   formatSessionTabSearch,
-  getSessionTabUrlSyncAction,
   parseSessionTabSearch,
+  resolveActiveSessionTab,
+  shouldClearSessionUrlTab,
+  type ParsedSessionTabSearch,
 } from '@/lib/session-tab-url';
 import {
   getSessionNavigationLocation,
@@ -753,9 +765,6 @@ const SessionDetail = ({
   const [mobileFileViewerTabId, setMobileFileViewerTabId] = useState<string | null>(null);
   const [mobileFileViewerOpen, setMobileFileViewerOpen] = useState(false);
   const mobileFilesBrowserRef = useRef<MobileProjectFileBrowserHandle>(null);
-  const [activeTabSessionIdRaw, setActiveTabSessionId] = useState<string>(
-    () => initialTabState.activeTabSessionId
-  );
   const [localStateSessionId, setLocalStateSessionId] = useState(sessionId);
   const [commentReferenceKeysBySession, setCommentReferenceKeysBySession] = useState<
     Record<string, string[]>
@@ -871,9 +880,6 @@ const SessionDetail = ({
     ? CODE_COLLAB_CHECKING_MESSAGE
     : activeSessionCodeCollabFiles.message;
   const parsedUrlTab = useMemo(() => parseSessionTabSearch(urlTab), [urlTab]);
-  const urlTabRef = useRef(urlTab);
-  const didHydrateUrlTabForSessionRef = useRef(false);
-  const skipNextMissingUrlSyncRef = useRef(false);
 
   // Multi-tab: load child sessions
   const childSessionsAtom = useMemo(() => childSessionsAtomFamily(sessionId), [sessionId]);
@@ -944,7 +950,6 @@ const SessionDetail = ({
     setMobileDiffState(null);
     setMobileFilesBrowserOpen(false);
     setFileProviderRequestedByInteraction(false);
-    setActiveTabSessionId(nextInitialTabState.activeTabSessionId);
   }
 
   const setDraftTabs = useCallback(
@@ -1064,19 +1069,19 @@ const SessionDetail = ({
     writePersistedDraftTabs(sessionId, draftTabs);
   }, [draftTabs, sessionId]);
 
-  useEffect(() => {
-    urlTabRef.current = urlTab;
-  }, [urlTab]);
-
-  // Validate active tab synchronously: if it doesn't match any existing tab,
-  // fall back to the parent session so we never render a blank content area.
-  const activeTabSessionId = useMemo(() => {
-    if (activeTabSessionIdRaw === sessionId) return sessionId; // parent is always valid
-    const stillExists =
-      visibleChildSessions.some((s) => s.id === activeTabSessionIdRaw) ||
-      draftTabs.some((draft) => draft.id === activeTabSessionIdRaw);
-    return stillExists ? activeTabSessionIdRaw : sessionId;
-  }, [activeTabSessionIdRaw, visibleChildSessions, draftTabs, sessionId]);
+  // The `?tab` search value is the single source of truth for the active
+  // conversation tab; tab activation navigates instead of setting state, so
+  // there is no second store to reconcile and no URL/state feedback loop
+  // (#193). `resolveActiveSessionTab` owns the derivation rule.
+  const activeTabSessionId = useMemo(
+    () =>
+      resolveActiveSessionTab(parsedUrlTab, {
+        parentSessionId: sessionId,
+        childSessionIds: visibleChildSessions.map((s) => s.id),
+        draftTabIds: draftTabs.map((draft) => draft.id),
+      }),
+    [parsedUrlTab, visibleChildSessions, draftTabs, sessionId]
+  );
   const activeSessionTabId = useMemo<SessionId | null>(() => {
     if (activeTabSessionId === sessionId) return sessionId;
     return visibleChildSessions.find((s) => s.id === activeTabSessionId)?.id ?? null;
@@ -1363,32 +1368,19 @@ const SessionDetail = ({
   // totaling provider entries that can resolve at different times.
   const changesDiffStat = activeSession?.diffStats?.allChange ?? null;
   const activeBrowserSession = activeDraftTab ? null : activeTabSession;
-  const requestedUrlTabSessionId = parsedUrlTab.kind === 'session' ? parsedUrlTab.sessionId : null;
-  const isWaitingForUrlTabResolution =
-    requestedUrlTabSessionId !== null &&
-    requestedUrlTabSessionId !== sessionId &&
-    activeTabSessionIdRaw === requestedUrlTabSessionId &&
-    activeTabSessionId !== requestedUrlTabSessionId &&
-    !docMetaCacheReady;
-  const shouldClearUrlTab = useMemo(() => {
-    if (parsedUrlTab.kind === 'missing') {
-      return false;
-    }
-
-    if (parsedUrlTab.kind === 'invalid') {
-      return true;
-    }
-
-    if (parsedUrlTab.sessionId === sessionId) {
-      return true;
-    }
-
-    if (!activeSession || !docMetaCacheReady) {
-      return false;
-    }
-
-    return !childSessions.some((childSession) => childSession.id === parsedUrlTab.sessionId);
-  }, [activeSession, childSessions, docMetaCacheReady, parsedUrlTab, sessionId]);
+  /* URL normalization only: `shouldClearSessionUrlTab` owns the rule for
+     removing a `?tab` that provably resolves to the parent. One-directional
+     and convergent — clearing yields `missing`, which is never cleared. */
+  const shouldClearUrlTab = useMemo(
+    () =>
+      shouldClearSessionUrlTab(parsedUrlTab, {
+        parentSessionId: sessionId,
+        childSessionIds: childSessions.map((childSession) => childSession.id),
+        draftTabIds: draftTabs.map((draft) => draft.id),
+        childSessionsResolved: Boolean(activeSession && docMetaCacheReady),
+      }),
+    [activeSession, childSessions, docMetaCacheReady, draftTabs, parsedUrlTab, sessionId]
+  );
   const workspaceOwnerSession = activeTabSession?.parentSessionId
     ? activeSession
     : activeTabSession;
@@ -1597,6 +1589,16 @@ const SessionDetail = ({
       });
     },
     [router, sessionId, workspaceSlug]
+  );
+
+  /* Activating a tab IS a navigation: the handlers below write the `?tab`
+     search value and the active tab derives back out of it. Parent tabs
+     encode as the absent value, drafts as their full `draft:<id>` tab id. */
+  const navigateToSessionTab = useCallback(
+    (tabId: string) => {
+      replaceSessionUrlTab(formatSessionTabSearch(tabId, sessionId));
+    },
+    [replaceSessionUrlTab, sessionId]
   );
 
   const replaceSessionUrlPr = useCallback(
@@ -1850,12 +1852,12 @@ const SessionDetail = ({
     if (isMobile) {
       setActiveViewerTabId(null);
     }
-    setActiveTabSessionId(draft.id);
+    navigateToSessionTab(draft.id);
     captureSessionDetailEvent('session/tab_draft_created', {
       draft_tab_id: draft.id,
       source_session_id: activeSession.id,
     });
-  }, [activeSession, captureSessionDetailEvent, isMobile, setDraftTabs]);
+  }, [activeSession, captureSessionDetailEvent, isMobile, navigateToSessionTab, setDraftTabs]);
 
   const handleDraftChange = useCallback(
     (draftId: DraftSessionTab['id'], patch: Partial<DraftSessionTab>) => {
@@ -1871,13 +1873,13 @@ const SessionDetail = ({
       setDraftTabs((prev) => prev.filter((draft) => draft.id !== draftId));
       setTabOrderState((prev) => removeTabOrderId(prev, draftId));
       if (activeTabSessionId === draftId) {
-        setActiveTabSessionId(sessionId);
+        replaceSessionUrlTab(undefined);
       }
       captureSessionDetailEvent('session/tab_draft_closed', {
         draft_tab_id: draftId,
       });
     },
-    [activeTabSessionId, captureSessionDetailEvent, sessionId, setDraftTabs]
+    [activeTabSessionId, captureSessionDetailEvent, replaceSessionUrlTab, setDraftTabs]
   );
 
   const handleSendDraft = useCallback(
@@ -2005,7 +2007,7 @@ const SessionDetail = ({
         if (isMobile) {
           setActiveViewerTabId(null);
         }
-        setActiveTabSessionId(childSessionId);
+        navigateToSessionTab(childSessionId);
         void requestSessionDispatch(childSessionId, historyEntry.id, {
           inputConfig: payload.inputConfig,
           machineId: activeSession.machineId,
@@ -2102,6 +2104,7 @@ const SessionDetail = ({
       deleteSessions,
       hidesBillingUi,
       isMobile,
+      navigateToSessionTab,
       openSettings,
       requestSessionDispatch,
       setDraftTabs,
@@ -2147,7 +2150,7 @@ const SessionDetail = ({
         // Switch to the parent tab only once the close is durable; a failed
         // close keeps the tab selected instead of yanking the user off it.
         if (tabSessionId === activeTabSessionId) {
-          setActiveTabSessionId(sessionId);
+          replaceSessionUrlTab(undefined);
         }
       } catch (error) {
         // A silent failure reads as "the close button does nothing" — surface
@@ -2168,7 +2171,7 @@ const SessionDetail = ({
       childSessions,
       closeDraftTab,
       deleteSessions,
-      sessionId,
+      replaceSessionUrlTab,
       t,
     ]
   );
@@ -2552,10 +2555,6 @@ const SessionDetail = ({
   ]);
 
   useEffect(() => {
-    didHydrateUrlTabForSessionRef.current = false;
-  }, [sessionId]);
-
-  useEffect(() => {
     const parentSessionId = activeSession?.parentSessionId;
     if (!parentSessionId || parentSessionId === sessionId) {
       return;
@@ -2563,38 +2562,45 @@ const SessionDetail = ({
     redirectToParentSessionUrl(parentSessionId, sessionId);
   }, [activeSession?.parentSessionId, redirectToParentSessionUrl, sessionId]);
 
-  useEffect(() => {
-    if (!didHydrateUrlTabForSessionRef.current) {
-      didHydrateUrlTabForSessionRef.current = true;
-      if (parsedUrlTab.kind === 'missing') {
-        return;
-      }
-    }
-
-    const ignoreMissingUrlSync =
-      parsedUrlTab.kind === 'missing' && skipNextMissingUrlSyncRef.current;
-    if (ignoreMissingUrlSync) {
-      skipNextMissingUrlSyncRef.current = false;
-    }
-
-    const urlSyncAction = getSessionTabUrlSyncAction(parsedUrlTab, {
-      ignoreMissing: ignoreMissingUrlSync,
-    });
-    if (urlSyncAction.kind === 'noop') {
+  /* Entry-scoped restoration: arriving on a session with no explicit `?tab`
+     restores the last active tab as ONE replace navigation. This is the only
+     `?tab` write not caused by a user action; claiming the session id on the
+     first run keeps it one-shot per entry, so a later user navigation back to
+     the parent (a `missing` value on the same session) is respected rather
+     than re-restored. Layout effect so the write lands before paint instead
+     of flashing the parent tab for a frame. */
+  const restoredEntryTabSessionIdRef = useRef<SessionId | null>(null);
+  useLayoutEffect(() => {
+    if (restoredEntryTabSessionIdRef.current === sessionId) {
       return;
     }
+    restoredEntryTabSessionIdRef.current = sessionId;
+    if (parsedUrlTab.kind !== 'missing') {
+      return;
+    }
+    const persistedTabId = readStoredLastActiveTabState(sessionId)?.sessionTabId;
+    if (!persistedTabId || persistedTabId === sessionId) {
+      return;
+    }
+    replaceSessionUrlTab(formatSessionTabSearch(persistedTabId, sessionId));
+  }, [parsedUrlTab.kind, replaceSessionUrlTab, sessionId]);
 
+  /* Mobile keeps one active surface: a `?tab` change dismisses the file
+     viewer, matching what explicit tab selection does. Ref-compared so the
+     session-entry run cannot clobber viewer state the entry just restored. */
+  const lastUrlTabSyncRef = useRef<{ sessionId: SessionId; parsed: ParsedSessionTabSearch }>({
+    sessionId,
+    parsed: parsedUrlTab,
+  });
+  useEffect(() => {
+    const last = lastUrlTabSyncRef.current;
+    lastUrlTabSyncRef.current = { sessionId, parsed: parsedUrlTab };
+    if (last.sessionId !== sessionId || last.parsed === parsedUrlTab) {
+      return;
+    }
     if (isMobile) {
       setActiveViewerTabId(null);
     }
-    if (urlSyncAction.kind === 'activate-session') {
-      setActiveTabSessionId((prev) =>
-        prev === urlSyncAction.sessionId ? prev : urlSyncAction.sessionId
-      );
-      return;
-    }
-
-    setActiveTabSessionId((prev) => (prev === sessionId ? prev : sessionId));
   }, [isMobile, parsedUrlTab, sessionId]);
 
   const resolveDiffFilePaths = useCallback(
@@ -2987,7 +2993,7 @@ const SessionDetail = ({
     (tabSessionId?: SessionId, navigateCandidate = false) => {
       const browserSessionId = tabSessionId ?? activeBrowserSession?.id;
       if (tabSessionId) {
-        setActiveTabSessionId(tabSessionId);
+        navigateToSessionTab(tabSessionId);
       }
       if (browserSessionId && navigateCandidate) {
         setBrowserCandidateNavigationRequest({
@@ -3011,6 +3017,7 @@ const SessionDetail = ({
       activateSidebarTab,
       captureSessionDetailEvent,
       isMobile,
+      navigateToSessionTab,
       replaceSessionUrlBrowser,
     ]
   );
@@ -3213,7 +3220,7 @@ const SessionDetail = ({
   const handleSessionTabSelect = useCallback(
     (tabId: string) => {
       desktopTabFocusRegionRef.current = 'conversation';
-      setActiveTabSessionId(tabId);
+      navigateToSessionTab(tabId);
       if (isMobile) {
         setActiveViewerTabId(null);
       }
@@ -3223,7 +3230,13 @@ const SessionDetail = ({
         tab_kind: isDraftSessionTabId(tabId) ? 'draft' : tabId === sessionId ? 'parent' : 'child',
       });
     },
-    [captureThrottledTabSelected, isMobile, sessionDetailAnalyticsProperties, sessionId]
+    [
+      captureThrottledTabSelected,
+      isMobile,
+      navigateToSessionTab,
+      sessionDetailAnalyticsProperties,
+      sessionId,
+    ]
   );
 
   const handleForkedConversationPrepared = useCallback(
@@ -3827,33 +3840,6 @@ const SessionDetail = ({
     }
     replaceSessionUrlTab(undefined);
   }, [replaceSessionUrlTab, shouldClearUrlTab]);
-
-  useEffect(() => {
-    if (parsedUrlTab.kind === 'invalid' || shouldClearUrlTab || isWaitingForUrlTabResolution) {
-      return;
-    }
-
-    const desiredUrlTab = activeDraftTab
-      ? undefined
-      : formatSessionTabSearch(activeTabSessionId, sessionId);
-    if (urlTab === desiredUrlTab) {
-      return;
-    }
-
-    if (activeDraftTab && desiredUrlTab === undefined) {
-      skipNextMissingUrlSyncRef.current = true;
-    }
-    replaceSessionUrlTab(desiredUrlTab);
-  }, [
-    activeDraftTab,
-    activeTabSessionId,
-    isWaitingForUrlTabResolution,
-    parsedUrlTab.kind,
-    replaceSessionUrlTab,
-    sessionId,
-    shouldClearUrlTab,
-    urlTab,
-  ]);
 
   useEffect(() => {
     writeStoredLastActiveTabState(sessionId, {

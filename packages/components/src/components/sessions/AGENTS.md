@@ -94,6 +94,20 @@ Session conversation page chain:
     must stay separate actions. Gated on `useWorkspaceMembers().isMultiMember`:
     a solo workspace has nobody to hand the session to, so no owner UI renders.
     Any member may transfer, mirroring task owner assignment.
+- **The `?tab` search value is the single source of truth for the active
+  conversation tab.** `session-detail.tsx` DERIVES the active tab from the
+  route search (`resolveActiveSessionTab` in `lib/session-tab-url.ts`; drafts
+  encode as their full `draft:<id>` id, children as `session:<id>`, the parent
+  as the absent value) and tab activation NAVIGATES (`replace: true`) instead
+  of setting state. Never reintroduce a mirrored `activeTabSessionId` state or
+  URL↔state sync effects: two stores reconciled by passive effects is exactly
+  the render-loop freeze of #193. A tab the URL names but the data cannot
+  resolve renders the parent and activates itself when its meta arrives; only
+  `shouldClearSessionUrlTab` may normalize the URL (one convergent replace,
+  never while child meta is still loading). The only non-user `?tab` write is
+  the entry-scoped last-active-tab restoration, one replace per session entry
+  in a layout effect, claimed by session id so it can never re-fire on the
+  same entry.
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
   mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff
@@ -483,6 +497,7 @@ Session conversation page chain:
   `<input type="file">` on every platform (Windows included — the renderer no
   longer crashes once locale `.pak`s ship; see `apps/electron/AGENTS.md`) and
   routes each selection by MIME into the image or file state machine.
+
 - `floating-permission-request.tsx`: floating permissions + ask-user-question;
   hidden-composer mobile keyboard lift/scroll lives there.
   `notification-permission-prompt.tsx` and the inner content of `session-pin.tsx`

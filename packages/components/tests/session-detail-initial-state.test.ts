@@ -62,6 +62,24 @@ describe('getSessionDetailInitialTabState', () => {
     });
   });
 
+  it('lets an explicit URL draft tab override persisted viewer state', () => {
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, 'draft:draft-uuid', {
+        readPersistedState: () => persistedProviderFileState,
+      })
+    ).toEqual({
+      activeTabSessionId: 'draft:draft-uuid',
+      viewerTabs: [],
+      activeViewerTabId: null,
+      sidePanel: {
+        open: false,
+        tab: null,
+        tabs: [],
+        sideSessionId: null,
+      },
+    });
+  });
+
   it('normalizes a URL tab pointing at the parent session and clears viewer state', () => {
     expect(
       getSessionDetailInitialTabState(parentSessionId, 'session:parent-session', {

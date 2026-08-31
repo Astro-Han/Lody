@@ -41,6 +41,15 @@ export const getSessionDetailInitialTabState = (
     };
   }
 
+  if (parsedUrlTab.kind === 'draft') {
+    return {
+      activeTabSessionId: parsedUrlTab.draftId,
+      viewerTabs: [],
+      activeViewerTabId: null,
+      sidePanel: DEFAULT_SIDE_PANEL_STATE,
+    };
+  }
+
   if (parsedUrlTab.kind === 'invalid') {
     return {
       activeTabSessionId: parentSessionId,
