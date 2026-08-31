@@ -26,6 +26,8 @@ const SUBTLE_FIELD = 'rounded-md border border-border/60 bg-foreground/[0.03]';
 export type CodexResetForecastDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Render above an already-open dialog, such as the desktop settings modal. */
+  nestedInDialog?: boolean;
   state: CodexResetForecastState;
   /** The still-valid forecast, already selected against `nowMs` by the caller. */
   watch: CodexResetWatch | null;
@@ -46,6 +48,7 @@ export type CodexResetForecastDialogProps = {
 export function CodexResetForecastDialog({
   open,
   onOpenChange,
+  nestedInDialog = false,
   state,
   watch,
   isExpired,
@@ -72,7 +75,10 @@ export function CodexResetForecastDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-4 sm:max-w-md">
+      <DialogContent
+        overlayClassName={nestedInDialog ? 'z-[var(--z-dialog)] bg-black/20' : undefined}
+        className="gap-4 sm:max-w-md"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <TimerReset className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
