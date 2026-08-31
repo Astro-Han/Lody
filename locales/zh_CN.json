@@ -1058,6 +1058,7 @@
   "onboarding.workspace.slugHint": "用于 URL，仅支持小写字母、数字与短横线。",
   "onboarding.workspace.slugMissing": "尚未设置标识 — 请在工作区设置中配置。",
   "onboarding.workspace.switchFailed": "切换工作区失败，请重试。",
+  "onboarding.workspace.timedOut": "请求超时。如果它在后台完成，你将自动继续。",
   "onboarding.workspace.title": "选择你的工作区",
   "organization.backToPreviousWorkspace": "返回上一个工作空间",
   "organization.createFailed": "创建工作空间失败",

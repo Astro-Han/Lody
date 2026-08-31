@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -122,6 +122,11 @@ export function WorkspaceScreenView({
     newNameError === null &&
     newSlugError === null &&
     newSlug.length > 0;
+  // A slug-less workspace can never advance (the confirm handler requires it),
+  // so the button must say so by being disabled rather than dying silently.
+  const selectedEntry = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
+  const canConfirmSelection =
+    !saving && selectedEntry !== undefined && selectedEntry.slug.length > 0;
   const previewWorkspaceName = creating
     ? newName.trim()
     : workspaces.find((workspace) => workspace.id === selectedWorkspaceId)?.name;
@@ -187,7 +192,7 @@ export function WorkspaceScreenView({
         ) : hasWorkspaces ? (
           <OnboardingNextButton
             onClick={onConfirmSelection}
-            disabled={selectedWorkspaceId === null || saving}
+            disabled={!canConfirmSelection}
             loading={saving}
           />
         ) : null
@@ -415,6 +420,14 @@ interface WorkspaceScreenProps {
 // workspace settings, where it can be undone.
 /** Bounds the slug availability wait; the server remains the final authority. */
 const SLUG_CHECK_STALE_MS = 8_000;
+/** Bounds create/setActive so a hung write cannot lock the whole screen. */
+const WORKSPACE_WRITE_STALE_MS = 15_000;
+
+function rejectAfter(ms: number, message: string): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
+  });
+}
 
 export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const { t } = useTranslation();
@@ -460,12 +473,18 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   }, [workspacesReadyEmpty]);
 
   // Default-select the active workspace once it loads, so the user can
-  // immediately confirm and proceed without an extra click.
+  // immediately confirm and proceed without an extra click. A slug-less
+  // workspace can never be confirmed, so pre-selecting it would just arm a
+  // dead Next button.
   useEffect(() => {
-    if (selectedWorkspaceId === null && activeWorkspaceId !== null) {
-      setSelectedWorkspaceId(activeWorkspaceId);
+    if (selectedWorkspaceId === null && activeWorkspace?.slug) {
+      setSelectedWorkspaceId(activeWorkspace.id);
     }
-  }, [activeWorkspaceId, selectedWorkspaceId]);
+  }, [activeWorkspace, selectedWorkspaceId]);
+
+  // Incremented per write attempt so a late-settling promise from a superseded
+  // attempt can never commit or navigate.
+  const writeAttemptRef = useRef(0);
 
   const [newName, setNewName] = useState('');
   // null = follow the auto-suggested slug derived from the name. A user edit
@@ -517,21 +536,40 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     }
     setSaving(true);
     commitWorkspaceContext(null);
+    const attempt = ++writeAttemptRef.current;
+    let settled = false;
+    const advance = () => {
+      if (settled || writeAttemptRef.current !== attempt) return;
+      settled = true;
+      commitWorkspaceContext(target);
+      onNext();
+    };
+    const switchWrite = platform.workspaces.setActive(selectedWorkspaceId);
     void (async () => {
       try {
-        await platform.workspaces.setActive(selectedWorkspaceId);
-        commitWorkspaceContext(target);
-        onNext();
+        await Promise.race([
+          switchWrite,
+          rejectAfter(
+            WORKSPACE_WRITE_STALE_MS,
+            t(
+              'onboarding.workspace.timedOut',
+              'The request timed out. If it completes in the background, you will continue automatically.'
+            )
+          ),
+        ]);
+        advance();
       } catch (error) {
         commitWorkspaceContext(activeWorkspace);
         toast.error(
           t('onboarding.workspace.switchFailed', 'Could not switch workspace. Try again.'),
           { description: error instanceof Error ? error.message : String(error) }
         );
-      } finally {
         setSaving(false);
       }
     })();
+    // A timed-out write may still land: a late success finishes the switch
+    // instead of leaving the UI unlocked against a promise that later wins.
+    void switchWrite.then(advance, () => undefined);
   }, [
     activeWorkspace,
     activeWorkspaceId,
@@ -549,28 +587,50 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     setSaving(true);
     setCreateError(null);
     commitWorkspaceContext(null);
+    const attempt = ++writeAttemptRef.current;
+    let settled = false;
+    const createWrite = (async () => {
+      if (!platform.workspaces.create) {
+        throw new Error('Workspace creation is unavailable on this platform');
+      }
+      const created = await platform.workspaces.create({ name: trimmedName, slug: newSlug });
+      await platform.workspaces.setActive(created.id);
+      return created;
+    })();
+    const advance = (created: { id: string; name: string; slug: string | null }) => {
+      if (settled || writeAttemptRef.current !== attempt) return;
+      settled = true;
+      commitWorkspaceContext({
+        id: created.id,
+        name: created.name,
+        slug: created.slug ?? newSlug,
+      });
+      onNext();
+    };
     void (async () => {
       try {
-        if (!platform.workspaces.create) {
-          throw new Error('Workspace creation is unavailable on this platform');
-        }
-        const created = await platform.workspaces.create({ name: trimmedName, slug: newSlug });
-        await platform.workspaces.setActive(created.id);
-        commitWorkspaceContext({
-          id: created.id,
-          name: created.name,
-          slug: created.slug ?? newSlug,
-        });
-        onNext();
+        const created = await Promise.race([
+          createWrite,
+          rejectAfter(
+            WORKSPACE_WRITE_STALE_MS,
+            t(
+              'onboarding.workspace.timedOut',
+              'The request timed out. If it completes in the background, you will continue automatically.'
+            )
+          ),
+        ]);
+        advance(created);
       } catch (error) {
         commitWorkspaceContext(activeWorkspace);
         // The error stays inline in the form: a toast disappears and leaves a
         // user with no workspaces without any visible way forward.
         setCreateError(error instanceof Error ? error.message : String(error));
-      } finally {
         setSaving(false);
       }
     })();
+    // A timed-out create may still land: a late success activates the new
+    // workspace and continues instead of stranding the unlocked form.
+    void createWrite.then(advance, () => undefined);
   }, [
     activeWorkspace,
     commitWorkspaceContext,
@@ -581,6 +641,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     newSlugError,
     onNext,
     platform.workspaces,
+    t,
   ]);
 
   return (

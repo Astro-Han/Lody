@@ -1058,6 +1058,7 @@
   "onboarding.workspace.slugHint": "Used in URLs. Lowercase letters, numbers, and dashes.",
   "onboarding.workspace.slugMissing": "No handle yet — open workspace settings to set one.",
   "onboarding.workspace.switchFailed": "Could not switch workspace. Try again.",
+  "onboarding.workspace.timedOut": "The request timed out. If it completes in the background, you will continue automatically.",
   "onboarding.workspace.title": "Choose your workspace",
   "organization.backToPreviousWorkspace": "Back to previous workspace",
   "organization.createFailed": "Failed to create workspace",

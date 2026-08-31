@@ -7,7 +7,7 @@ import {
   desktopOnboardingPhaseAtom,
   type DesktopOnboardingResumePhase,
 } from '@/atoms/onboarding';
-import { getAllProviderSetupsAtom } from '@/atoms/agents';
+import { getAllAgentConfigAtom, getAllProviderSetupsAtom } from '@/atoms/agents';
 import { getDesktopOnboardingSteps, OnboardingStepsProvider } from './onboarding-steps';
 import { OnboardingCeremony } from './ceremony/ceremony';
 import { useOnboardingAudio } from './ceremony/use-onboarding-audio';
@@ -90,20 +90,27 @@ export function OnboardingOverlay({
 
   // The summary must tell the truth about a pending setup: a failed task is
   // not "still progressing", and a deleted one is no longer pending at all.
+  // A successful setup is REPLACED by a published AgentConfig under the same
+  // id, so the config check must come first or success reads as "missing".
   const providerSetups = useAtomValue(getAllProviderSetupsAtom);
+  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const selectedSetupId =
     draft.provider?.kind === 'providerSetup' ? draft.provider.providerSetupId : null;
   const selectedSetup = providerSetups.find((setup) => setup.id === selectedSetupId);
+  const publishedSetupConfig = agentConfigs.find((config) => config.id === selectedSetupId);
   const summaryAgentState =
     draft.provider?.kind === 'agentConfig'
       ? ('ready' as const)
       : draft.provider?.kind === 'providerSetup'
-        ? selectedSetup === undefined
-          ? ('missing' as const)
-          : selectedSetup.status === 'failed'
-            ? ('failed' as const)
-            : ('preparing' as const)
+        ? publishedSetupConfig !== undefined
+          ? ('ready' as const)
+          : selectedSetup === undefined
+            ? ('missing' as const)
+            : selectedSetup.status === 'failed'
+              ? ('failed' as const)
+              : ('preparing' as const)
         : ('missing' as const);
+  const summaryAgentName = publishedSetupConfig?.name ?? draft.provider?.agentName;
 
   useEffect(() => {
     if (phase === 'ceremony') {
@@ -196,7 +203,7 @@ export function OnboardingOverlay({
       <SummaryScreen
         key="summary"
         agentState={summaryAgentState}
-        agentName={draft.provider?.agentName}
+        agentName={summaryAgentName}
         projectName={draft.project?.name}
         onBack={() => advanceTo(draft.project ? 'projects' : 'providers')}
         onComplete={() => {

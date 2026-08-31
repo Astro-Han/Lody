@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
@@ -47,6 +47,12 @@ export function getSelectedFirstTaskAgentConfig(
 /** Bounds the session-create wait so a hung write cannot freeze the screen. */
 const START_SESSION_STALE_MS = 20_000;
 
+function rejectAfter(ms: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Starting the session timed out')), ms);
+  });
+}
+
 export function FirstTaskScreen({
   agentConfigId,
   project,
@@ -90,6 +96,9 @@ export function FirstTaskScreen({
   const [prompt, setPrompt] = useState(seedPrompts[0] ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Incremented per start attempt (and on Agent change) so a late-settling
+  // write from a superseded attempt can never dispatch or complete.
+  const startAttemptRef = useRef(0);
   const canStartFirstTask =
     project.kind === 'local' &&
     config !== null &&
@@ -117,9 +126,44 @@ export function FirstTaskScreen({
     ) {
       return;
     }
+    const machineId = project.machineId;
     const trimmedPrompt = prompt.trim();
     setSubmitting(true);
     setError(null);
+    const attempt = ++startAttemptRef.current;
+    let settled = false;
+    // Shared by the raced path and the late-write continuation: exactly one of
+    // them finishes dispatch + completion, so a timed-out write can never
+    // become an orphaned Session without dispatch or navigation.
+    const finishWithSession = (result: Awaited<ReturnType<typeof startSession>>) => {
+      if (settled || startAttemptRef.current !== attempt) return;
+      settled = true;
+      // The Session and its first turn are already durable. Dispatch is only
+      // acceleration; normal recovery can pick up the pointer if this request
+      // fails, so it must not turn a successful first Session into a failure.
+      void requestSessionDispatch(result.sessionId, result.historyEntry.id, {
+        inputConfig: result.historyEntry.inputConfig,
+        machineId,
+      }).catch((dispatchError: unknown) => {
+        console.error('Failed to accelerate the first onboarding session', dispatchError);
+      });
+      void onSessionStarted({
+        sessionId: result.sessionId,
+        workspaceSlug: resolvedWorkspaceSlug,
+      }).then((completed) => {
+        if (!completed && startAttemptRef.current === attempt) {
+          // The Session is durable; only the completion step failed. Unlock the
+          // screen so Enter Lody can retry instead of stranding a finished run.
+          setError(
+            t(
+              'onboarding.firstTask.completionFailed',
+              'The session was created, but setup could not finish. Try entering Lody again.'
+            )
+          );
+          setSubmitting(false);
+        }
+      });
+    };
     void (async () => {
       try {
         const projectRef: ProjectRef = {
@@ -135,58 +179,28 @@ export function FirstTaskScreen({
           inputBlocks: undefined,
         });
         if (!entry) throw new Error('Could not build the first turn');
-        // A hung write must not lock every button forever. If the write lands
-        // after the timeout, the Session still exists and appears in the
-        // product; only the onboarding navigation is skipped.
-        const result = await Promise.race([
-          startSession(
-            {
-              sessionId: uuidv4() as SessionId,
-              userId: user.id,
-              cliType: config.cliType,
-              agentType: config.agentType,
-              customAcp: config.customAcp,
-              runtimeOverrides: config.runtimeOverrides,
-              machineId: project.machineId,
-              agentConfigId: config.id,
-              env: config.env,
-              project: projectRef,
-              title: trimmedPrompt.slice(0, 50),
-              titleSource: 'draft',
-            },
-            entry
-          ),
-          new Promise<never>((_resolve, reject) => {
-            setTimeout(
-              () => reject(new Error('Starting the session timed out')),
-              START_SESSION_STALE_MS
-            );
-          }),
-        ]);
-        // The Session and its first turn are already durable. Dispatch is only
-        // acceleration; normal recovery can pick up the pointer if this request
-        // fails, so it must not turn a successful first Session into a failure.
-        void requestSessionDispatch(result.sessionId, result.historyEntry.id, {
-          inputConfig: result.historyEntry.inputConfig,
-          machineId: project.machineId,
-        }).catch((dispatchError: unknown) => {
-          console.error('Failed to accelerate the first onboarding session', dispatchError);
-        });
-        const completed = await onSessionStarted({
-          sessionId: result.sessionId,
-          workspaceSlug: resolvedWorkspaceSlug,
-        });
-        if (!completed) {
-          // The Session is durable; only the completion step failed. Unlock the
-          // screen so Enter Lody can retry instead of stranding a finished run.
-          setError(
-            t(
-              'onboarding.firstTask.completionFailed',
-              'The session was created, but setup could not finish. Try entering Lody again.'
-            )
-          );
-          setSubmitting(false);
-        }
+        const started = startSession(
+          {
+            sessionId: uuidv4() as SessionId,
+            userId: user.id,
+            cliType: config.cliType,
+            agentType: config.agentType,
+            customAcp: config.customAcp,
+            runtimeOverrides: config.runtimeOverrides,
+            machineId,
+            agentConfigId: config.id,
+            env: config.env,
+            project: projectRef,
+            title: trimmedPrompt.slice(0, 50),
+            titleSource: 'draft',
+          },
+          entry
+        );
+        // A hung write must not lock every button forever. The continuation
+        // takes over if the write lands after the bound has unlocked the UI.
+        void started.then(finishWithSession, () => undefined);
+        const result = await Promise.race([started, rejectAfter(START_SESSION_STALE_MS)]);
+        finishWithSession(result);
       } catch (submitError) {
         console.error('Failed to start the first onboarding session', submitError);
         setError(
@@ -295,6 +309,8 @@ export function FirstTaskScreen({
             onValueChange={(value) => {
               const next = availableConfigs.find((candidate) => candidate.id === value);
               if (!next) return;
+              // Supersede any unlocked-but-still-pending start attempt.
+              startAttemptRef.current += 1;
               setError(null);
               onAgentConfigChange(next);
             }}
