@@ -55,7 +55,9 @@ import {
   type WorkspaceId,
   getSessionLaunchConfigLegacyFields,
   getSessionRoomId,
-  isManagedBuiltinAgentType,
+  machineSupportsAcpProtocolAuthentication,
+  supportsAuthenticationWhenRequired,
+  usesAcpProtocolAuthentication,
   type CommentReferencePayload,
   type VisualAnnotationReferencePayload,
   sanitizeGoalObjective,
@@ -2182,6 +2184,19 @@ const ChatFailedNoticeView = ({
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(sessionMeta?.agentConfigId));
   const sessionLaunch = getSessionLaunchConfigLegacyFields(sessionMeta);
+  const sessionMachineMeta = useAtomValue(getMachineMetaByIdAtomFamily(sessionMeta?.machineId));
+  // The ACP `authenticate` exchange runs entirely on the daemon, so a machine
+  // that predates it answers "Authentication is not supported": offering a
+  // sign-in button there would only ever fail. Builtin providers keep their
+  // long-standing login flow and need no negotiation.
+  const canAuthenticateSessionAgent =
+    !!sessionMeta &&
+    supportsAuthenticationWhenRequired({
+      cliType: sessionMeta.cliType,
+      agentType: sessionMeta.agentType,
+    }) &&
+    (!usesAcpProtocolAuthentication(sessionMeta.cliType) ||
+      machineSupportsAcpProtocolAuthentication(sessionMachineMeta));
   const [detailOpen, setDetailOpen] = useState(false);
 
   const meta = notice.meta as
@@ -2367,14 +2382,13 @@ const ChatFailedNoticeView = ({
           machineId={sessionMeta?.machineId}
         />
       ) : null}
-      {meta?.reason === 'acp_auth_required' &&
-      sessionMeta?.cliType === 'builtin' &&
-      isManagedBuiltinAgentType(sessionMeta.agentType) ? (
+      {meta?.reason === 'acp_auth_required' && sessionMeta && canAuthenticateSessionAgent ? (
         <AcpAuthenticationPanel
           machineId={sessionMeta.machineId}
           configId={sessionMeta.agentConfigId}
           cliType={sessionMeta.cliType}
           agentType={sessionMeta.agentType}
+          providerName={agentConfig?.name}
           customAcp={agentConfig?.customAcp ?? sessionLaunch?.customAcp}
           runtimeOverrides={agentConfig?.runtimeOverrides ?? sessionLaunch?.runtimeOverrides}
           env={agentConfig?.env ?? sessionLaunch?.env}
