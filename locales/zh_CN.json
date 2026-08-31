@@ -1226,7 +1226,7 @@
   "sessions.openedBy.viewSession": "查看对话",
   "sessions.sharing.visibility": "可见范围",
   "sessions.sharing.team": "团队可见",
-  "sessions.sharing.private": "仅自己可见",
+  "sessions.sharing.private": "私密对话",
   "sessions.sharing.checking": "正在确认可见范围…",
   "sessions.sharing.checkingShort": "确认中",
   "sessions.sharing.sharedWithTeam": "已与团队共享",
