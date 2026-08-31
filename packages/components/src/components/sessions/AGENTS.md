@@ -326,22 +326,30 @@ Session conversation page chain:
   should adopt it.
   `DesktopRunConfigMenu` gains a **Role** row when the caller passes
   `agentRoles`. It sits ABOVE Agent, since a Role answers every row under it at
-  once. BOTH composers pass it, but they mean different things by it and the
-  difference is load-bearing:
+  once. The callers split by whether a Session exists yet, and that difference
+  is load-bearing:
 
-  - **Chat landing** authorizes the WHOLE Role — machine, agent config, run
-    config, instruction — because it can still move the agent.
-  - **An existing session** (`useSessionAgentRole`) can NOT: its agent, machine,
-    and runtime are fixed. So it offers only Roles bound to an agent of the same
-    TYPE and applies only their RUN CONFIG, which is exactly what transfers:
-    model / reasoning / permission are published per `cliType:agentType`, and
-    they are the values a session can still change every turn. Availability is
-    not consulted there — nothing is going to that Role's machine — and the
-    Role's INSTRUCTION is not applied, because a prompt prefix belongs to the
-    first turn of a session the Role creates. The row is NOT gated on
-    `isEmptyConversation`: those values stay changeable for the whole
-    conversation. `isAgentRoleRunConfigApplied` is the shared value rule;
-    `isComposerAgentRoleApplied` is that rule plus the landing's agent check. With Roles to pick it is a submenu of
+  **Chat landing and a blank child-tab draft** authorize the WHOLE Role —
+  agent config, run config, instruction, and provenance — because no Session
+  exists yet and the Agent can still move. A child tab keeps the parent
+  Session's exact machine/workspace, so its Role list is every Role bound to
+  that machine, across Agent types; selecting one changes the draft Agent.
+  Never route a draft through `selectSessionAgentRoles`: that same-type subset
+  is only correct after a Session exists. The Role id persists with a non-empty
+  draft, its current revision re-seeds the composer after an edit, and its
+  instruction is frozen into the first Turn before draft promotion.
+
+  **An existing session** (`useSessionAgentRole`) can NOT: its agent, machine,
+  and runtime are fixed. So it offers only Roles bound to an agent of the same
+  TYPE and applies only their RUN CONFIG, which is exactly what transfers:
+  model / reasoning / permission are published per `cliType:agentType`, and
+  they are the values a session can still change every turn. Availability is
+  not consulted there — nothing is going to that Role's machine — and the
+  Role's INSTRUCTION is not applied, because a prompt prefix belongs to the
+  first turn of a session the Role creates. The row is NOT gated on
+  `isEmptyConversation`: those values stay changeable for the whole
+  conversation. `isAgentRoleRunConfigApplied` is the shared value rule;
+  `isComposerAgentRoleApplied` is that rule plus the landing's agent check. With Roles to pick it is a submenu of
   `None` + the Roles bound to the machine the chat will start on (a Role's
   `machineId + agentConfigId` are exact, so a Role from another machine could
   only move the chat or fall back) beside a pane stating what the highlighted
@@ -424,7 +432,7 @@ Session conversation page chain:
   too; hiding it made the control look absent. `None` still leads the list and
   an unavailable Role is still listed, disabled, with its reason (from the
   shared `AGENT_ROLE_UNAVAILABLE_REASON_KEYS`).
-  The Role editor is a Dialog, so BOTH composers host it outside their menu /
+  The Role editor is a Dialog, so every composer hosts it outside its menu /
   drawer — and the in-session one mounts it only while OPEN, because it reads
   machine visibility and the composer must stay renderable in hosts that do not
   provide that context. The collapsed
@@ -433,9 +441,10 @@ Session conversation page chain:
   the `@` mention pane shows a private/workspace badge: every Role offered is
   one this user may run, so visibility changes nothing about accepting it and is
   a Settings concern. The remembered Role rides in
-  `chatLandingDefaults.agentRoleId` and is restored only once the workspace
-  catalog can answer — before that, "not in the list" means "not loaded yet", so
-  the stored id must not be overwritten with null.
+  `chatLandingDefaults.agentRoleId` on Chat Landing and
+  `DraftSessionTab.agentRoleId` in a non-empty child-tab draft. It is restored
+  only once the workspace catalog can answer — before that, "not in the list"
+  means "not loaded yet", so the stored id must not be overwritten with null.
   `SessionMeta.agentRoleId`/`agentRoleRevision` record provenance only.
   A Role also appears in **Recently used**, because a Role IS one of those whole
   combinations: the record carries `agentRoleId`, that id is part of

@@ -14,7 +14,7 @@ import { useAtomValue } from 'jotai';
 import { ArrowUp, Loader2 } from 'lucide-react';
 import { Button } from '@/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
-import { useSessionAgentRole } from '@/hooks/use-session-agent-role';
+import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
 import { buildAgentRoleFormValueFromRunConfig } from '@/lib/agent-role-form';
 import { doesAgentRolePinPermissionMode } from '@/lib/composer-agent-roles';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
@@ -58,6 +58,7 @@ import {
 import { IMAGE_UPLOAD_REASONS, type ImageUploadReason } from '@lody/shared';
 import type {
   AcpCommandSummary,
+  AgentRole,
   CommentReferencePayload,
   SessionMeta,
   SessionId,
@@ -423,6 +424,13 @@ export interface SessionChatInputAreaProps {
   onRemoveQueueItem: (itemId: string) => Promise<void>;
   /** When provided and conversation is empty, the agent config badge becomes a selector. */
   onAgentConfigChange?: (selection: AgentSelection) => void;
+  /**
+   * New-Session surfaces may provide complete Role semantics. Existing
+   * Sessions omit this and keep the same-agent-type run-config-only behavior.
+   */
+  agentRoleControl?: SessionAgentRoleControl;
+  /** Receives durable Role editor saves owned by a new-Session surface. */
+  onAgentRoleSaved?: (role: AgentRole, meta: { created: boolean }) => void;
   initialInputText?: string;
   onInputValueChange?: (value: string) => void;
   disableImageUpload?: boolean;
@@ -488,6 +496,8 @@ export const SessionChatInputArea = memo(
       onStop,
       onRemoveQueueItem: _onRemoveQueueItem,
       onAgentConfigChange,
+      agentRoleControl,
+      onAgentRoleSaved,
       initialInputText,
       onInputValueChange,
       disableImageUpload = false,
@@ -2079,11 +2089,10 @@ export const SessionChatInputArea = memo(
       session.agentConfigId && session.machineId
         ? { agentId: session.agentConfigId, machineId: session.machineId }
         : null;
-    /* Role, in an EXISTING session. The agent is fixed here, so this offers
-       only Roles bound to an agent of the same TYPE and applies only their run
-       config — see `useSessionAgentRole`. The row is NOT gated on
-       `isEmptyConversation`: those values stay changeable every turn, so a Role
-       that packages them stays useful for the whole conversation. */
+    /* Existing Sessions use the same-agent-type, run-config-only Role control.
+       A not-yet-created child-tab draft supplies its own complete new-Session
+       control instead. The row is NOT gated on `isEmptyConversation`: these
+       values stay changeable every turn in an existing conversation too. */
     const [agentRoleEditor, setAgentRoleEditor] = useState<AgentRoleEditorState | null>(null);
     const { roles: accessibleAgentRoles } = useWorkspaceAgentRoles();
     const sessionAgentRole = useSessionAgentRole({
@@ -2100,11 +2109,12 @@ export const SessionChatInputArea = memo(
       configOptionValues,
       onConfigOptionChange,
     });
+    const effectiveAgentRoleControl = agentRoleControl ?? sessionAgentRole;
     const agentRolesProp = useMemo(
       () => ({
-        items: sessionAgentRole.items,
-        selectedRoleId: sessionAgentRole.selectedRoleId,
-        onSelect: sessionAgentRole.onSelect,
+        items: effectiveAgentRoleControl.items,
+        selectedRoleId: effectiveAgentRoleControl.selectedRoleId,
+        onSelect: effectiveAgentRoleControl.onSelect,
         onCreate: () =>
           setAgentRoleEditor(
             openAgentRoleEditorForCreate(
@@ -2125,13 +2135,13 @@ export const SessionChatInputArea = memo(
         selectedModeId,
         session.agentConfigId,
         session.machineId,
-        sessionAgentRole,
+        effectiveAgentRoleControl,
       ]
     );
-    const sessionAgentRolePinsPermissionMode = useMemo(() => {
-      if (!sessionAgentRole.selectedRoleId) return false;
-      const selectedRole = sessionAgentRole.items.find(
-        (item) => item.role.id === sessionAgentRole.selectedRoleId
+    const selectedAgentRolePinsPermissionMode = useMemo(() => {
+      if (!effectiveAgentRoleControl.selectedRoleId) return false;
+      const selectedRole = effectiveAgentRoleControl.items.find(
+        (item) => item.role.id === effectiveAgentRoleControl.selectedRoleId
       )?.role;
       if (!selectedRole) return false;
       const { source } = resolvePermissionModeFace({
@@ -2146,8 +2156,8 @@ export const SessionChatInputArea = memo(
       configOptionValues,
       modeOptions,
       selectedModeId,
-      sessionAgentRole.items,
-      sessionAgentRole.selectedRoleId,
+      effectiveAgentRoleControl.items,
+      effectiveAgentRoleControl.selectedRoleId,
     ]);
     const mobileFooterSelectorNode = isMobile ? (
       <MobileSessionRunConfig
@@ -2200,7 +2210,7 @@ export const SessionChatInputArea = memo(
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}
         />
-        {sessionAgentRolePinsPermissionMode ? null : (
+        {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton
             modeOptions={modeOptions}
             selectedModeId={selectedModeId}
@@ -2405,6 +2415,7 @@ export const SessionChatInputArea = memo(
             accessibleRoles={accessibleAgentRoles}
             onChange={setAgentRoleEditor}
             onClose={() => setAgentRoleEditor(null)}
+            onSaved={onAgentRoleSaved}
             source="session_composer"
           />
         ) : null}
