@@ -34,6 +34,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import {
   authTokenAtom,
   electronDeepLinkSignInInProgressAtom,
+  nativeSignInInProgressAtom,
   setWorkspaceContextAtom,
   userAtom,
 } from '@/atoms';
@@ -252,6 +253,7 @@ function RootLocationEffects() {
   } = useStableSession();
   const userEmail = session?.user?.email;
   const electronSignInInProgress = useAtomValue(electronDeepLinkSignInInProgressAtom);
+  const nativeSignInInProgress = useAtomValue(nativeSignInInProgressAtom);
   const setUser = useSetAtom(userAtom);
   const setAuthToken = useSetAtom(authTokenAtom);
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
@@ -318,6 +320,9 @@ function RootLocationEffects() {
     if (electronSignInInProgress) {
       return;
     }
+    if (nativeSignInInProgress) {
+      return;
+    }
 
     authInvalidationRef.current = true;
     const redirectPath =
@@ -339,6 +344,7 @@ function RootLocationEffects() {
     confirmedUnauthenticated,
     electronSignInInProgress,
     location.pathname,
+    nativeSignInInProgress,
     navigate,
     setAuthToken,
     setWorkspaceContext,

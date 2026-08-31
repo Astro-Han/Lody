@@ -33,6 +33,18 @@ this file; edit `AGENTS.md` only.
   restoration, search/group-expansion suppression, and viewport resize handling
   for the mobile keyboard and terminal dock. The library observes content growth;
   it does not replace Virtua or own those product-level behaviors.
+- `useStableSession` treats an HTTP 401 from `authClient.useSession()` as a
+  potentially stale response and verifies it once with the current credential.
+  Only a second 401 for the unchanged local token is terminal: stop retrying,
+  ignore cached user/bootstrap and grace state, and confirm unauthenticated so
+  the root sign-out path clears both Lody auth state and platform credential
+  storage. A rotated token or successful verification fences late responses from
+  an older login. Native login also holds `nativeSignInInProgressAtom` from the
+  first sign-in request through successful page replacement because its
+  Capacitor credential and local token are not written atomically; root session
+  invalidation must respect that fence. Do not extend terminal handling to
+  transport failures such as timeouts, 5xx, or `Client disconnected`; those
+  remain retryable and must not sign out an otherwise recoverable user.
 - `use-workspace-catalog.ts` reads a ref-counted per-workspace room in
   `lib/workspace-catalog-room.ts`; it must not open the Flock document,
   subscribe, or join the room per mount. The catalog is ONE small document, but
