@@ -518,6 +518,10 @@ export const SessionChatInputArea = memo(
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const restoreFocusAfterRejectedMobileSendRef = useRef(false);
+    /** Session id that initiated the pending desktop focus restore. */
+    const pendingDesktopFocusRestoreSessionIdRef = useRef<string | null>(null);
+    /** The textarea element that was active when the send started. */
+    const pendingFocusRestoreTextareaRef = useRef<HTMLTextAreaElement | null>(null);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
     const activeSessionIdRef = useRef(session.id);
     activeSessionIdRef.current = session.id;
@@ -1791,6 +1795,12 @@ export const SessionChatInputArea = memo(
         ];
         const dismissKeyboardForSubmit =
           usesMobileKeyboardAction && (source === 'keyboard' || source === 'button');
+        // Snapshot the textarea and session id BEFORE the await so the
+        // post-commit focus-restore effect can verify neither changed during
+        // the in-flight send. Capturing after the await would miss a session
+        // switch that happened while the send was pending.
+        const textareaBeforeSend = textareaRef.current;
+        const sessionIdBeforeSend = session.id;
         if (dismissKeyboardForSubmit) {
           // The mobile Send action should dismiss the soft keyboard at the same
           // immediate handoff boundary as the visible draft, not after the
@@ -1819,7 +1829,16 @@ export const SessionChatInputArea = memo(
           }
         } finally {
           restoreFocusAfterRejectedMobileSendRef.current = dismissKeyboardForSubmit && !accepted;
+          if (!dismissKeyboardForSubmit) {
+            // Stash the pre-send snapshot for the focus-restore effect below.
+            pendingDesktopFocusRestoreSessionIdRef.current = sessionIdBeforeSend;
+            pendingFocusRestoreTextareaRef.current = textareaBeforeSend;
+          }
           setSubmissionPending(false);
+          // Focus is NOT restored synchronously here: the textarea is still
+          // disabled (React has not yet committed the re-render that clears
+          // submissionPending). The desktop focus-restore useEffect below
+          // handles it after the re-enable render.
         }
       },
       [
@@ -1853,6 +1872,44 @@ export const SessionChatInputArea = memo(
       }
       restoreFocusAfterRejectedMobileSendRef.current = false;
       textareaRef.current?.focus();
+    }, [submissionPending]);
+    // Desktop focus restore: runs after submissionPending flips to false AND
+    // the textarea re-renders as enabled. Verifies that:
+    //   1. The session has not changed since the send started (compares the
+    //      stored session id with the current one).
+    //   2. The textarea DOM element is still the one that initiated the send
+    //      (guards against session switches that replace the textarea).
+    //   3. No other interactive control owns focus. Disabling the textarea
+    //      moves focus to document.body, so body !== textarea is the expected
+    //      state — only skip when a different interactive element has focus.
+    useEffect(() => {
+      if (submissionPending) return;
+      const storedSessionId = pendingDesktopFocusRestoreSessionIdRef.current;
+      if (storedSessionId === null) return;
+      pendingDesktopFocusRestoreSessionIdRef.current = null;
+
+      const targetTextarea = pendingFocusRestoreTextareaRef.current;
+      pendingFocusRestoreTextareaRef.current = null;
+
+      // Session changed while the send was in flight — the current textarea
+      // belongs to a different session, so do not touch it.
+      if (storedSessionId !== activeSessionIdRef.current) return;
+      // The textarea was replaced (e.g. session switch unmounted/remounted).
+      if (!targetTextarea || textareaRef.current !== targetTextarea) return;
+      // The user deliberately focused another interactive control during the
+      // wait. document.body is the default when the disabled textarea lost
+      // focus, so it does NOT count as the user moving focus elsewhere.
+      const active = document.activeElement;
+      if (
+        active &&
+        active !== document.body &&
+        active !== targetTextarea &&
+        active instanceof HTMLElement
+      ) {
+        return;
+      }
+
+      targetTextarea.focus();
     }, [submissionPending]);
 
     const handleKeyDown = useCallback(
