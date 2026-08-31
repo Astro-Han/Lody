@@ -232,6 +232,7 @@ import {
   getSessionDetailInitialTabState,
   resolveSessionEntryTabRestoration,
 } from '@/lib/session-detail-initial-state';
+import { useWorkspaceRouteTargetSlug } from '@/providers/workspace-route-target';
 import {
   resolveSessionFileProviderOpenPath,
   type SessionFileProviderOpenPathResolution,
@@ -779,7 +780,17 @@ const SessionDetail = ({
   const [externalHistoryRefreshBySessionId, setExternalHistoryRefreshBySessionId] = useState<
     Record<string, ExternalHistoryRefreshViewState>
   >({});
-  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  /* The render-phase route target wins over the atom. During a
+     cross-workspace client navigation, `currentWorkspaceSlugAtom` still holds
+     the PREVIOUS workspace's non-null slug until the ancestor `$workspaceName`
+     route's own effect publishes the new one — a `?tab`/`?pr` write issued in
+     that window with the atom slug navigates back into the old workspace.
+     Every consumer here builds a URL for the CURRENT route, so all of them
+     use the effective slug (same rule as `LoroAppSidebar`); the atom is only
+     the fallback for hosts mounted without `WorkspaceRouteTargetProvider`. */
+  const routeTargetWorkspaceSlug = useWorkspaceRouteTargetSlug();
+  const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const workspaceSlug = routeTargetWorkspaceSlug ?? atomWorkspaceSlug;
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const isLeftSidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const setLeftSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
@@ -2570,17 +2581,18 @@ const SessionDetail = ({
      `?tab` write not caused by a user action; claiming the session id keeps
      it one-shot per entry, so a later user navigation back to the parent (a
      `missing` value on the same session) is respected rather than
-     re-restored. The claim happens only once navigation is actually possible
-     — on a cold start this layout effect runs BEFORE the ancestor workspace
-     route publishes `currentWorkspaceSlugAtom`, and claiming while
-     `replaceSessionUrlTab` would early-return on the null slug loses the
-     persisted tab for good (`resolveSessionEntryTabRestoration` owns that
-     ordering rule). Layout effect so the write lands before paint instead of
-     flashing the parent tab for a frame. */
+     re-restored. The claim happens only once a slug can actually carry the
+     navigation, and that slug is the render-phase route target — the slug
+     atom is stale at both edges of a workspace transition (null on a cold
+     start, the previous workspace's slug during a cross-workspace client
+     navigation), and `resolveSessionEntryTabRestoration` owns that ordering
+     rule. Layout effect so the write lands before paint instead of flashing
+     the parent tab for a frame. */
   const restoredEntryTabSessionIdRef = useRef<SessionId | null>(null);
   useLayoutEffect(() => {
     const restoration = resolveSessionEntryTabRestoration({
-      canNavigate: Boolean(workspaceSlug),
+      routeTargetSlug: routeTargetWorkspaceSlug,
+      atomWorkspaceSlug,
       claimedSessionId: restoredEntryTabSessionIdRef.current,
       sessionId,
       urlTabKind: parsedUrlTab.kind,
@@ -2591,9 +2603,18 @@ const SessionDetail = ({
     }
     restoredEntryTabSessionIdRef.current = sessionId;
     if (restoration.kind === 'restore') {
+      /* `restoration.workspaceSlug` and the component-level `workspaceSlug`
+         are the same `routeTargetSlug ?? atomWorkspaceSlug` value, which is
+         what `replaceSessionUrlTab` addresses the navigation with. */
       replaceSessionUrlTab(restoration.tab);
     }
-  }, [parsedUrlTab.kind, replaceSessionUrlTab, sessionId, workspaceSlug]);
+  }, [
+    atomWorkspaceSlug,
+    parsedUrlTab.kind,
+    replaceSessionUrlTab,
+    routeTargetWorkspaceSlug,
+    sessionId,
+  ]);
 
   /* Mobile keeps one active surface: a `?tab` change dismisses the file
      viewer, matching what explicit tab selection does. Ref-compared so the

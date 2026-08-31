@@ -78,25 +78,33 @@ export const getSessionDetailInitialTabState = (
 /**
  * Entry-scoped `?tab` restoration decision for `SessionDetail`.
  *
- * `defer` — navigation is not possible yet (the workspace slug atom can still
- * be null on a cold start: React runs the descendant's layout effect before
- * the ancestor publishes the slug). The entry must NOT be claimed, so the
- * effect retries once the slug is ready instead of silently losing the
- * persisted tab.
- * `noop` — this session entry was already claimed; nothing to do.
+ * The navigation slug is `routeTargetSlug ?? atomWorkspaceSlug` — the
+ * render-phase `$workspaceName` route target always wins, because the atom is
+ * stale at the two edges of a workspace transition: null on a cold start
+ * (descendant layout effects run before the ancestor publishes the slug), and
+ * the PREVIOUS workspace's non-null slug during a cross-workspace client
+ * navigation. Restoring with the atom slug in that second window would send
+ * the replace navigation back into the old workspace. The atom is only the
+ * fallback for hosts mounted without `WorkspaceRouteTargetProvider`.
+ *
+ * `restore` — claim the entry and issue the single replace navigation to
+ * `tab`, addressed by `workspaceSlug`.
  * `claim` — claim the entry without navigating (an explicit URL tab is
  * present, or nothing worth restoring is persisted).
- * `restore` — claim the entry and issue the single replace navigation to
- * `tab`.
+ * `noop` — this session entry was already claimed; nothing to do.
+ * `defer` — no slug can carry the navigation yet. The entry must NOT be
+ * claimed, so the effect retries once a slug is ready instead of silently
+ * losing the persisted tab.
  */
 export type SessionEntryTabRestoration =
   | { kind: 'defer' }
   | { kind: 'noop' }
   | { kind: 'claim' }
-  | { kind: 'restore'; tab: string };
+  | { kind: 'restore'; tab: string; workspaceSlug: string };
 
 export const resolveSessionEntryTabRestoration = (options: {
-  canNavigate: boolean;
+  routeTargetSlug: string | null;
+  atomWorkspaceSlug: string | null;
   claimedSessionId: string | null;
   sessionId: string;
   urlTabKind: ParsedSessionTabSearch['kind'];
@@ -105,7 +113,8 @@ export const resolveSessionEntryTabRestoration = (options: {
   if (options.claimedSessionId === options.sessionId) {
     return { kind: 'noop' };
   }
-  if (!options.canNavigate) {
+  const workspaceSlug = options.routeTargetSlug ?? options.atomWorkspaceSlug;
+  if (!workspaceSlug) {
     return { kind: 'defer' };
   }
   if (options.urlTabKind !== 'missing') {
@@ -115,5 +124,5 @@ export const resolveSessionEntryTabRestoration = (options: {
   const tab = persistedTabId
     ? formatSessionTabSearch(persistedTabId, options.sessionId)
     : undefined;
-  return tab === undefined ? { kind: 'claim' } : { kind: 'restore', tab };
+  return tab === undefined ? { kind: 'claim' } : { kind: 'restore', tab, workspaceSlug };
 };

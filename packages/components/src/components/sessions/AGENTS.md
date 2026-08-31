@@ -107,11 +107,15 @@ Session conversation page chain:
   never while child meta is still loading). The only non-user `?tab` write is
   the entry-scoped last-active-tab restoration, one replace per session entry
   in a layout effect, claimed by session id so it can never re-fire on the
-  same entry — and claimed only once the workspace slug can actually carry
-  the navigation (`resolveSessionEntryTabRestoration`): on a cold start this
-  layout effect runs before the ancestor route publishes
-  `currentWorkspaceSlugAtom`, and claiming while the navigate would
-  early-return loses the persisted tab for good.
+  same entry — and claimed only once a slug can actually carry the navigation
+  (`resolveSessionEntryTabRestoration`). That slug is the render-phase
+  `WorkspaceRouteTargetProvider` target with `currentWorkspaceSlugAtom` as
+  provider-less fallback, and EVERY session-detail URL writer uses the same
+  effective slug: the atom is stale at both edges of a workspace transition —
+  null on a cold start (claiming then loses the persisted tab for good) and
+  the PREVIOUS workspace's non-null slug during a cross-workspace client
+  navigation (navigating then sends the restore back into the old
+  workspace).
 - `session-detail.tsx` — outer shell/tabs (desktop: `desktop-session-detail-layout.tsx`;
   mobile drill pages use `../mobile/mobile-drill-page-layout.tsx`). All Changes UI lives here via
   `session-changes-sidebar.tsx` (story: `SessionChangesSidebar.stories.tsx`). Desktop file/diff

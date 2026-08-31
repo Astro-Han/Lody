@@ -119,27 +119,29 @@ describe('getSessionDetailInitialTabState', () => {
     });
   });
 
-  it('does not claim the entry while the workspace slug is still null, then restores once ready', () => {
+  it('does not claim the entry while no slug is ready, then restores once the route target lands', () => {
     // Cold start on /workspace/sessions/A without ?tab: React runs the
     // descendant SessionDetail layout effect before the ancestor publishes
     // currentWorkspaceSlugAtom. The null→ready sequence must end in exactly
     // one restore, not a silently consumed claim.
     const base = {
+      atomWorkspaceSlug: null,
       claimedSessionId: null,
       sessionId: parentSessionId,
       urlTabKind: 'missing' as const,
       readPersistedTabId: () => 'child-session',
     };
 
-    // Slug not ready: defer, no claim.
-    expect(resolveSessionEntryTabRestoration({ ...base, canNavigate: false })).toEqual({
+    // No slug from either source: defer, no claim.
+    expect(resolveSessionEntryTabRestoration({ ...base, routeTargetSlug: null })).toEqual({
       kind: 'defer',
     });
 
-    // Slug ready, entry still unclaimed: restore the persisted child.
-    expect(resolveSessionEntryTabRestoration({ ...base, canNavigate: true })).toEqual({
+    // Route target ready, entry still unclaimed: restore the persisted child.
+    expect(resolveSessionEntryTabRestoration({ ...base, routeTargetSlug: 'workspace-b' })).toEqual({
       kind: 'restore',
       tab: 'session:child-session',
+      workspaceSlug: 'workspace-b',
     });
 
     // Entry claimed: later runs (including a user navigating back to the
@@ -147,18 +149,54 @@ describe('getSessionDetailInitialTabState', () => {
     expect(
       resolveSessionEntryTabRestoration({
         ...base,
-        canNavigate: true,
+        routeTargetSlug: 'workspace-b',
         claimedSessionId: parentSessionId,
       })
     ).toEqual({ kind: 'noop' });
   });
 
-  it('claims without restoring when the URL already names a tab or nothing is persisted', () => {
+  it('restores into the route target workspace when the atom still holds the previous one', () => {
+    // Cross-workspace client navigation: standing in workspace C, navigating
+    // to /B/sessions/A without ?tab. The first SessionDetail layout effect
+    // sees the stale non-null atom slug "workspace-c" while the render-phase
+    // route target already says "workspace-b" — the restoration must address
+    // workspace B, never fall back to the stale atom value.
     expect(
       resolveSessionEntryTabRestoration({
-        canNavigate: true,
+        routeTargetSlug: 'workspace-b',
+        atomWorkspaceSlug: 'workspace-c',
         claimedSessionId: null,
         sessionId: parentSessionId,
+        urlTabKind: 'missing',
+        readPersistedTabId: () => 'child-session',
+      })
+    ).toEqual({ kind: 'restore', tab: 'session:child-session', workspaceSlug: 'workspace-b' });
+  });
+
+  it('falls back to the atom slug only for hosts without a route target provider', () => {
+    expect(
+      resolveSessionEntryTabRestoration({
+        routeTargetSlug: null,
+        atomWorkspaceSlug: 'workspace-b',
+        claimedSessionId: null,
+        sessionId: parentSessionId,
+        urlTabKind: 'missing',
+        readPersistedTabId: () => 'child-session',
+      })
+    ).toEqual({ kind: 'restore', tab: 'session:child-session', workspaceSlug: 'workspace-b' });
+  });
+
+  it('claims without restoring when the URL already names a tab or nothing is persisted', () => {
+    const base = {
+      routeTargetSlug: 'workspace-b',
+      atomWorkspaceSlug: 'workspace-b',
+      claimedSessionId: null,
+      sessionId: parentSessionId,
+    };
+
+    expect(
+      resolveSessionEntryTabRestoration({
+        ...base,
         urlTabKind: 'session',
         readPersistedTabId: () => 'child-session',
       })
@@ -166,9 +204,7 @@ describe('getSessionDetailInitialTabState', () => {
 
     expect(
       resolveSessionEntryTabRestoration({
-        canNavigate: true,
-        claimedSessionId: null,
-        sessionId: parentSessionId,
+        ...base,
         urlTabKind: 'missing',
         readPersistedTabId: () => undefined,
       })
@@ -178,9 +214,7 @@ describe('getSessionDetailInitialTabState', () => {
     // a restore.
     expect(
       resolveSessionEntryTabRestoration({
-        canNavigate: true,
-        claimedSessionId: null,
-        sessionId: parentSessionId,
+        ...base,
         urlTabKind: 'missing',
         readPersistedTabId: () => parentSessionId,
       })
@@ -190,13 +224,14 @@ describe('getSessionDetailInitialTabState', () => {
   it('restores a persisted draft tab verbatim', () => {
     expect(
       resolveSessionEntryTabRestoration({
-        canNavigate: true,
+        routeTargetSlug: 'workspace-b',
+        atomWorkspaceSlug: 'workspace-b',
         claimedSessionId: null,
         sessionId: parentSessionId,
         urlTabKind: 'missing',
         readPersistedTabId: () => 'draft:draft-uuid',
       })
-    ).toEqual({ kind: 'restore', tab: 'draft:draft-uuid' });
+    ).toEqual({ kind: 'restore', tab: 'draft:draft-uuid', workspaceSlug: 'workspace-b' });
   });
 
   it('defaults the side panel state when older persisted state has no side panel entry', () => {
