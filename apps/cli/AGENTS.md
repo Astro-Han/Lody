@@ -164,6 +164,12 @@ Two things the dev build does deliberately, both load-bearing:
 - Post-turn automatic commit/push is allowed for GitHub worktrees and local projects
   with `ProjectRef.useWorktree === true`. Never run it against a local project's
   original directory, even when that project has a `githubRepoFullName` or associated PR.
+- Local create resolves `ProjectRef.githubRepoFullName` from the project's `origin`
+  for direct AND worktree sessions, exactly like desktop creation, because
+  `repoFullName`, PR actions, and post-turn PR detection all read it. Bind only a
+  repository the workspace enables, recording the workspace's spelling; an
+  unauthorized, absent, or unreadable one leaves the Session local rather than
+  failing create.
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input
   schemas. New create/chat Commands require a caller-chosen Operation id. Create persists
   the Operation before its fallible availability/materialization step; the normal response

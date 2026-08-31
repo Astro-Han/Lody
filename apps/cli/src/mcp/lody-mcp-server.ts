@@ -69,6 +69,7 @@ import {
   makeLodyError,
   normalizeSessionPullRequestMeta,
   resolveActiveAssistantTurnId,
+  resolveProjectGitHubRepo,
   type LodyOperationItemResult,
   type SessionTurnInputConfig,
   REVIEW_SEVERITY_VALUES,
@@ -2302,6 +2303,7 @@ const buildSessionWorkContext = async (
       projectId: string;
       localProjectName?: string;
       rootPath?: string;
+      githubRepo?: string;
       worktree?: boolean;
     }
 > => {
@@ -2316,11 +2318,17 @@ const buildSessionWorkContext = async (
       session.machineId
     );
     const localProject = localProjects[project.localProjectId];
+    const githubRepo = resolveProjectGitHubRepo(project);
     return {
       kind: 'local',
       projectId: project.localProjectId,
       ...(localProject?.name ? { localProjectName: localProject.name } : {}),
       ...(localProject?.rootPath ? { rootPath: localProject.rootPath } : {}),
+      // Reported so an Agent can tell a local Session that carries an authorized
+      // GitHub identity (PR actions available) from a purely local one. It is
+      // deliberately absent from `summarizeProjectRefForMcp`, whose output must
+      // stay a valid `workContext` create input.
+      ...(githubRepo ? { githubRepo } : {}),
       ...(project.useWorktree === true || session.isWorktree === true ? { worktree: true } : {}),
     };
   }
