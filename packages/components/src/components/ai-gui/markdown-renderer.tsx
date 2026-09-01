@@ -302,8 +302,13 @@ const isUnescapedDoubleAsterisk = (source: string, offset: number) => {
 const isMarkdownPunctuation = (value: string) =>
   /[!-/:-@[-`{-~]/u.test(value) || /\p{P}/u.test(value);
 
+const isExactUnescapedDoubleAsterisk = (source: string, offset: number) =>
+  isUnescapedDoubleAsterisk(source, offset) &&
+  source[offset - 1] !== '*' &&
+  source[offset + 2] !== '*';
+
 const isValidStrongCloser = (source: string, offset: number) => {
-  if (!isUnescapedDoubleAsterisk(source, offset)) return false;
+  if (!isExactUnescapedDoubleAsterisk(source, offset)) return false;
 
   const precedingCharacter = source[offset - 1];
   const followingCharacter = source[offset + 2];
@@ -432,7 +437,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       const nextChild = children[index + 1];
       const precedingValue = child.type === 'text' ? child.value : undefined;
       const precedingEndOffset = child.position?.end?.offset;
-      const hasUnescapedStrongOpener = isUnescapedDoubleAsterisk(
+      const hasUnescapedStrongOpener = isExactUnescapedDoubleAsterisk(
         source,
         typeof precedingEndOffset === 'number' ? precedingEndOffset - 2 : -1
       );
