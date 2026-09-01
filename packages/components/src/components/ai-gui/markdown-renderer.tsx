@@ -351,9 +351,10 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
 
     const rawValue = source.slice(startOffset, endOffset);
     if (rawValue === decodedValue) {
-      const markerOffset = source.indexOf('**', startOffset);
+      const markerOffset = startOffset + decodedOffset;
       return markerOffset >= 0 &&
         markerOffset + 2 <= endOffset &&
+        source.slice(markerOffset, markerOffset + 2) === '**' &&
         !hasEscapedDoubleAsterisk(source, startOffset, markerOffset)
         ? markerOffset
         : -1;
@@ -425,6 +426,61 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     return [{ type: 'text', value }];
   };
 
+  const findValidStrongMarker = (source: string, node: MdastNode, value: string) => {
+    for (
+      let markerIndex = value.indexOf('**');
+      markerIndex >= 0;
+      markerIndex = value.indexOf('**', markerIndex + 2)
+    ) {
+      const sourceOffset = findRawDoubleAsterisk(source, node, value, markerIndex);
+      if (isValidStrongCloser(source, sourceOffset)) {
+        return { markerIndex, sourceOffset };
+      }
+    }
+
+    return undefined;
+  };
+
+  const repairStrongAutolink = (node: MdastNode, source: string): MdastNode[] | undefined => {
+    if (node.type !== 'strong' || node.children?.length !== 1) return undefined;
+
+    const link = node.children[0];
+    const linkText = link?.children?.[0];
+    if (
+      link?.type !== 'link' ||
+      typeof link.url !== 'string' ||
+      linkText?.type !== 'text' ||
+      typeof linkText.value !== 'string'
+    ) {
+      return undefined;
+    }
+
+    const marker = findValidStrongMarker(source, linkText, linkText.value);
+    if (!marker || marker.markerIndex <= 0) return undefined;
+
+    const url = linkText.value.slice(0, marker.markerIndex);
+    if (!/^(?:https?:\/\/|www\.)/iu.test(url)) return undefined;
+
+    const suffix = linkText.value.slice(marker.markerIndex + 2);
+    const suffixNodes = suffix ? parseInlineSuffix(suffix) : [];
+    if (!suffixNodes.some((suffixNode) => suffixNode.type !== 'text')) return undefined;
+
+    const href = /^www\./iu.test(url) ? `http://${url}` : url;
+    return [
+      {
+        ...node,
+        children: [
+          {
+            ...link,
+            url: href,
+            children: [{ ...linkText, value: url }],
+          },
+        ],
+      },
+      ...suffixNodes,
+    ];
+  };
+
   const walk = (node: MdastNode, source: string) => {
     if (node.type === 'link' || node.type === 'linkReference' || node.type === 'code') return;
 
@@ -435,6 +491,11 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     for (let index = 0; index < children.length; index += 1) {
       const child = children[index];
       const nextChild = children[index + 1];
+      const repairedStrong = repairStrongAutolink(child, source);
+      if (repairedStrong) {
+        nextChildren.push(...repairedStrong);
+        continue;
+      }
       const precedingValue = child.type === 'text' ? child.value : undefined;
       const precedingEndOffset = child.position?.end?.offset;
       const hasUnescapedStrongOpener = isExactUnescapedDoubleAsterisk(
@@ -449,14 +510,18 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
           ? linkText.value.indexOf('**')
           : -1;
       const linkTextValue = linkText?.type === 'text' ? linkText.value : undefined;
-      const closerSourceOffset =
-        markerIndex > 0 && linkText?.type === 'text' && typeof linkTextValue === 'string'
-          ? findRawDoubleAsterisk(source, linkText, linkTextValue, markerIndex)
-          : -1;
-      const hasValidStrongCloser = isValidStrongCloser(source, closerSourceOffset);
+      let repairedMarkerIndex = -1;
+      let closerSourceOffset = -1;
+      if (markerIndex > 0 && linkText?.type === 'text' && typeof linkTextValue === 'string') {
+        const marker = findValidStrongMarker(source, linkText, linkTextValue);
+        if (marker) {
+          repairedMarkerIndex = marker.markerIndex;
+          closerSourceOffset = marker.sourceOffset;
+        }
+      }
       const suffix =
-        markerIndex > 0 && typeof linkTextValue === 'string'
-          ? linkTextValue.slice(markerIndex + 2)
+        repairedMarkerIndex > 0 && typeof linkTextValue === 'string'
+          ? linkTextValue.slice(repairedMarkerIndex + 2)
           : '';
       const suffixNodes = suffix ? parseInlineSuffix(suffix) : [];
       const hasSwallowedInlineMarkdown = suffixNodes.some(
@@ -471,18 +536,13 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         typeof nextChild.url === 'string' &&
         linkText?.type === 'text' &&
         typeof linkText.value === 'string' &&
-        markerIndex > 0 &&
-        hasValidStrongCloser &&
+        repairedMarkerIndex > 0 &&
+        closerSourceOffset >= 0 &&
         hasSwallowedInlineMarkdown &&
-        /^(?:https?:\/\/|www\.)/iu.test(linkText.value.slice(0, markerIndex))
+        /^(?:https?:\/\/|www\.)/iu.test(linkText.value.slice(0, repairedMarkerIndex))
       ) {
-        const url = linkText.value.slice(0, markerIndex);
-        const malformedSuffix = linkText.value.slice(markerIndex);
-        const href = nextChild.url.endsWith(malformedSuffix)
-          ? nextChild.url.slice(0, -malformedSuffix.length)
-          : /^www\./iu.test(url)
-            ? `http://${url}`
-            : url;
+        const url = linkText.value.slice(0, repairedMarkerIndex);
+        const href = /^www\./iu.test(url) ? `http://${url}` : url;
         const textBeforeStrong = precedingValue.slice(0, -2);
 
         if (textBeforeStrong) {

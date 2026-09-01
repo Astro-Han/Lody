@@ -50,6 +50,7 @@ const ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN =
   '**https://example.com\\*\\*(`fix/some-branch` -> `main`)';
 const URL_WITH_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/path**segment';
 const URL_WITH_DOUBLE_ASTERISK_BEFORE_CODE_MARKDOWN = '**https://example.com/path**segment(`code`)';
+const URL_WITH_LATER_VALID_CLOSER_MARKDOWN = '**https://example.com/a**b/c**(`code`)';
 const URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN = '**https://example.com/**€(`code`)';
 const TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN = '***https://example.com***(_branch_)';
 const ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/\\*\\*path**(`code`)';
@@ -184,6 +185,15 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(link?.textContent).toBe('https://example.com/path**segment(`code`)');
     expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
     expect(container?.querySelector('code')).toBeNull();
+  });
+
+  it('searches past an invalid asterisk pair for a later valid closer', async () => {
+    await renderMarkdown(URL_WITH_LATER_VALID_CLOSER_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/a**b/c');
+    expect(link?.textContent).toBe('https://example.com/a**b/c');
+    expect(container?.querySelector('code')?.textContent).toBe('code');
   });
 
   it('does not treat a non-ASCII symbol as Markdown punctuation after the marker', async () => {
