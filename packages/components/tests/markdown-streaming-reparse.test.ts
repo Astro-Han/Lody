@@ -44,6 +44,8 @@ const ESCAPED_BOLD_AUTOLINK_MARKDOWN =
   '\\*\\*https://example.com\\*\\*(`fix/some-branch` -> `main`)';
 const ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN =
   '\\*\\*https://example.com**(`fix/some-branch` -> `main`)';
+const ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN =
+  '**https://example.com\\*\\*(`fix/some-branch` -> `main`)';
 
 const buildStreamingMarkdownChunks = (count: number): string[] =>
   Array.from({ length: count }, (_, index) => {
@@ -149,15 +151,16 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.textContent).toContain('fix/some-branch -> main');
   });
 
-  it.each([ESCAPED_BOLD_AUTOLINK_MARKDOWN, ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN])(
-    'does not turn escaped bold markers into formatting: %s',
-    async (markdown) => {
-      await renderMarkdown(markdown);
+  it.each([
+    ESCAPED_BOLD_AUTOLINK_MARKDOWN,
+    ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN,
+    ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN,
+  ])('does not turn escaped bold markers into formatting: %s', async (markdown) => {
+    await renderMarkdown(markdown);
 
-      expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
-      expect(container?.textContent).toContain('**');
-    }
-  );
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.textContent).toContain('**');
+  });
 
   it('keeps raw HTML escaped by default', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.');

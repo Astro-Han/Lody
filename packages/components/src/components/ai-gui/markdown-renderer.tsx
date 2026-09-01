@@ -289,6 +289,16 @@ type MarkdownFile = {
   toString: () => string;
 };
 
+const isUnescapedDoubleAsterisk = (source: string, offset: number) => {
+  if (offset < 0 || source.slice(offset, offset + 2) !== '**') return false;
+
+  let precedingBackslashes = 0;
+  for (let index = offset - 1; index >= 0 && source[index] === '\\'; index -= 1) {
+    precedingBackslashes += 1;
+  }
+  return precedingBackslashes % 2 === 0;
+};
+
 // GFM can consume a closing strong delimiter and the following inline code into
 // an autolink. Repair that AST shape after GFM, while keeping GFM autolinks
 // enabled for ordinary URLs and email addresses.
@@ -319,9 +329,10 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       const nextChild = children[index + 1];
       const precedingValue = child.type === 'text' ? child.value : undefined;
       const precedingEndOffset = child.position?.end?.offset;
-      const hasUnescapedStrongOpener =
-        typeof precedingEndOffset === 'number' &&
-        source.slice(precedingEndOffset - 2, precedingEndOffset) === '**';
+      const hasUnescapedStrongOpener = isUnescapedDoubleAsterisk(
+        source,
+        typeof precedingEndOffset === 'number' ? precedingEndOffset - 2 : -1
+      );
       const linkText = nextChild?.children?.[0];
       const markerIndex =
         nextChild?.type === 'link' &&
@@ -329,6 +340,18 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         typeof linkText.value === 'string'
           ? linkText.value.indexOf('**')
           : -1;
+      const linkTextValue = linkText?.type === 'text' ? linkText.value : undefined;
+      const linkTextStartOffset = linkText?.position?.start?.offset;
+      const urlSourceStart =
+        markerIndex > 0 &&
+        typeof linkTextStartOffset === 'number' &&
+        typeof linkTextValue === 'string'
+          ? source.indexOf(linkTextValue.slice(0, markerIndex), linkTextStartOffset)
+          : -1;
+      const hasUnescapedStrongCloser = isUnescapedDoubleAsterisk(
+        source,
+        urlSourceStart >= 0 ? urlSourceStart + markerIndex : -1
+      );
 
       if (
         typeof precedingValue === 'string' &&
@@ -339,6 +362,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         linkText?.type === 'text' &&
         typeof linkText.value === 'string' &&
         markerIndex > 0 &&
+        hasUnescapedStrongCloser &&
         /^(?:https?:\/\/|www\.)/iu.test(linkText.value.slice(0, markerIndex))
       ) {
         const url = linkText.value.slice(0, markerIndex);
