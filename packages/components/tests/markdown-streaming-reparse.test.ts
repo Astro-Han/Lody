@@ -39,6 +39,7 @@ class TestIntersectionObserver {
 const STREAM_CHUNK_COUNT = 48;
 const MALFORMED_BOLD_AUTOLINK_MARKDOWN =
   '**https://github.com/LodyAI/Lody/pull/262**(`fix/some-branch` -> `main`)';
+const MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN = '**www.example.com**(`fix/some-branch` -> `main`)';
 
 const buildStreamingMarkdownChunks = (count: number): string[] =>
   Array.from({ length: count }, (_, index) => {
@@ -133,6 +134,16 @@ describe('MarkdownRenderer streaming rendering', () => {
       expect(container?.textContent).not.toContain('**');
     }
   );
+
+  it('preserves an absolute destination when repairing a bold www autolink', async () => {
+    await renderMarkdown(MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN);
+
+    const link = container?.querySelector(
+      '[data-streamdown="strong"] a[href="http://www.example.com"]'
+    );
+    expect(link?.textContent).toBe('www.example.com');
+    expect(container?.textContent).toContain('fix/some-branch -> main');
+  });
 
   it('keeps raw HTML escaped by default', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.');

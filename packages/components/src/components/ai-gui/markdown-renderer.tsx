@@ -330,6 +330,12 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       ) {
         const url = linkText.value.slice(0, markerIndex);
         const suffix = linkText.value.slice(markerIndex + 2);
+        const malformedSuffix = linkText.value.slice(markerIndex);
+        const href = nextChild.url.endsWith(malformedSuffix)
+          ? nextChild.url.slice(0, -malformedSuffix.length)
+          : url.startsWith('www.')
+            ? `http://${url}`
+            : url;
         const textBeforeStrong = precedingValue.slice(0, -2);
 
         if (textBeforeStrong) {
@@ -340,7 +346,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
           children: [
             {
               ...nextChild,
-              url,
+              url: href,
               children: [{ type: 'text', value: url }],
             },
           ],
