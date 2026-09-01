@@ -47,6 +47,7 @@ const ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN =
 const ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN =
   '**https://example.com\\*\\*(`fix/some-branch` -> `main`)';
 const URL_WITH_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/path**segment';
+const URL_WITH_DOUBLE_ASTERISK_BEFORE_CODE_MARKDOWN = '**https://example.com/path**segment(`code`)';
 const HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN =
   '**https://example.com/?a=1&amp;b=2**(`fix/some-branch` -> `main`)';
 
@@ -160,6 +161,16 @@ describe('MarkdownRenderer streaming rendering', () => {
     const link = container?.querySelector('a[href="https://example.com/path**segment"]');
     expect(link?.textContent).toBe('https://example.com/path**segment');
     expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+  });
+
+  it('does not split a URL when ordinary URL text precedes an inline code suffix', async () => {
+    await renderMarkdown(URL_WITH_DOUBLE_ASTERISK_BEFORE_CODE_MARKDOWN);
+
+    const link = container?.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/path**segment(%60code%60)');
+    expect(link?.textContent).toBe('https://example.com/path**segment(`code`)');
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('code')).toBeNull();
   });
 
   it('repairs bold autolinks when the URL contains an HTML entity', async () => {

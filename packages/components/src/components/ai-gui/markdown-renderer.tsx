@@ -299,6 +299,20 @@ const isUnescapedDoubleAsterisk = (source: string, offset: number) => {
   return precedingBackslashes % 2 === 0;
 };
 
+const isValidStrongCloser = (source: string, offset: number) => {
+  if (!isUnescapedDoubleAsterisk(source, offset)) return false;
+
+  const precedingCharacter = source[offset - 1];
+  const followingCharacter = source[offset + 2];
+  if (!precedingCharacter || /\s/u.test(precedingCharacter)) return false;
+
+  return (
+    followingCharacter === undefined ||
+    /\s/u.test(followingCharacter) ||
+    /[\p{P}\p{S}]/u.test(followingCharacter)
+  );
+};
+
 const findRawDoubleAsterisk = (source: string, node: MdastNode) => {
   const startOffset = node.position?.start?.offset;
   const endOffset = node.position?.end?.offset;
@@ -352,7 +366,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       const linkTextValue = linkText?.type === 'text' ? linkText.value : undefined;
       const closerSourceOffset =
         markerIndex > 0 && linkText?.type === 'text' ? findRawDoubleAsterisk(source, linkText) : -1;
-      const hasUnescapedStrongCloser = isUnescapedDoubleAsterisk(source, closerSourceOffset);
+      const hasValidStrongCloser = isValidStrongCloser(source, closerSourceOffset);
       const suffix =
         markerIndex > 0 && typeof linkTextValue === 'string'
           ? linkTextValue.slice(markerIndex + 2)
@@ -371,7 +385,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         linkText?.type === 'text' &&
         typeof linkText.value === 'string' &&
         markerIndex > 0 &&
-        hasUnescapedStrongCloser &&
+        hasValidStrongCloser &&
         hasSwallowedInlineMarkdown &&
         /^(?:https?:\/\/|www\.)/iu.test(linkText.value.slice(0, markerIndex))
       ) {
