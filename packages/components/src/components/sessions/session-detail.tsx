@@ -89,15 +89,7 @@ import {
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { useWindowsCaptionPadClass } from '@/ui/window-drag-region';
 import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useDocumentTitle } from '@/hooks/use-document-title';
 import { useTabStatus, type TabStatus } from '@/hooks/use-tab-status';
 import {
@@ -721,8 +713,13 @@ const SessionDetail = ({
      animating a transition nobody asked for. See
      DesktopSessionDetailLayout.sidebarRestoreSeq. */
   const [sidebarRestoreSeq, setSidebarRestoreSeq] = useState(0);
-  /* The `?pr=` restore below applies once per (session, PR number). */
-  const restoredPrSidebarRef = useRef<number | null>(null);
+  /* The `?pr=` restore below applies once per (session, PR number) — a STATE
+     guard for a render-phase adjustment, keyed by session id so no separate
+     session-switch reset is needed. */
+  const [restoredPrSidebar, setRestoredPrSidebar] = useState<{
+    sessionId: SessionId;
+    prNumber: number;
+  } | null>(null);
   const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTab | null>(
     () => initialTabState.sidePanel.tab
   );
@@ -949,7 +946,6 @@ const SessionDetail = ({
     detailLoadStartMsRef.current = getPerformanceNowMs();
     sendingDraftIdsRef.current.clear();
     desktopTabFocusRegionRef.current = 'conversation';
-    restoredPrSidebarRef.current = null;
     setLocalStateSessionId(sessionId);
     setSidebarRestoreSeq((seq) => seq + 1);
     setIsSidebarOpen(nextInitialTabState.sidePanel.open);
@@ -2560,35 +2556,43 @@ const SessionDetail = ({
     }
   }, [isMobile, replaceSessionUrlBrowser, urlBrowser]);
 
-  // Sync ?pr=<number> URL param into the desktop sidebar. The mobile path reads
-  // `urlPrNumber` directly for its full-screen drawer.
-  //
-  // This can only run once `latestPr` has resolved from the session doc, so on
-  // a deep link it lands a commit or two AFTER the switch — the panel would
-  // otherwise animate open from whatever width the session the user just left
-  // had. It is a restore, not a user action: bump `sidebarRestoreSeq` so the
-  // layout applies it in one frame. Applied once per (session, PR number);
-  // re-running on every `latestPr` identity change would reopen a panel the
-  // user had closed.
-  useEffect(() => {
-    if (isMobile) return;
-    if (!urlPrNumber) {
-      restoredPrSidebarRef.current = null;
-      return;
-    }
-    if (!latestPr || !repoFullName || urlPrNumber !== latestPrNumber) return;
-    if (restoredPrSidebarRef.current === urlPrNumber) return;
-    restoredPrSidebarRef.current = urlPrNumber;
-    setSidebarRestoreSeq((seq) => seq + 1);
-    setIsSidebarOpen(true);
-    activateSidebarTab('pr');
-  }, [activateSidebarTab, isMobile, latestPr, latestPrNumber, repoFullName, urlPrNumber]);
+  /* Sync ?pr=<number> into the desktop sidebar. The mobile path reads
+     `urlPrNumber` directly for its full-screen drawer.
 
-  // When the user switches away from the PR sidebar tab (or closes the sidebar)
-  // on desktop, clear the ?pr= param so the URL stays consistent. We skip
-  // clearing while the session data is still loading so deep-linking into
-  // `?pr=42` survives the first render (where `latestPr` is still null and
-  // `activeSidebarTab` hasn't been synced to 'pr' yet).
+     The restore is a RENDER-PHASE state adjustment ("adjusting state when a
+     prop changes" — react.dev/learn/you-might-not-need-an-effect), not an
+     effect: as a sibling effect it armed in the same commit as the clear below
+     — the first where `latestPr` resolved — and the clear then read the
+     restore's target state BEFORE it landed (sidebar still closed, persisted
+     viewer tab still active), stripping a fresh `?pr` deep link. Adjusted
+     during render, the restored sidebar state is COMMITTED before any effect
+     can observe it, so the ordering race is unrepresentable — and the restore
+     lands in the same commit as `sidebarRestoreSeq`, which the layout
+     invariant requires anyway. Applied once per (session, PR number) via a
+     STATE guard (an aborted concurrent render retries instead of consuming
+     the restore); re-applying on every `latestPr` identity change would
+     reopen a panel the user had closed. */
+  if (!isMobile && urlPrNumber !== undefined) {
+    if (
+      latestPr &&
+      repoFullName &&
+      urlPrNumber === latestPrNumber &&
+      (restoredPrSidebar?.sessionId !== sessionId || restoredPrSidebar.prNumber !== urlPrNumber)
+    ) {
+      setRestoredPrSidebar({ sessionId, prNumber: urlPrNumber });
+      setSidebarRestoreSeq((seq) => seq + 1);
+      setIsSidebarOpen(true);
+      activateSidebarTab('pr');
+    }
+  } else if (restoredPrSidebar !== null) {
+    setRestoredPrSidebar(null);
+  }
+
+  // Once restored, a user switching away from the PR tab (or closing the
+  // sidebar) clears `?pr` so the URL stays consistent. The URL write must be
+  // an effect, but it can never observe pre-restore state: the render-phase
+  // adjustment above commits the restored sidebar in the same render that
+  // arms this effect.
   useEffect(() => {
     if (isMobile) return;
     if (urlPrNumber === undefined) return;
