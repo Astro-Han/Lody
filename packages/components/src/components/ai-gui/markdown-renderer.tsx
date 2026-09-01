@@ -299,6 +299,15 @@ const isUnescapedDoubleAsterisk = (source: string, offset: number) => {
   return precedingBackslashes % 2 === 0;
 };
 
+const findRawDoubleAsterisk = (source: string, node: MdastNode) => {
+  const startOffset = node.position?.start?.offset;
+  const endOffset = node.position?.end?.offset;
+  if (typeof startOffset !== 'number' || typeof endOffset !== 'number') return -1;
+
+  const markerOffset = source.indexOf('**', startOffset);
+  return markerOffset >= 0 && markerOffset + 2 <= endOffset ? markerOffset : -1;
+};
+
 // GFM can consume a closing strong delimiter and the following inline code into
 // an autolink. Repair that AST shape after GFM, while keeping GFM autolinks
 // enabled for ordinary URLs and email addresses.
@@ -341,16 +350,16 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
           ? linkText.value.indexOf('**')
           : -1;
       const linkTextValue = linkText?.type === 'text' ? linkText.value : undefined;
-      const linkTextStartOffset = linkText?.position?.start?.offset;
-      const urlSourceStart =
-        markerIndex > 0 &&
-        typeof linkTextStartOffset === 'number' &&
-        typeof linkTextValue === 'string'
-          ? source.indexOf(linkTextValue.slice(0, markerIndex), linkTextStartOffset)
-          : -1;
-      const hasUnescapedStrongCloser = isUnescapedDoubleAsterisk(
-        source,
-        urlSourceStart >= 0 ? urlSourceStart + markerIndex : -1
+      const closerSourceOffset =
+        markerIndex > 0 && linkText?.type === 'text' ? findRawDoubleAsterisk(source, linkText) : -1;
+      const hasUnescapedStrongCloser = isUnescapedDoubleAsterisk(source, closerSourceOffset);
+      const suffix =
+        markerIndex > 0 && typeof linkTextValue === 'string'
+          ? linkTextValue.slice(markerIndex + 2)
+          : '';
+      const suffixNodes = suffix ? parseInlineSuffix(suffix) : [];
+      const hasSwallowedInlineMarkdown = suffixNodes.some(
+        (suffixNode) => suffixNode.type !== 'text'
       );
 
       if (
@@ -363,10 +372,10 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         typeof linkText.value === 'string' &&
         markerIndex > 0 &&
         hasUnescapedStrongCloser &&
+        hasSwallowedInlineMarkdown &&
         /^(?:https?:\/\/|www\.)/iu.test(linkText.value.slice(0, markerIndex))
       ) {
         const url = linkText.value.slice(0, markerIndex);
-        const suffix = linkText.value.slice(markerIndex + 2);
         const malformedSuffix = linkText.value.slice(markerIndex);
         const href = nextChild.url.endsWith(malformedSuffix)
           ? nextChild.url.slice(0, -malformedSuffix.length)
@@ -388,7 +397,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
             },
           ],
         });
-        nextChildren.push(...parseInlineSuffix(suffix));
+        nextChildren.push(...suffixNodes);
         index += 1;
         continue;
       }

@@ -46,6 +46,9 @@ const ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN =
   '\\*\\*https://example.com**(`fix/some-branch` -> `main`)';
 const ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN =
   '**https://example.com\\*\\*(`fix/some-branch` -> `main`)';
+const URL_WITH_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/path**segment';
+const HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN =
+  '**https://example.com/?a=1&amp;b=2**(`fix/some-branch` -> `main`)';
 
 const buildStreamingMarkdownChunks = (count: number): string[] =>
   Array.from({ length: count }, (_, index) => {
@@ -148,6 +151,24 @@ describe('MarkdownRenderer streaming rendering', () => {
       '[data-streamdown="strong"] a[href="http://www.example.com"]'
     );
     expect(link?.textContent).toBe('www.example.com');
+    expect(container?.textContent).toContain('fix/some-branch -> main');
+  });
+
+  it('does not split a URL at double asterisks followed by ordinary URL text', async () => {
+    await renderMarkdown(URL_WITH_DOUBLE_ASTERISK_MARKDOWN);
+
+    const link = container?.querySelector('a[href="https://example.com/path**segment"]');
+    expect(link?.textContent).toBe('https://example.com/path**segment');
+    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+  });
+
+  it('repairs bold autolinks when the URL contains an HTML entity', async () => {
+    await renderMarkdown(HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/?a=1&amp;b=2');
+    expect(link?.textContent).toBe('https://example.com/?a=1&amp;b=2');
+    expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
     expect(container?.textContent).toContain('fix/some-branch -> main');
   });
 
