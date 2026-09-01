@@ -313,20 +313,97 @@ const isValidStrongCloser = (source: string, offset: number) => {
   );
 };
 
-const findRawDoubleAsterisk = (source: string, node: MdastNode) => {
-  const startOffset = node.position?.start?.offset;
-  const endOffset = node.position?.end?.offset;
-  if (typeof startOffset !== 'number' || typeof endOffset !== 'number') return -1;
-
-  const markerOffset = source.indexOf('**', startOffset);
-  return markerOffset >= 0 && markerOffset + 2 <= endOffset ? markerOffset : -1;
-};
-
 // GFM can consume a closing strong delimiter and the following inline code into
 // an autolink. Repair that AST shape after GFM, while keeping GFM autolinks
 // enabled for ordinary URLs and email addresses.
 const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
   const parse = this.parse.bind(this);
+
+  const getTextContent = (node: MdastNode): string => {
+    if (node.type === 'text') return node.value ?? '';
+    return node.children?.map(getTextContent).join('') ?? '';
+  };
+
+  const decodeCharacterReference = (value: string) => getTextContent(parse(value));
+
+  const hasEscapedDoubleAsterisk = (source: string, startOffset: number, endOffset: number) =>
+    source.slice(startOffset, endOffset).includes('\\*\\*');
+
+  // Align a decoded AST marker with its original source offset. GFM may preserve
+  // backslash escapes in autolink text, while character references can decode.
+  const findRawDoubleAsterisk = (
+    source: string,
+    node: MdastNode,
+    decodedValue: string,
+    decodedOffset: number
+  ) => {
+    const startOffset = node.position?.start?.offset;
+    const endOffset = node.position?.end?.offset;
+    if (typeof startOffset !== 'number' || typeof endOffset !== 'number') return -1;
+
+    const rawValue = source.slice(startOffset, endOffset);
+    if (rawValue === decodedValue) {
+      const markerOffset = source.indexOf('**', startOffset);
+      return markerOffset >= 0 &&
+        markerOffset + 2 <= endOffset &&
+        !hasEscapedDoubleAsterisk(source, startOffset, markerOffset)
+        ? markerOffset
+        : -1;
+    }
+
+    let sourceOffset = startOffset;
+    let decodedValueOffset = 0;
+    while (sourceOffset < endOffset) {
+      if (decodedValueOffset === decodedOffset) {
+        return hasEscapedDoubleAsterisk(source, startOffset, sourceOffset) ? -1 : sourceOffset;
+      }
+
+      const remainingSource = source.slice(sourceOffset, endOffset);
+      const characterReference = remainingSource.match(
+        /^&(?:#(?:x[0-9a-f]+|[0-9]+)|[a-z][a-z0-9]+);/iu
+      )?.[0];
+      if (characterReference) {
+        const decodedReference = decodeCharacterReference(characterReference);
+        const rawReferenceMatches = decodedValue.startsWith(characterReference, decodedValueOffset);
+        const decodedReferenceMatches = decodedValue.startsWith(
+          decodedReference,
+          decodedValueOffset
+        );
+        const consumedValue = rawReferenceMatches
+          ? characterReference
+          : decodedReferenceMatches
+            ? decodedReference
+            : characterReference;
+
+        sourceOffset += characterReference.length;
+        decodedValueOffset += consumedValue.length;
+        continue;
+      }
+
+      if (source[sourceOffset] === '\\' && /[!-/:-@[-`{-~]/u.test(source[sourceOffset + 1] ?? '')) {
+        const escapedSource = source.slice(sourceOffset, sourceOffset + 2);
+        const escapedCharacter = source[sourceOffset + 1] ?? '';
+        const rawEscapeMatches = decodedValue.startsWith(escapedSource, decodedValueOffset);
+        const decodedEscapeMatches = decodedValue.startsWith(escapedCharacter, decodedValueOffset);
+        const consumedValue = rawEscapeMatches
+          ? escapedSource
+          : decodedEscapeMatches
+            ? escapedCharacter
+            : escapedSource;
+
+        sourceOffset += 2;
+        decodedValueOffset += consumedValue.length;
+        continue;
+      }
+
+      const codePoint = source.codePointAt(sourceOffset);
+      const sourceCharacterLength = codePoint ? String.fromCodePoint(codePoint).length : 1;
+      sourceOffset += sourceCharacterLength;
+      decodedValueOffset += sourceCharacterLength;
+    }
+
+    return -1;
+  };
 
   const parseInlineSuffix = (value: string): MdastNode[] => {
     if (!value) return [];
@@ -365,7 +442,9 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
           : -1;
       const linkTextValue = linkText?.type === 'text' ? linkText.value : undefined;
       const closerSourceOffset =
-        markerIndex > 0 && linkText?.type === 'text' ? findRawDoubleAsterisk(source, linkText) : -1;
+        markerIndex > 0 && linkText?.type === 'text' && typeof linkTextValue === 'string'
+          ? findRawDoubleAsterisk(source, linkText, linkTextValue, markerIndex)
+          : -1;
       const hasValidStrongCloser = isValidStrongCloser(source, closerSourceOffset);
       const suffix =
         markerIndex > 0 && typeof linkTextValue === 'string'
