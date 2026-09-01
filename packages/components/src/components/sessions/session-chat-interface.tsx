@@ -49,9 +49,14 @@ import { isMac } from '@/lib/commands/platform';
 import { matchesKeyboardEvent, parseBinding } from '@/lib/commands/key-matcher';
 import { isSessionContextCompacting } from '@/lib/session-context-compaction';
 import { hasFileTransfer, getFilesFromDataTransfer } from '@/lib/file-drop';
+import { resolveProgrammaticTurnAgentRole } from '@/lib/composer-agent-roles';
 import { mergeDropZoneHandlers, useDropZone } from '@/hooks/use-drop-zone';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
-import { SessionChatInputArea, type SessionChatInputAreaHandle } from './session-chat-input-area';
+import {
+  SessionChatInputArea,
+  type SessionChatInputAreaHandle,
+  type SessionTurnAgentRoleSelection,
+} from './session-chat-input-area';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import { MessageQueueDisplay, shouldRequestNativeQueueSteer } from './message-queue';
 import { useTranslation } from 'react-i18next';
@@ -103,6 +108,7 @@ import {
   normalizeSessionTurnInputConfig,
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
+  resolveSessionConversationSourceFence,
   resolveVisibleSessionGoal,
   resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
@@ -190,7 +196,10 @@ import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
-import { resolveSessionInfoBarGitHubActionIds } from './session-info-action-state';
+import {
+  resolveSessionInfoBarGitHubActionIds,
+  shouldDisableSessionInfoBarGitHubActionForHydration,
+} from './session-info-action-state';
 import {
   canPauseGoalThroughPromptBridge,
   getPromptBridgeGoalCommands,
@@ -1841,6 +1850,8 @@ export type DispatchInputBlocksOptions = {
   modeIdOverride?: string | null;
   modelIdOverride?: string | null;
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
+  /** Role identity frozen beside this Turn's run config; null is explicit None. */
+  agentRole?: SessionTurnAgentRoleSelection;
 };
 
 function buildEditedMessageQueueItem(
@@ -2058,6 +2069,10 @@ export const SessionChatInterface = memo(
       () => resolveSessionConversationConfig(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
       [sessionDoc?.history, sessionDoc?.mq]
     );
+    const sessionConversationSourceFence = useMemo(
+      () => resolveSessionConversationSourceFence(sessionDoc?.history ?? [], sessionDoc?.mq ?? []),
+      [sessionDoc?.history, sessionDoc?.mq]
+    );
     const sessionRuntimeConfig = useMemo(
       () =>
         resolveSessionAcpRuntimeConfig(
@@ -2092,6 +2107,7 @@ export const SessionChatInterface = memo(
     const {
       selection: sessionConfigSelection,
       candidates: sessionConfigCandidates,
+      hasUserEdits: sessionRunConfigHasUserEdits,
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
@@ -3518,6 +3534,7 @@ export const SessionChatInterface = memo(
           modeIdOverride?: string | null;
           modelIdOverride?: string | null;
           configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
+          agentRole?: SessionTurnAgentRoleSelection;
         }
       ): Promise<boolean> => {
         try {
@@ -3541,6 +3558,9 @@ export const SessionChatInterface = memo(
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
             taskToolsEnabled: tasksEnabled,
+            agentRoleId:
+              options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
+            agentRoleRevision: options?.agentRole?.agentRoleRevision,
             resume: session.acpSessionId ?? undefined,
           });
 
@@ -3655,7 +3675,7 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride'
+          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
         >
       ): Promise<boolean> => {
         try {
@@ -3679,6 +3699,9 @@ export const SessionChatInterface = memo(
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
             taskToolsEnabled: tasksEnabled,
+            agentRoleId:
+              options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
+            agentRoleRevision: options?.agentRole?.agentRoleRevision,
             resume: session.acpSessionId ?? undefined,
           });
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
@@ -3692,6 +3715,8 @@ export const SessionChatInterface = memo(
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
             mcpServerIds: [...mcpSelection.selectedIds],
             taskToolsEnabled: inputConfig.taskToolsEnabled,
+            agentRoleId: inputConfig.agentRoleId,
+            agentRoleRevision: inputConfig.agentRoleRevision,
             resume: inputConfig.resume ?? undefined,
             chainDepth: 0,
           };
@@ -3747,7 +3772,7 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride'
+          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -3757,6 +3782,7 @@ export const SessionChatInterface = memo(
           modeIdOverride: options?.modeIdOverride,
           modelIdOverride: options?.modelIdOverride,
           configOptionValuesOverride: turnConfigOptionValues,
+          agentRole: options?.agentRole,
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -3769,6 +3795,9 @@ export const SessionChatInterface = memo(
       ): Promise<boolean> => {
         const normalized = normalizeSessionInputBlocks(inputBlocks, '');
         if (normalized.length === 0) {
+          return false;
+        }
+        if (!sessionDocReady) {
           return false;
         }
 
@@ -3818,6 +3847,7 @@ export const SessionChatInterface = memo(
             modeIdOverride: turnModeId,
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
+            agentRole: options?.agentRole,
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -3838,6 +3868,7 @@ export const SessionChatInterface = memo(
             modeIdOverride: turnModeId,
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
+            agentRole: options?.agentRole,
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -3866,6 +3897,7 @@ export const SessionChatInterface = memo(
           modeIdOverride: turnModeId,
           modelIdOverride: turnModelId,
           configOptionValuesOverride: turnConfigOptionValues,
+          agentRole: options?.agentRole,
         });
         if (!accepted) {
           captureSessionEvent('session/message_submit_failed', {
@@ -3889,6 +3921,7 @@ export const SessionChatInterface = memo(
         isAgentBusy,
         queueInputBlocks,
         queuedMessageBehavior,
+        sessionDocReady,
         selectedModeId,
         selectedModelId,
       ]
@@ -3896,14 +3929,39 @@ export const SessionChatInterface = memo(
 
     const dispatchPrompt = useCallback(
       async (prompt: string, options?: DispatchInputBlocksOptions): Promise<boolean> => {
-        return await dispatchInputBlocks([{ type: 'text', text: prompt }], options);
+        const inputArea = inputAreaRef.current;
+        const hasRunConfigOverride =
+          options?.modeIdOverride !== undefined ||
+          options?.modelIdOverride !== undefined ||
+          options?.configOptionValuesOverride !== undefined;
+        const agentRole = resolveProgrammaticTurnAgentRole({
+          requested: options?.agentRole,
+          composer: inputArea
+            ? inputArea.getAgentRoleSelection(options)
+            : hasRunConfigOverride
+              ? null
+              : undefined,
+          durableRoleId: sessionConversationConfig.agentRoleId,
+          durableRoleRevision: sessionConversationConfig.agentRoleRevision,
+        });
+        return await dispatchInputBlocks(
+          [{ type: 'text', text: prompt }],
+          agentRole === undefined ? options : { ...options, agentRole }
+        );
       },
-      [dispatchInputBlocks]
+      [
+        dispatchInputBlocks,
+        sessionConversationConfig.agentRoleId,
+        sessionConversationConfig.agentRoleRevision,
+      ]
     );
 
     const handleSendMessage = useCallback(
-      async (inputBlocks: SessionInputBlock[]): Promise<boolean> => {
-        return await dispatchInputBlocks(inputBlocks);
+      async (
+        inputBlocks: SessionInputBlock[],
+        agentRole?: SessionTurnAgentRoleSelection
+      ): Promise<boolean> => {
+        return await dispatchInputBlocks(inputBlocks, { agentRole });
       },
       [dispatchInputBlocks]
     );
@@ -3912,7 +3970,11 @@ export const SessionChatInterface = memo(
       sessionId: session.id,
       history: sessionDoc?.history,
       canRetry:
-        !isAgentBusy && !isMachineRemoved && !isArchivedSession && !isExternalHistoryRefreshing,
+        sessionDocReady &&
+        !isAgentBusy &&
+        !isMachineRemoved &&
+        !isArchivedSession &&
+        !isExternalHistoryRefreshing,
       onRetry: async () =>
         await dispatchPrompt(
           t('sessions.capacityRetry.continuationPrompt', CAPACITY_RETRY_CONTINUATION_PROMPT)
@@ -3925,7 +3987,16 @@ export const SessionChatInterface = memo(
     // NEW message — the old turn is never revived.
     const handleResendUndelivered = useCallback(
       async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
-        const accepted = await handleSendMessage(inputBlocks);
+        // This is a new Turn with the old content, not a replay of the old run:
+        // freeze the currently committed composer Role beside the current run
+        // config. Copying only the original Role would pair it with unrelated
+        // current mode/model values.
+        const currentAgentRole = resolveProgrammaticTurnAgentRole({
+          composer: inputAreaRef.current?.getAgentRoleSelection(),
+          durableRoleId: sessionConversationConfig.agentRoleId,
+          durableRoleRevision: sessionConversationConfig.agentRoleRevision,
+        });
+        const accepted = await handleSendMessage(inputBlocks, currentAgentRole);
         if (accepted) {
           // Supersede the abandoned delivery attempt. The ordinary send clears
           // the missing-history marker, and without a terminal status the stale
@@ -3947,7 +4018,12 @@ export const SessionChatInterface = memo(
         }
         return accepted;
       },
-      [handleSendMessage, updateHistoryEntry]
+      [
+        handleSendMessage,
+        sessionConversationConfig.agentRoleId,
+        sessionConversationConfig.agentRoleRevision,
+        updateHistoryEntry,
+      ]
     );
 
     const autoReview = useAutoReview(session?.id, session);
@@ -4487,38 +4563,45 @@ export const SessionChatInterface = memo(
         prReadiness: deriveSessionPullRequestReadiness(latestPrState),
         prStatus: effectivePrStatus,
       }).map((actionId) => {
+        const disabledForHydration = shouldDisableSessionInfoBarGitHubActionForHydration(
+          actionId,
+          sessionDocReady
+        );
         switch (actionId) {
           case 'create-pr':
             return {
               id: actionId,
               label: t('sessions.createPr', 'Create PR'),
               onClick: handleCreatePr,
+              disabled: disabledForHydration,
             };
           case 'create-draft-pr':
             return {
               id: actionId,
               label: t('sessions.createDraftPr', 'Create Draft PR'),
               onClick: handleCreateDraftPr,
+              disabled: disabledForHydration,
             };
           case 'commit-and-push':
             return {
               id: actionId,
               label: t('sessions.commitAndPush', 'Commit & Push'),
               onClick: handleCommitAndPush,
+              disabled: disabledForHydration,
             };
           case 'resolve-conflicts':
             return {
               id: actionId,
               label: t('sessions.resolveConflicts', 'Resolve Conflicts'),
               onClick: () => void handleResolveConflicts(),
-              disabled: isResolvingConflicts,
+              disabled: disabledForHydration || isResolvingConflicts,
             };
           case 'fix-ci-errors':
             return {
               id: actionId,
               label: t('sessions.fixCiErrors', 'Fix CI Errors'),
               onClick: () => void handleFixCiErrors(),
-              disabled: isPrActionPending,
+              disabled: disabledForHydration || isPrActionPending,
             };
           case 'ready-for-review':
             return {
@@ -4565,6 +4648,7 @@ export const SessionChatInterface = memo(
       isActivePrMarkingReady,
       preferredMergeMethod,
       isActivePrMerging,
+      sessionDocReady,
       t,
       workspaceDirty,
       hasChanges,
@@ -4581,7 +4665,7 @@ export const SessionChatInterface = memo(
     useEffect(() => {
       setResolveConflictsAction({
         run: () => void handleResolveConflicts(),
-        pending: isResolvingConflicts,
+        pending: !sessionDocReady || isResolvingConflicts,
         available: resolveConflictsAvailable,
       });
       return () => setResolveConflictsAction(null);
@@ -4590,6 +4674,7 @@ export const SessionChatInterface = memo(
       handleResolveConflicts,
       isResolvingConflicts,
       resolveConflictsAvailable,
+      sessionDocReady,
     ]);
 
     const headerBrowserSession =
@@ -4945,7 +5030,11 @@ export const SessionChatInterface = memo(
           if (!pendingHistoryEntry) {
             throw new Error('Queued message is empty');
           }
-          const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry);
+          const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
+          const { entry: historyEntry } = await addSessionHistory({
+            ...pendingHistoryEntry,
+            id: queuedUserTurnId,
+          });
           await removeMessageQueueItem(item.$cid);
           trackMessageSend(historyEntry.id);
           touchSessionActivity(session.id).catch((error: unknown) => {
@@ -5909,6 +5998,12 @@ export const SessionChatInterface = memo(
                       isEmptyConversation={isEmptyConversation}
                       selectedModeId={selectedModeId}
                       selectedModelId={selectedModelId}
+                      durableAgentRoleId={sessionConversationConfig.agentRoleId}
+                      durableAgentRoleRevision={sessionConversationConfig.agentRoleRevision}
+                      durableAgentRoleSourceTurnKey={sessionConversationSourceFence.currentTurnKey}
+                      durableAgentRoleKnownTurnKeys={sessionConversationSourceFence.knownTurnKeys}
+                      durableAgentRoleReady={sessionDocReady}
+                      runConfigHasUserEdits={sessionRunConfigHasUserEdits}
                       modeOptions={modeOptions}
                       modelOptions={modelOptions}
                       rateLimits={sessionRateLimits}
