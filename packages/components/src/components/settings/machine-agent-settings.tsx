@@ -494,14 +494,32 @@ export function MachineAgentSettings({
   ]);
 
   useEffect(() => {
-    if (!isMobile || mode !== 'agents' || allItems.length === 0) return;
-    if (selectedMachineId && allItems.some((item) => item.machine.id === selectedMachineId)) return;
-    onSelectedMachineChange(allItems[0]!.machine.id);
-  }, [allItems, isMobile, mode, onSelectedMachineChange, selectedMachineId]);
+    if (!isMobile || mode !== 'agents') return;
+    const selectableItems = remoteMachinesAvailable ? allItems : localMachineItems;
+    if (selectableItems.length === 0) return;
+    if (
+      selectedMachineId &&
+      selectableItems.some((item) => item.machine.id === selectedMachineId)
+    ) {
+      return;
+    }
+    onSelectedMachineChange(selectableItems[0]!.machine.id);
+  }, [
+    allItems,
+    isMobile,
+    localMachineItems,
+    mode,
+    onSelectedMachineChange,
+    remoteMachinesAvailable,
+    selectedMachineId,
+  ]);
 
   const resolvedSelectedMachine: MachineViewMeta | undefined = isMobile
     ? mode === 'agents'
-      ? ((selectedMachineId ? machines.get(selectedMachineId) : undefined) ?? allItems[0]?.machine)
+      ? remoteMachinesAvailable
+        ? ((selectedMachineId ? machines.get(selectedMachineId) : undefined) ??
+          allItems[0]?.machine)
+        : localMachineItems[0]?.machine
       : !remoteMachinesAvailable
         ? localMachineId
           ? machines.get(localMachineId)
@@ -1032,7 +1050,7 @@ export function MachineAgentSettings({
         <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-y-auto">
           {banner ? <div className="px-3 pt-3">{banner}</div> : null}
           <div className="flex flex-col pb-4">
-            {resolvedSelectedMachine ? (
+            {remoteMachinesAvailable && resolvedSelectedMachine ? (
               <MobileSettingsSection title={t('settings.tabs.machines', 'Machines')}>
                 <MobileSettingsRow
                   label={
@@ -1091,65 +1109,67 @@ export function MachineAgentSettings({
               </MobileSettingsSection>
             ) : null}
           </div>
-          <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
-            <DrawerContent className="max-h-[80dvh]! rounded-t-2xl border-border/60">
-              <DrawerTitle className="px-4 pb-1 pt-3 text-center text-[0.95rem]">
-                {t('settings.tabs.machines', 'Machines')}
-              </DrawerTitle>
-              <DrawerDescription className="sr-only">
-                {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
-              </DrawerDescription>
-              <div className="min-h-0 overflow-y-auto px-3 pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)))] pt-2">
-                <div className="overflow-hidden rounded-2xl border border-border/60 bg-card">
-                  {allItems.map((item, index) => {
-                    const selected = item.machine.id === resolvedSelectedMachine?.id;
-                    const itemIsLocal = item.machine.id === localMachineId;
-                    return (
-                      <button
-                        key={item.machine.id}
-                        type="button"
-                        className={cn(
-                          'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted/40',
-                          index > 0 && 'border-t border-border'
-                        )}
-                        onClick={() => {
-                          onSelectedMachineChange(item.machine.id);
-                          setMobileMachinePickerOpen(false);
-                        }}
-                      >
-                        <span
-                          aria-hidden
+          {remoteMachinesAvailable ? (
+            <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
+              <DrawerContent className="max-h-[80dvh]! rounded-t-2xl border-border/60">
+                <DrawerTitle className="px-4 pb-1 pt-3 text-center text-[0.95rem]">
+                  {t('settings.tabs.machines', 'Machines')}
+                </DrawerTitle>
+                <DrawerDescription className="sr-only">
+                  {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
+                </DrawerDescription>
+                <div className="min-h-0 overflow-y-auto px-3 pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)))] pt-2">
+                  <div className="overflow-hidden rounded-2xl border border-border/60 bg-card">
+                    {allItems.map((item, index) => {
+                      const selected = item.machine.id === resolvedSelectedMachine?.id;
+                      const itemIsLocal = item.machine.id === localMachineId;
+                      return (
+                        <button
+                          key={item.machine.id}
+                          type="button"
                           className={cn(
-                            'h-2 w-2 shrink-0 rounded-full',
-                            item.isOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
+                            'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted/40',
+                            index > 0 && 'border-t border-border'
                           )}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[0.95rem] font-medium">
-                            {item.machine.name || item.machine.id}
+                          onClick={() => {
+                            onSelectedMachineChange(item.machine.id);
+                            setMobileMachinePickerOpen(false);
+                          }}
+                        >
+                          <span
+                            aria-hidden
+                            className={cn(
+                              'h-2 w-2 shrink-0 rounded-full',
+                              item.isOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
+                            )}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[0.95rem] font-medium">
+                              {item.machine.name || item.machine.id}
+                            </span>
+                            <span className="mt-0.5 block truncate text-[0.78rem] text-muted-foreground">
+                              {item.isOnline
+                                ? t('workspace.machines.online', 'Online')
+                                : t('workspace.machines.offline', 'Offline')}
+                              {itemIsLocal
+                                ? ` · ${t('workspace.machines.thisDevice', 'This device')}`
+                                : ''}
+                              {!item.sharedWithTeam
+                                ? ` · ${t('workspace.machines.private', 'Private')}`
+                                : ''}
+                            </span>
                           </span>
-                          <span className="mt-0.5 block truncate text-[0.78rem] text-muted-foreground">
-                            {item.isOnline
-                              ? t('workspace.machines.online', 'Online')
-                              : t('workspace.machines.offline', 'Offline')}
-                            {itemIsLocal
-                              ? ` · ${t('workspace.machines.thisDevice', 'This device')}`
-                              : ''}
-                            {!item.sharedWithTeam
-                              ? ` · ${t('workspace.machines.private', 'Private')}`
-                              : ''}
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center text-primary">
+                            {selected ? <Check className="h-4 w-4" /> : null}
                           </span>
-                        </span>
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-primary">
-                          {selected ? <Check className="h-4 w-4" /> : null}
-                        </span>
-                      </button>
-                    );
-                  })}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            </DrawerContent>
-          </Drawer>
+              </DrawerContent>
+            </Drawer>
+          ) : null}
           {reviewAgentEnabled ? (
             <Drawer open={mobileReviewPolicyOpen} onOpenChange={setMobileReviewPolicyOpen}>
               <DrawerContent className="h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60">
