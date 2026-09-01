@@ -277,6 +277,94 @@ const linkifyTextValue = (value: string): MdastNode[] => {
   return result;
 };
 
+type MarkdownParser = {
+  parse: (value: string) => MdastNode;
+};
+
+// GFM can consume a closing strong delimiter and the following inline code into
+// an autolink. Repair that AST shape after GFM, while keeping GFM autolinks
+// enabled for ordinary URLs and email addresses.
+const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
+  const parse = this.parse.bind(this);
+
+  const parseInlineSuffix = (value: string): MdastNode[] => {
+    if (!value) return [];
+
+    const parsed = parse(value);
+    const [first] = parsed.children ?? [];
+    if (parsed.children?.length === 1 && first?.type === 'paragraph' && first.children) {
+      return first.children;
+    }
+
+    return [{ type: 'text', value }];
+  };
+
+  const walk = (node: MdastNode) => {
+    if (node.type === 'link' || node.type === 'linkReference' || node.type === 'code') return;
+
+    const children = node.children;
+    if (!Array.isArray(children) || children.length === 0) return;
+
+    const nextChildren: MdastNode[] = [];
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      const nextChild = children[index + 1];
+      const precedingValue = child.type === 'text' ? child.value : undefined;
+      const linkText = nextChild?.children?.[0];
+      const markerIndex =
+        nextChild?.type === 'link' &&
+        linkText?.type === 'text' &&
+        typeof linkText.value === 'string'
+          ? linkText.value.indexOf('**')
+          : -1;
+
+      if (
+        typeof precedingValue === 'string' &&
+        precedingValue.endsWith('**') &&
+        nextChild?.type === 'link' &&
+        typeof nextChild.url === 'string' &&
+        linkText?.type === 'text' &&
+        typeof linkText.value === 'string' &&
+        markerIndex > 0 &&
+        /^(?:https?:\/\/|www\.)/iu.test(linkText.value.slice(0, markerIndex))
+      ) {
+        const url = linkText.value.slice(0, markerIndex);
+        const suffix = linkText.value.slice(markerIndex + 2);
+        const textBeforeStrong = precedingValue.slice(0, -2);
+
+        if (textBeforeStrong) {
+          nextChildren.push({ ...child, value: textBeforeStrong });
+        }
+        nextChildren.push({
+          type: 'strong',
+          children: [
+            {
+              ...nextChild,
+              url,
+              children: [{ type: 'text', value: url }],
+            },
+          ],
+        });
+        nextChildren.push(...parseInlineSuffix(suffix));
+        index += 1;
+        continue;
+      }
+
+      walk(child);
+      nextChildren.push(child);
+    }
+
+    node.children = nextChildren;
+  };
+
+  return (tree: unknown) => {
+    if (typeof tree !== 'object' || tree === null) return;
+    const root = tree as MdastNode;
+    if (typeof root.type !== 'string') return;
+    walk(root);
+  };
+};
+
 const remarkLinkifyPlainUrls = () => {
   const walk = (node: MdastNode) => {
     if (node.type === 'link' || node.type === 'linkReference') return;
@@ -389,6 +477,7 @@ const remarkLinkifyFilePaths = () => {
 
 const MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkRepairMalformedGfmAutolinks,
   remarkLinkifyPlainUrls,
   remarkLinkifyFilePaths,
   remarkSingleDollarTextMath,

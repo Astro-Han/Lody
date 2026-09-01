@@ -37,6 +37,8 @@ class TestIntersectionObserver {
 ).IntersectionObserver = TestIntersectionObserver as typeof IntersectionObserver;
 
 const STREAM_CHUNK_COUNT = 48;
+const MALFORMED_BOLD_AUTOLINK_MARKDOWN =
+  '**https://github.com/LodyAI/Lody/pull/262**(`fix/some-branch` -> `main`)';
 
 const buildStreamingMarkdownChunks = (count: number): string[] =>
   Array.from({ length: count }, (_, index) => {
@@ -116,6 +118,21 @@ describe('MarkdownRenderer streaming rendering', () => {
 
     expect(container?.querySelector('a[href="mailto:agent-000@example.com"]')).not.toBeNull();
   });
+
+  it.each([false, true])(
+    'repairs bold URLs followed by inline code while streaming=%s',
+    async (isStreaming) => {
+      await renderMarkdown(MALFORMED_BOLD_AUTOLINK_MARKDOWN, { isStreaming });
+
+      const url = 'https://github.com/LodyAI/Lody/pull/262';
+      const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
+      expect(link?.textContent).toBe(url);
+      expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(url);
+      expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
+      expect(container?.textContent).toContain('fix/some-branch -> main');
+      expect(container?.textContent).not.toContain('**');
+    }
+  );
 
   it('keeps raw HTML escaped by default', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.');
