@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, useMemo } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentConfigId, MachineId } from '@lody/shared';
