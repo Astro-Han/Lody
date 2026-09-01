@@ -133,7 +133,7 @@ export function ProviderRow({
       className={cn(
         'overflow-hidden',
         variant === 'card'
-          ? 'rounded-lg bg-foreground/[0.04]'
+          ? '@container rounded-lg bg-foreground/[0.04]'
           : 'bg-transparent [&+&]:border-t [&+&]:border-border',
         className
       )}
@@ -183,7 +183,7 @@ export function ProviderRow({
               store subscription and no clock tick. */}
           {showResetForecast ? <CodexResetForecastChip enabled /> : null}
           {rateLimitWindows.length > 0 && variant === 'card' && (
-            <div className="hidden items-center gap-2.5 sm:flex">
+            <div className="hidden items-center gap-2.5 @sm:flex">
               {rateLimitWindows.map((window, index) => (
                 <RateLimitMeter
                   key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
@@ -238,7 +238,7 @@ export function ProviderRow({
         </div>
       </div>
       {rateLimitWindows.length > 0 && variant === 'card' && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 pb-2.5 pt-0.5 sm:hidden">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 pb-2.5 pt-0.5 @sm:hidden">
           {rateLimitWindows.map((window, index) => (
             <RateLimitMeter
               key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
