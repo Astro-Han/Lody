@@ -299,6 +299,9 @@ const isUnescapedDoubleAsterisk = (source: string, offset: number) => {
   return precedingBackslashes % 2 === 0;
 };
 
+const isMarkdownPunctuation = (value: string) =>
+  /[!-/:-@[-`{-~]/u.test(value) || /\p{P}/u.test(value);
+
 const isValidStrongCloser = (source: string, offset: number) => {
   if (!isUnescapedDoubleAsterisk(source, offset)) return false;
 
@@ -309,7 +312,7 @@ const isValidStrongCloser = (source: string, offset: number) => {
   return (
     followingCharacter === undefined ||
     /\s/u.test(followingCharacter) ||
-    /[\p{P}\p{S}]/u.test(followingCharacter)
+    isMarkdownPunctuation(followingCharacter)
   );
 };
 
