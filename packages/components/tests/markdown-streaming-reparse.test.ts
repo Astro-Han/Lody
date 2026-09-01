@@ -40,6 +40,10 @@ const STREAM_CHUNK_COUNT = 48;
 const MALFORMED_BOLD_AUTOLINK_MARKDOWN =
   '**https://github.com/LodyAI/Lody/pull/262**(`fix/some-branch` -> `main`)';
 const MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN = '**www.example.com**(`fix/some-branch` -> `main`)';
+const ESCAPED_BOLD_AUTOLINK_MARKDOWN =
+  '\\*\\*https://example.com\\*\\*(`fix/some-branch` -> `main`)';
+const ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN =
+  '\\*\\*https://example.com**(`fix/some-branch` -> `main`)';
 
 const buildStreamingMarkdownChunks = (count: number): string[] =>
   Array.from({ length: count }, (_, index) => {
@@ -144,6 +148,16 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(link?.textContent).toBe('www.example.com');
     expect(container?.textContent).toContain('fix/some-branch -> main');
   });
+
+  it.each([ESCAPED_BOLD_AUTOLINK_MARKDOWN, ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN])(
+    'does not turn escaped bold markers into formatting: %s',
+    async (markdown) => {
+      await renderMarkdown(markdown);
+
+      expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+      expect(container?.textContent).toContain('**');
+    }
+  );
 
   it('keeps raw HTML escaped by default', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.');

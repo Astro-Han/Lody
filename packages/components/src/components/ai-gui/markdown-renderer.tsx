@@ -79,6 +79,10 @@ type MdastNode = {
   children?: MdastNode[];
   url?: string;
   title?: string | null;
+  position?: {
+    start?: { offset?: number };
+    end?: { offset?: number };
+  };
 };
 
 // `!` prefixes are load-bearing: Streamdown wraps its output in a div with
@@ -281,6 +285,10 @@ type MarkdownParser = {
   parse: (value: string) => MdastNode;
 };
 
+type MarkdownFile = {
+  toString: () => string;
+};
+
 // GFM can consume a closing strong delimiter and the following inline code into
 // an autolink. Repair that AST shape after GFM, while keeping GFM autolinks
 // enabled for ordinary URLs and email addresses.
@@ -299,7 +307,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     return [{ type: 'text', value }];
   };
 
-  const walk = (node: MdastNode) => {
+  const walk = (node: MdastNode, source: string) => {
     if (node.type === 'link' || node.type === 'linkReference' || node.type === 'code') return;
 
     const children = node.children;
@@ -310,6 +318,10 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       const child = children[index];
       const nextChild = children[index + 1];
       const precedingValue = child.type === 'text' ? child.value : undefined;
+      const precedingEndOffset = child.position?.end?.offset;
+      const hasUnescapedStrongOpener =
+        typeof precedingEndOffset === 'number' &&
+        source.slice(precedingEndOffset - 2, precedingEndOffset) === '**';
       const linkText = nextChild?.children?.[0];
       const markerIndex =
         nextChild?.type === 'link' &&
@@ -321,6 +333,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       if (
         typeof precedingValue === 'string' &&
         precedingValue.endsWith('**') &&
+        hasUnescapedStrongOpener &&
         nextChild?.type === 'link' &&
         typeof nextChild.url === 'string' &&
         linkText?.type === 'text' &&
@@ -356,18 +369,18 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         continue;
       }
 
-      walk(child);
+      walk(child, source);
       nextChildren.push(child);
     }
 
     node.children = nextChildren;
   };
 
-  return (tree: unknown) => {
+  return (tree: unknown, file: MarkdownFile) => {
     if (typeof tree !== 'object' || tree === null) return;
     const root = tree as MdastNode;
     if (typeof root.type !== 'string') return;
-    walk(root);
+    walk(root, file.toString());
   };
 };
 
