@@ -480,7 +480,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         const malformedSuffix = linkText.value.slice(markerIndex);
         const href = nextChild.url.endsWith(malformedSuffix)
           ? nextChild.url.slice(0, -malformedSuffix.length)
-          : url.startsWith('www.')
+          : /^www\./iu.test(url)
             ? `http://${url}`
             : url;
         const textBeforeStrong = precedingValue.slice(0, -2);

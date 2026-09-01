@@ -40,6 +40,8 @@ const STREAM_CHUNK_COUNT = 48;
 const MALFORMED_BOLD_AUTOLINK_MARKDOWN =
   '**https://github.com/LodyAI/Lody/pull/262**(`fix/some-branch` -> `main`)';
 const MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN = '**www.example.com**(`fix/some-branch` -> `main`)';
+const MALFORMED_BOLD_MIXED_CASE_WWW_AUTOLINK_MARKDOWN =
+  '**WWW.example.com**(`fix/some-branch` -> `main`)';
 const ESCAPED_BOLD_AUTOLINK_MARKDOWN =
   '\\*\\*https://example.com\\*\\*(`fix/some-branch` -> `main`)';
 const ESCAPED_BOLD_OPENER_AUTOLINK_MARKDOWN =
@@ -156,6 +158,14 @@ describe('MarkdownRenderer streaming rendering', () => {
     );
     expect(link?.textContent).toBe('www.example.com');
     expect(container?.textContent).toContain('fix/some-branch -> main');
+  });
+
+  it('adds an absolute scheme for mixed-case www autolinks', async () => {
+    await renderMarkdown(MALFORMED_BOLD_MIXED_CASE_WWW_AUTOLINK_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('http://WWW.example.com');
+    expect(link?.textContent).toBe('WWW.example.com');
   });
 
   it('does not split a URL at double asterisks followed by ordinary URL text', async () => {
