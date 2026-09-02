@@ -80,6 +80,7 @@ import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { localProbeAttemptedAtom, localProbeResultAtom } from '@/atoms/local-probe';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
+import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { useNavigate } from '@tanstack/react-router';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, runtimeAtom } from '@/atoms/runtime';
@@ -6415,6 +6416,7 @@ function WorkspaceChatLanding({
             void navigate({
               to: '/$workspaceName/settings',
               params: { workspaceName: workspaceSlug },
+              search: { from: getAppCurrentPathWithSearch() },
             });
           }}
           /* New-chat chip opens the bottom-sheet composer. Stays on the

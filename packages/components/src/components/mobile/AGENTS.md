@@ -105,6 +105,10 @@ embedded` lazy-imported from `../tasks/tasks-workspace.tsx` (`embedded`
   `workspaceJoinRequestsSlot` already owns its card frame, so wrap it in a
   `MobileSettingsSection noCard` plus the standard `mx-3` card inset; mounting
   the slot raw drops both the section rhythm and the shared horizontal edge.
+  Opening the mobile Settings route from workspace home carries the complete
+  in-app path in `from`. Nested settings Back returns to the settings list;
+  top-level Back restores that validated source path (including the Projects
+  Local/GitHub query) and uses context-free Chat only as the direct-entry fallback.
 - Sheets (bottom): `mobile-new-chat-sheet.tsx`,
   `mobile-workspace-switcher-sheet.tsx`, `mobile-create/delete-workspace-sheet`,
   `mobile-worktree-config-sheet.tsx`, `mobile-acp-history-sheet.tsx`,
