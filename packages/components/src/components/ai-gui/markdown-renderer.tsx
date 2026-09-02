@@ -441,6 +441,17 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     return undefined;
   };
 
+  const isLiteralGfmAutolink = (source: string, link: MdastNode, linkText: MdastNode) => {
+    const linkStartOffset = link.position?.start?.offset;
+    const linkTextStartOffset = linkText.position?.start?.offset;
+    return (
+      typeof linkStartOffset === 'number' &&
+      typeof linkTextStartOffset === 'number' &&
+      linkStartOffset === linkTextStartOffset &&
+      source[linkStartOffset] !== '['
+    );
+  };
+
   const repairStrongAutolink = (node: MdastNode, source: string): MdastNode[] | undefined => {
     if (node.type !== 'strong' || node.children?.length !== 1) return undefined;
 
@@ -454,6 +465,8 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     ) {
       return undefined;
     }
+
+    if (!isLiteralGfmAutolink(source, link, linkText)) return undefined;
 
     const marker = findValidStrongMarker(source, linkText, linkText.value);
     if (!marker || marker.markerIndex <= 0) return undefined;
@@ -539,6 +552,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
         repairedMarkerIndex > 0 &&
         closerSourceOffset >= 0 &&
         hasSwallowedInlineMarkdown &&
+        isLiteralGfmAutolink(source, nextChild, linkText) &&
         /^(?:https?:\/\/|www\.)/iu.test(linkText.value.slice(0, repairedMarkerIndex))
       ) {
         const url = linkText.value.slice(0, repairedMarkerIndex);
