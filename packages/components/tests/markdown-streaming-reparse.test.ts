@@ -57,6 +57,7 @@ const LONG_URL_WITH_REPEATED_NON_CLOSERS = `https://example.com/${LONG_URL_SEGME
 const EXPLICIT_BOLD_LINK_MARKDOWN =
   '**[https://example.com**(\\`code\\`)](https://destination.test)**';
 const URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN = '**https://example.com/**€(`code`)';
+const URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN = '**https://example.com**𐄀(`code`)';
 const TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN = '***https://example.com***(_branch_)';
 const ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/\\*\\*path**(`code`)';
 const HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN =
@@ -225,6 +226,15 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
     expect(container?.querySelector('code')).toBeNull();
     expect(container?.textContent).toContain('https://example.com/**€(`code`)');
+  });
+
+  it('recognizes astral Unicode punctuation after a strong closer', async () => {
+    await renderMarkdown(URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com');
+    expect(link?.textContent).toBe('https://example.com');
+    expect(container?.querySelector('code')?.textContent).toBe('code');
   });
 
   it('does not reduce triple-star emphasis to a strong link', async () => {

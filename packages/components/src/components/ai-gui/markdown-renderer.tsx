@@ -85,6 +85,47 @@ type MdastNode = {
   };
 };
 
+type MdastChildReplacement = {
+  nodes: MdastNode[];
+  consumedSiblings?: number;
+};
+
+type MdastChildTransformer = (
+  child: MdastNode,
+  nextChild: MdastNode | undefined
+) => MdastChildReplacement | undefined;
+
+const transformMdastChildren = (tree: unknown, transform: MdastChildTransformer) => {
+  if (typeof tree !== 'object' || tree === null) return;
+  const root = tree as MdastNode;
+  if (typeof root.type !== 'string') return;
+
+  const walk = (node: MdastNode) => {
+    if (node.type === 'link' || node.type === 'linkReference' || node.type === 'code') return;
+
+    const children = node.children;
+    if (!Array.isArray(children) || children.length === 0) return;
+
+    const nextChildren: MdastNode[] = [];
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      const replacement = transform(child, children[index + 1]);
+      if (replacement) {
+        nextChildren.push(...replacement.nodes);
+        index += replacement.consumedSiblings ?? 0;
+        continue;
+      }
+
+      walk(child);
+      nextChildren.push(child);
+    }
+
+    node.children = nextChildren;
+  };
+
+  walk(root);
+};
+
 // `!` prefixes are load-bearing: Streamdown wraps its output in a div with
 // `space-y-4` (which our `className="space-y-0"` swap below replaces). Either
 // way that compiles to `.space-y-N > :not([hidden]) ~ :not([hidden])` which
@@ -234,6 +275,13 @@ const splitAutolinkTrailing = (value: string) => {
   return { url, trailing };
 };
 
+const createTextLinkNode = (url: string, text: string, title: string | null = null): MdastNode => ({
+  type: 'link',
+  url,
+  title,
+  children: [{ type: 'text', value: text }],
+});
+
 const linkifyTextValue = (value: string): MdastNode[] => {
   const result: MdastNode[] = [];
   AUTOLINK_PATTERN.lastIndex = 0;
@@ -258,12 +306,7 @@ const linkifyTextValue = (value: string): MdastNode[] => {
       result.push({ type: 'text', value: rawUrl });
     } else {
       const href = url.startsWith('www.') ? `https://${url}` : url;
-      result.push({
-        type: 'link',
-        url: href,
-        title: null,
-        children: [{ type: 'text', value: url }],
-      });
+      result.push(createTextLinkNode(href, url));
 
       if (trailing.length > 0) {
         result.push({ type: 'text', value: trailing });
@@ -289,50 +332,6 @@ type MarkdownFile = {
   toString: () => string;
 };
 
-const getMdastRoot = (tree: unknown): MdastNode | undefined => {
-  if (typeof tree !== 'object' || tree === null) return undefined;
-  const root = tree as MdastNode;
-  return typeof root.type === 'string' ? root : undefined;
-};
-
-const shouldSkipMdastChildren = (node: MdastNode) =>
-  node.type === 'link' || node.type === 'linkReference' || node.type === 'code';
-
-type MdastChildReplacement = {
-  nodes: MdastNode[];
-  skip?: number;
-};
-
-const replaceMdastChildren = (
-  node: MdastNode,
-  replaceChild: (
-    child: MdastNode,
-    index: number,
-    siblings: MdastNode[]
-  ) => MdastChildReplacement | undefined
-) => {
-  if (shouldSkipMdastChildren(node)) return;
-
-  const children = node.children;
-  if (!Array.isArray(children) || children.length === 0) return;
-
-  const nextChildren: MdastNode[] = [];
-  for (let index = 0; index < children.length; index += 1) {
-    const child = children[index];
-    const replacement = replaceChild(child, index, children);
-    if (replacement) {
-      nextChildren.push(...replacement.nodes);
-      index += replacement.skip ?? 0;
-      continue;
-    }
-
-    replaceMdastChildren(child, replaceChild);
-    nextChildren.push(child);
-  }
-
-  node.children = nextChildren;
-};
-
 const isExactDoubleAsterisk = (value: string, offset: number) =>
   offset >= 0 &&
   value.slice(offset, offset + 2) === '**' &&
@@ -356,7 +355,9 @@ const isValidStrongCloser = (value: string, offset: number) => {
   if (!isExactDoubleAsterisk(value, offset)) return false;
 
   const precedingCharacter = value[offset - 1];
-  const followingCharacter = value[offset + 2];
+  const followingCodePoint = value.codePointAt(offset + 2);
+  const followingCharacter =
+    followingCodePoint === undefined ? undefined : String.fromCodePoint(followingCodePoint);
   if (!precedingCharacter || /\s/u.test(precedingCharacter)) return false;
 
   return (
@@ -446,23 +447,19 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     };
   };
 
-  const wrapRepairedAutolink = (link: MdastNode, split: { href: string; url: string }) => ({
+  const wrapRepairedAutolink = (
+    link: MdastNode,
+    split: { href: string; url: string }
+  ): MdastNode => ({
     type: 'strong' as const,
-    children: [
-      {
-        type: 'link' as const,
-        url: split.href,
-        title: link.title ?? null,
-        children: [{ type: 'text' as const, value: split.url }],
-      },
-    ],
+    children: [createTextLinkNode(split.href, split.url, link.title ?? null)],
   });
 
   const tryRepairMalformedBoldAutolink = (
     child: MdastNode,
     nextChild: MdastNode | undefined,
     source: string
-  ): MdastNode[] | undefined => {
+  ): MdastChildReplacement | undefined => {
     if (child.type === 'strong' && child.children?.length === 1) {
       const strongStart = child.position?.start?.offset;
       if (!isUnescapedDoubleAsterisk(source, typeof strongStart === 'number' ? strongStart : -1)) {
@@ -471,7 +468,9 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
 
       const split = splitMalformedAutolink(child.children[0], source);
       if (!split) return undefined;
-      return [wrapRepairedAutolink(child.children[0], split), ...split.suffixNodes];
+      return {
+        nodes: [wrapRepairedAutolink(child.children[0], split), ...split.suffixNodes],
+      };
     }
 
     if (child.type !== 'text' || typeof child.value !== 'string' || !child.value.endsWith('**')) {
@@ -498,31 +497,20 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       repaired.push({ ...child, value: textBeforeStrong });
     }
     repaired.push(wrapRepairedAutolink(nextChild, split), ...split.suffixNodes);
-    return repaired;
+    return { nodes: repaired, consumedSiblings: 1 };
   };
 
   return (tree: unknown, file: MarkdownFile) => {
-    const root = getMdastRoot(tree);
-    if (!root) return;
-
     const source = file.toString();
-    replaceMdastChildren(root, (child, index, siblings) => {
-      const repaired = tryRepairMalformedBoldAutolink(child, siblings[index + 1], source);
-      if (!repaired) return undefined;
-      return {
-        nodes: repaired,
-        skip: child.type !== 'strong' ? 1 : 0,
-      };
-    });
+    transformMdastChildren(tree, (child, nextChild) =>
+      tryRepairMalformedBoldAutolink(child, nextChild, source)
+    );
   };
 };
 
 const remarkLinkifyPlainUrls = () => {
   return (tree: unknown) => {
-    const root = getMdastRoot(tree);
-    if (!root) return;
-
-    replaceMdastChildren(root, (child) => {
+    transformMdastChildren(tree, (child) => {
       if (child.type === 'text' && typeof child.value === 'string') {
         return { nodes: linkifyTextValue(child.value) };
       }
@@ -543,8 +531,6 @@ const remarkLinkifyPlainUrls = () => {
           });
           return { nodes: wrappedChildren };
         }
-
-        return { nodes: [child] };
       }
 
       return undefined;
@@ -556,29 +542,17 @@ const remarkLinkifyPlainUrls = () => {
 // `link` nodes that explicit markdown file links use, so they flow through the
 // `a` -> AgentFileLink renderer. Runs AFTER URL linkify so URLs are already
 // `link` nodes (which this walk skips) and can't be re-grabbed as paths.
-const buildFilePathLinkNode = (path: string): MdastNode => ({
-  type: 'link',
-  url: path,
-  title: null,
-  children: [{ type: 'text', value: path }],
-});
-
 const remarkLinkifyFilePaths = () => {
   return (tree: unknown) => {
-    const root = getMdastRoot(tree);
-    if (!root) return;
-
-    replaceMdastChildren(root, (child) => {
+    transformMdastChildren(tree, (child) => {
       if (child.type === 'text' && typeof child.value === 'string') {
         const segments = splitTextIntoFilePathSegments(child.value);
-        if (segments.length === 1 && segments[0]?.type === 'text') {
-          return { nodes: [child] };
-        }
+        if (segments.length === 1 && segments[0]?.type === 'text') return undefined;
 
         return {
           nodes: segments.map((segment) =>
             segment.type === 'path'
-              ? buildFilePathLinkNode(segment.value)
+              ? createTextLinkNode(segment.value, segment.value)
               : { type: 'text', value: segment.value }
           ),
         };
@@ -586,7 +560,7 @@ const remarkLinkifyFilePaths = () => {
 
       if (child.type === 'inlineCode' && typeof child.value === 'string') {
         const path = matchWholeFilePath(child.value);
-        return { nodes: path ? [buildFilePathLinkNode(path)] : [child] };
+        return path ? { nodes: [createTextLinkNode(path, path)] } : undefined;
       }
 
       return undefined;
