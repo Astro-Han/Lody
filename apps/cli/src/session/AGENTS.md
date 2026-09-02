@@ -157,7 +157,11 @@ delegation proofs or a shared-machine gate without a new product and security de
   history mutation, leaving B pending and permanently unwatched.
   Because teardown/cancel finalize (`message-handler.ts`
   `finalizeACPState`, no-turnId overload) stamps `finished=true`/`endedAt` on the
-  in-progress entry, resume must **reopen** it: `writeAssistantEntryForTurn`'s
+  in-progress entry — and only that entry: `assistant-turn-finalize.ts`
+  `markAssistantTurnFinished` is a no-op on an already-finished one, because those
+  callers fire per live session at app close and a second stamp would rewrite a
+  long-finished turn's `endedAt` to now — resume must **reopen** it:
+  `writeAssistantEntryForTurn`'s
   existing-entry branch clears `finished`/`endedAt`/`permissionWaitMs` when re-adopting
   the entry for a live turn. Without that reset a machine-death-then-resume turn streams
   new output into a `finished=true` entry — the web renderer folds the still-streaming
