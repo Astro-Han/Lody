@@ -202,6 +202,51 @@ describe('SessionChatInputArea submission feedback', () => {
     ).not.toBeNull();
   });
 
+  it('does not submit against transient run-config defaults while the Session doc hydrates', async () => {
+    const onSendMessage = vi.fn(async () => true);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        createElement(SessionChatInputArea, {
+          session: {
+            id: 'session-hydrating',
+            userId: 'user-1',
+            machineId: 'machine-1',
+            agentConfigId: 'agent-1',
+            cliType: 'builtin',
+            agentType: 'codex',
+            status: { type: 'idle' },
+            isArchived: false,
+            createdAt: '2026-08-26T00:00:00.000Z',
+          } as SessionMeta,
+          sessionLocalProjectRootPath: null,
+          isMachineRemoved: false,
+          isAgentBusy: false,
+          isDark: false,
+          isEmptyConversation: false,
+          durableAgentRoleReady: false,
+          selectedModeId: null,
+          selectedModelId: 'provider-default',
+          modeOptions: [],
+          modelOptions: [],
+          onModeChange: () => undefined,
+          onModelChange: () => undefined,
+          onSendMessage,
+          onStop: () => undefined,
+          onRemoveQueueItem: async () => undefined,
+          initialInputText: 'wait for the durable config',
+        })
+      );
+    });
+
+    expect(container.querySelector('button')?.disabled).toBe(true);
+    await act(async () => container.querySelector('button')?.click());
+    expect(onSendMessage).not.toHaveBeenCalled();
+  });
+
   afterEach(async () => {
     await act(async () => root?.unmount());
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
