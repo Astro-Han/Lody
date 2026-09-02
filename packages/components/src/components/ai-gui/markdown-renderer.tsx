@@ -334,43 +334,37 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
 
   const decodeCharacterReference = (value: string) => getTextContent(parse(value));
 
-  const hasEscapedDoubleAsterisk = (source: string, startOffset: number, endOffset: number) =>
-    source.slice(startOffset, endOffset).includes('\\*\\*');
-
-  // Align a decoded AST marker with its original source offset. GFM may preserve
-  // backslash escapes in autolink text, while character references can decode.
-  const findRawDoubleAsterisk = (
+  // Build the decoded-to-source marker map once. GFM may preserve backslash
+  // escapes in autolink text, while character references can decode.
+  const mapRawDoubleAsterisks = (
     source: string,
     node: MdastNode,
-    decodedValue: string,
-    decodedOffset: number
-  ) => {
+    decodedValue: string
+  ): Map<number, number> => {
+    const markerOffsets = new Map<number, number>();
     const startOffset = node.position?.start?.offset;
     const endOffset = node.position?.end?.offset;
-    if (typeof startOffset !== 'number' || typeof endOffset !== 'number') return -1;
-
-    const rawValue = source.slice(startOffset, endOffset);
-    if (rawValue === decodedValue) {
-      const markerOffset = startOffset + decodedOffset;
-      return markerOffset >= 0 &&
-        markerOffset + 2 <= endOffset &&
-        source.slice(markerOffset, markerOffset + 2) === '**' &&
-        !hasEscapedDoubleAsterisk(source, startOffset, markerOffset)
-        ? markerOffset
-        : -1;
-    }
+    if (typeof startOffset !== 'number' || typeof endOffset !== 'number') return markerOffsets;
 
     let sourceOffset = startOffset;
     let decodedValueOffset = 0;
+    let hasEscapedDoubleAsterisk = false;
+    const characterReferencePattern = /&(?:#(?:x[0-9a-f]+|[0-9]+)|[a-z][a-z0-9]+);/iuy;
     while (sourceOffset < endOffset) {
-      if (decodedValueOffset === decodedOffset) {
-        return hasEscapedDoubleAsterisk(source, startOffset, sourceOffset) ? -1 : sourceOffset;
+      if (
+        source.startsWith('**', sourceOffset) &&
+        decodedValue.startsWith('**', decodedValueOffset)
+      ) {
+        if (!hasEscapedDoubleAsterisk) {
+          markerOffsets.set(decodedValueOffset, sourceOffset);
+        }
+        sourceOffset += 2;
+        decodedValueOffset += 2;
+        continue;
       }
 
-      const remainingSource = source.slice(sourceOffset, endOffset);
-      const characterReference = remainingSource.match(
-        /^&(?:#(?:x[0-9a-f]+|[0-9]+)|[a-z][a-z0-9]+);/iu
-      )?.[0];
+      characterReferencePattern.lastIndex = sourceOffset;
+      const characterReference = characterReferencePattern.exec(source)?.[0];
       if (characterReference) {
         const decodedReference = decodeCharacterReference(characterReference);
         const rawReferenceMatches = decodedValue.startsWith(characterReference, decodedValueOffset);
@@ -390,6 +384,9 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       }
 
       if (source[sourceOffset] === '\\' && /[!-/:-@[-`{-~]/u.test(source[sourceOffset + 1] ?? '')) {
+        if (source.startsWith('\\*\\*', sourceOffset)) {
+          hasEscapedDoubleAsterisk = true;
+        }
         const escapedSource = source.slice(sourceOffset, sourceOffset + 2);
         const escapedCharacter = source[sourceOffset + 1] ?? '';
         const rawEscapeMatches = decodedValue.startsWith(escapedSource, decodedValueOffset);
@@ -411,7 +408,7 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
       decodedValueOffset += sourceCharacterLength;
     }
 
-    return -1;
+    return markerOffsets;
   };
 
   const parseInlineSuffix = (value: string): MdastNode[] => {
@@ -427,12 +424,10 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
   };
 
   const findValidStrongMarker = (source: string, node: MdastNode, value: string) => {
-    for (
-      let markerIndex = value.indexOf('**');
-      markerIndex >= 0;
-      markerIndex = value.indexOf('**', markerIndex + 2)
-    ) {
-      const sourceOffset = findRawDoubleAsterisk(source, node, value, markerIndex);
+    const rawMarkerOffsets = mapRawDoubleAsterisks(source, node, value);
+    for (let markerIndex = 0; markerIndex + 1 < value.length; markerIndex += 1) {
+      if (value[markerIndex] !== '*' || value[markerIndex + 1] !== '*') continue;
+      const sourceOffset = rawMarkerOffsets.get(markerIndex) ?? -1;
       if (isValidStrongCloser(source, sourceOffset)) {
         return { markerIndex, sourceOffset };
       }

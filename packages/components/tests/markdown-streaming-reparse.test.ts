@@ -51,6 +51,9 @@ const ESCAPED_BOLD_CLOSER_AUTOLINK_MARKDOWN =
 const URL_WITH_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/path**segment';
 const URL_WITH_DOUBLE_ASTERISK_BEFORE_CODE_MARKDOWN = '**https://example.com/path**segment(`code`)';
 const URL_WITH_LATER_VALID_CLOSER_MARKDOWN = '**https://example.com/a**b/c**(`code`)';
+const LONG_URL_SEGMENTS = Array.from({ length: 64 }, (_, index) => `segment${index}**`).join('');
+const LONG_URL_WITH_REPEATED_NON_CLOSERS_MARKDOWN = `**https://example.com/${LONG_URL_SEGMENTS}final**(\`code\`)`;
+const LONG_URL_WITH_REPEATED_NON_CLOSERS = `https://example.com/${LONG_URL_SEGMENTS}final`;
 const EXPLICIT_BOLD_LINK_MARKDOWN =
   '**[https://example.com**(\\`code\\`)](https://destination.test)**';
 const URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN = '**https://example.com/**€(`code`)';
@@ -195,6 +198,15 @@ describe('MarkdownRenderer streaming rendering', () => {
     const link = container?.querySelector('[data-streamdown="strong"] a');
     expect(link?.getAttribute('href')).toBe('https://example.com/a**b/c');
     expect(link?.textContent).toBe('https://example.com/a**b/c');
+    expect(container?.querySelector('code')?.textContent).toBe('code');
+  });
+
+  it('handles many non-closing asterisk pairs before a valid closer', async () => {
+    await renderMarkdown(LONG_URL_WITH_REPEATED_NON_CLOSERS_MARKDOWN);
+
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
+    expect(link?.textContent).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
     expect(container?.querySelector('code')?.textContent).toBe('code');
   });
 
