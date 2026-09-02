@@ -234,12 +234,13 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.textContent).toContain('https://example.com');
   });
 
-  it('does not use a later closer after an escaped URL marker', async () => {
+  it('searches past an escaped URL marker for a later valid closer', async () => {
     await renderMarkdown(ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN);
 
-    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
-    expect(container?.querySelector('code')).toBeNull();
-    expect(container?.textContent).toContain('https://example.com/\\*\\*path');
+    const link = container?.querySelector('[data-streamdown="strong"] a');
+    expect(link?.getAttribute('href')).toBe('https://example.com/%5C*%5C*path');
+    expect(link?.textContent).toBe('https://example.com/\\*\\*path');
+    expect(container?.querySelector('code')?.textContent).toBe('code');
   });
 
   it('repairs bold autolinks when the URL contains an HTML entity', async () => {
