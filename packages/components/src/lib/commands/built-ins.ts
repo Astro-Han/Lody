@@ -117,12 +117,6 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Session',
   },
   {
-    id: 'session.closeFocusedTab',
-    titleKey: 'commands.session.closeFocusedTab',
-    title: 'Close Focused Tab',
-    category: 'Session',
-  },
-  {
     id: 'session.toggleTerminal',
     titleKey: 'commands.session.toggleTerminal',
     title: 'Toggle Terminal',

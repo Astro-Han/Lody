@@ -60,6 +60,7 @@ export function SettingsLayoutComponent() {
     typeof locationSearch.machine === 'string' && locationSearch.machine.length > 0;
   const isMobileMachineDetail =
     isMobile && activeTabId === 'machines' && hasAgentConfigMachineParam;
+  const settingsFrom = (location.search as { from?: string }).from;
 
   const handleBack = useCallback(() => {
     if (isMobileMachineDetail) {
@@ -75,9 +76,10 @@ export function SettingsLayoutComponent() {
     const destination = getSettingsBackDestination({
       isMobile,
       settingsListPage,
+      from: settingsFrom,
     });
 
-    if (destination === 'settings-list') {
+    if (destination.kind === 'settings-list') {
       void navigate({
         to: '/$workspaceName/settings',
         params: { workspaceName },
@@ -87,16 +89,20 @@ export function SettingsLayoutComponent() {
       return;
     }
 
-    // Settings exits back to the new session landing instead of browser history.
+    if (destination.kind === 'source') {
+      void navigate({ to: destination.to });
+      return;
+    }
+
+    // A direct settings entry has no source to restore.
     void navigate({
       to: '/$workspaceName/chat',
       params: { workspaceName },
     });
-  }, [isMobile, isMobileMachineDetail, navigate, settingsListPage, workspaceName]);
+  }, [isMobile, isMobileMachineDetail, navigate, settingsFrom, settingsListPage, workspaceName]);
 
   // Close (exit) settings entirely — back to where it was opened from (the `from` search
   // param, preserved across tabs) or the chat landing. Used by ⌘, (toggle) and Esc.
-  const settingsFrom = (location.search as { from?: string }).from;
   const handleCloseSettings = useCallback(() => {
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {

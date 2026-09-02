@@ -34,9 +34,12 @@ Session conversation page chain:
     conversation inserts a mention of that tab; dropping onto another tab
     still reorders. Pointer-over-conversation wins over closest-tab collision.
     A lone parent Session tab is not draggable; enable tab drag only once a
-    second visible tab exists. On desktop, Cmd/Ctrl+W closes the focused side
-    panel or child tab; when the parent is the only conversation tab, it leaves
-    the Session view for Chat Landing without archiving the Session.
+    second visible tab exists. On desktop, Cmd/Ctrl+W is the native Close
+    accelerator. Session-detail registers a tab closer: focused side panel or
+    child tab closes; the lone parent leaves for Chat Landing without archiving.
+    A parent with siblings is not closeable and does not close the window. With
+    no closer mounted (Chat Landing and other surfaces) the chord closes the
+    window.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
     below that threshold the active tab keeps that width and the others share the remainder.
     **The tab pills' top border shares one line with the sidebar and side-panel
@@ -242,6 +245,10 @@ Session conversation page chain:
   capability (Electron `WebContentsView` today); loopback/private targets use Managed Preview and
   are the only pages eligible for Visual Annotation. Never fall back from a missing public engine
   to iframe, system browser, CLI, Preview Gateway, or a different Machine RPC plane.
+  The public engine resolves every hostname and rejects non-public answers (DNS rebinding), with
+  one deliberate exception: a public name resolving into RFC 2544 `198.18.0.0/15` is a fake-IP
+  proxy's synthetic answer (Clash, Surge, sing-box, Shadowrocket) and is allowed via
+  `classifyResolvedBrowserAddress`; a literal `198.18.x.x` address stays prohibited.
   The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
   panel-open action. It opens the reported candidate even when another page is already visible.
   That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel
@@ -369,15 +376,41 @@ Session conversation page chain:
   instruction is frozen into the first Turn before draft promotion.
 
   **An existing session** (`useSessionAgentRole`) can NOT: its agent, machine,
-  and runtime are fixed. So it offers only Roles bound to an agent of the same
-  TYPE and applies only their RUN CONFIG, which is exactly what transfers:
-  model / reasoning / permission are published per `cliType:agentType`, and
-  they are the values a session can still change every turn. Availability is
-  not consulted there — nothing is going to that Role's machine — and the
+  and runtime are fixed. So it offers only Roles bound to that exact machine +
+  Agent Config (the model provider shown by the composer) and applies only their
+  RUN CONFIG, which is exactly what transfers: model / reasoning / permission
+  are the values a session can still change every turn. Keep the Role's real
+  availability so a stale binding stays visible but cannot be selected. The
   Role's INSTRUCTION is not applied, because a prompt prefix belongs to the
   first turn of a session the Role creates. The row is NOT gated on
   `isEmptyConversation`: those values stay changeable for the whole
-  conversation. `isAgentRoleRunConfigApplied` is the shared value rule;
+  conversation. An unsent explicit selection (including None) lives in
+  session-keyed app state rather than the composer component: top-level
+  navigation unmounts that component, and one shared override slot also makes
+  selecting a Role in a second Session erase the first Session's identity. On
+  send, freeze `agentRoleId` (null for None) plus `agentRoleRevision` into the
+  Turn `inputConfig`; the latest accepted/queued Turn is the synchronized
+  authority on remount and supersedes a draft made against an older Turn. A
+  session-keyed last-known durable snapshot may bridge the empty document while
+  that remount hydrates, but it is never an authority: replace it as soon as the
+  document is ready. Keep the known logical Turn lineage as its supersession
+  fence: queue promotion, deletion, reordering, and older history backfill are
+  not newer Turns; consume a draft only when the authoritative current Turn
+  moves to a previously unseen key. Role
+  selection and Turn submission stay disabled until the Session document is
+  ready because its transient provider defaults are not a valid run config.
+  Programmatic Turns inherit the current
+  Role only after their final run-config overrides are applied; if an override
+  breaks a value the Role pins, freeze explicit None instead of a lying Role id.
+  A legacy/non-composer Turn with both fields absent inherits the most recent
+  explicit selection; only `agentRoleId: null` means None. Keep unsynced catalog
+  rows and not-yet-hydrated Session docs in the unknown state — neither may
+  turn a durable Role into explicit None. If the catalog row is still unknown,
+  an unsent manual run-config edit drops stale Role provenance to unknown.
+  Session provenance remains the legacy fallback when the selected Turn
+  predates these fields; never rewrite `SessionMeta.agentRoleId`, which records
+  creation provenance only.
+  `isAgentRoleRunConfigApplied` is the shared value rule;
   `isComposerAgentRoleApplied` is that rule plus the landing's agent check. With Roles to pick it is a submenu of
   `None` + the Roles bound to the machine the chat will start on (a Role's
   `machineId + agentConfigId` are exact, so a Role from another machine could
@@ -422,9 +455,15 @@ Session conversation page chain:
   the menu the moment it opened; `AgentRoleEditorDialog` is the one editor,
   shared with Settings.
   Picking a Role flows through the SAME preference channel as that agent's
-  remembered defaults (`useReconcileAcpSessionConfigSelection`), never a second
+  remembered defaults (`useAcpSessionConfigSelectionState`), never a second
   apply path — so a pinned value the agent no longer supports falls back visibly
-  there instead of being forced in. The footer names a Role only while
+  there instead of being forced in. That channel is a PURE DERIVATION: user
+  edits are the only stored selection state, and effective values resolve per
+  render (user edit > runtime baseline > turn preference > capability default;
+  a full runtime snapshot owns the non-user config table). Never reintroduce a
+  reducer that stores the resolved selection or an effect that reconciles it —
+  two dispatches disagreeing about a runtime-omitted key plus options rebuilt
+  from the selection was a synchronous #185 render loop on session open. The footer names a Role only while
   `isComposerAgentRoleApplied` still holds (`lib/composer-agent-roles.ts`):
   every value the Role pins is what will run. Moving a knob takes the name away
   rather than clearing the preference, which would re-seed the value just
@@ -767,7 +806,9 @@ labelClassName`) so the stage diffstat never clips. Wired from
   near-saturated main thread per session switch. Any code path that sets
   `isSidebarOpen` from persisted/URL state rather than from a user action must
   bump `sidebarRestoreSeq` in the same commit (today: the session-switch reset
-  branch and the `?pr=` deep-link effect); `DesktopSessionDetailLayout` then
+  branch and the `?pr=` deep-link RENDER-PHASE adjustment — the restore is
+  deliberately not an effect, so the `?pr` clear effect can never observe
+  pre-restore sidebar state); `DesktopSessionDetailLayout` then
   applies it in one frame and re-arms the transition on the next rAF. User
   toggles (`handleToggleSidebar`, `handleOpenPrTab`, viewer/browser opens) still
   animate and must NOT bump it.

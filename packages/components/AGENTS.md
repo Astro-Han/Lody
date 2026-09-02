@@ -103,6 +103,14 @@ mobile surfaces.
   list — never a keep-allowlist, so a missed key survives a clear instead of a
   missed preference being wiped. Register new `lody:*` localStorage cache keys
   there; the auth token and preferences always survive a cache-level clear.
+- The copy payload also carries the tail of `lib/session-render-trace.ts`, a
+  module-level ring of session render/mount/navigation lines (consecutive
+  duplicates collapse into ×N). It exists because a React #185 (nested update
+  limit) report names the fiber where the limit tripped, not the loop that
+  drove it. Diagnostics only: writers append one compact line and must never
+  read the trace to drive behavior; the surface mount/unmount lines use a
+  LAYOUT effect because passive effects may never flush inside the crashing
+  cascade.
 - `maybeClearLodyCacheOnBoot` runs at most once per page load and is shared by
   `AppInitializer` (so a user wedged before any workspace still gets the wipe) and
   `RuntimeProvider` (which must await it before opening the repo IndexedDB).
@@ -263,7 +271,11 @@ mobile surfaces.
   raw HTML off. The website is only the no-notes fallback, through `getChangelogUrl`
   and `openExternalUrl`, never a hardcoded link.
 - Agent configuration: `settings/agent-config-dialog.tsx` and
-  `settings/env-vars-textarea.tsx`.
+  `settings/env-vars-textarea.tsx`. DeepSeek Harness official vs custom
+  endpoint is dialog form state only: persist `DEEPSEEK_API_KEY` /
+  `DEEPSEEK_BASE_URL` (official always writes `https://api.deepseek.com`)
+  and never a new AgentConfigMeta field. Additional env cannot override
+  those keys.
 - Codex reset forecast: `components/codex-reset/` + `lib/codex-reset-forecast*.ts`.
   A public unauthenticated GET to the third-party `codex-resets.com`, cached in ONE
   module-level store (`lib/codex-reset-forecast-store.ts`) that every surface shares.

@@ -18,7 +18,6 @@ export type ShortcutCommandId =
   | 'session.copyUrl'
   | 'session.renameCurrent'
   | 'session.newTabOrTerminal'
-  | 'session.closeFocusedTab'
   | 'session.toggleTerminal'
   | 'session.saveCurrentFile'
   | 'session.nextTab'
@@ -73,9 +72,6 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   // ⌥N creates a new tab, or a new terminal when the terminal is focused (desktop).
   // ⌘T is intentionally avoided — the browser claims it on web.
   'session.newTabOrTerminal': ['Alt+n'],
-  // Electron's native menu only displays this accelerator; the renderer owns it so the
-  // focused in-app tab closes instead of the BrowserWindow.
-  'session.closeFocusedTab': [electron('$mod+w')],
   // Open/close the terminal panel (desktop, local sessions only).
   'session.toggleTerminal': [electron('Ctrl+`'), electron('$mod+j')],
   'session.saveCurrentFile': ['$mod+s'],

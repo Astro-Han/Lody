@@ -393,6 +393,18 @@ export interface AssistantMessageAction {
   tone?: 'default' | 'accent';
 }
 
+export interface CapacityRetryControl {
+  noticeId: string;
+  retryInSeconds: number | null;
+  retryRemainingRatio: number | null;
+  pending: boolean;
+  canRetry: boolean;
+  autoRetryEnabled: boolean;
+  autoRetryExhausted: boolean;
+  retry: () => void;
+  stopAutoRetry: () => void;
+}
+
 // Exported for focused message/action binding tests.
 export const resolveAssistantMessageActions = (
   messageId: string,
@@ -1801,6 +1813,7 @@ export const MessageRowView = memo(function MessageRowView({
   onNavigateSession,
   onEdit,
   onResendUndelivered,
+  capacityRetry,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
 }: {
   message: SessionHistoryParsed;
@@ -1808,6 +1821,7 @@ export const MessageRowView = memo(function MessageRowView({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
   conversationFontSize?: ConversationFontSize;
 }) {
@@ -1828,6 +1842,7 @@ export const MessageRowView = memo(function MessageRowView({
         message={message}
         sessionId={sessionId}
         onNavigateSession={onNavigateSession}
+        capacityRetry={capacityRetry}
       />
     );
   }
@@ -1860,10 +1875,12 @@ const SystemMessageRowView = ({
   message,
   sessionId,
   onNavigateSession,
+  capacityRetry,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
+  capacityRetry?: CapacityRetryControl;
 }) => {
   const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const systemItems = message.items.flatMap((item, itemIndex) =>
@@ -1891,6 +1908,7 @@ const SystemMessageRowView = ({
             notice={item}
             sessionId={sessionId}
             onNavigateSession={onNavigateSession}
+            capacityRetry={capacityRetry}
           />
         ) : item.type === 'worktree_script' ? (
           <WorktreeScriptNoticeView
@@ -2066,16 +2084,20 @@ const SystemNoticeView = ({
   notice,
   sessionId,
   onNavigateSession,
+  capacityRetry,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
+  capacityRetry?: CapacityRetryControl;
 }) => {
   const { t } = useTranslation();
 
   switch (notice.name) {
     case 'chat_failed':
-      return <ChatFailedNoticeView notice={notice} sessionId={sessionId} />;
+      return (
+        <ChatFailedNoticeView notice={notice} sessionId={sessionId} capacityRetry={capacityRetry} />
+      );
     case 'agent_warning':
       return <AgentWarningNoticeView notice={notice} />;
     case 'resume_from_external_chat_history':
@@ -2190,9 +2212,11 @@ const SystemNoticeView = ({
 const ChatFailedNoticeView = ({
   notice,
   sessionId,
+  capacityRetry,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
+  capacityRetry?: CapacityRetryControl;
 }) => {
   const { t } = useTranslation();
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
@@ -2289,6 +2313,11 @@ const ChatFailedNoticeView = ({
           'sessions.systemNotices.chatFailed.acpUpstreamApiError',
           'Upstream API error — you can retry your message'
         );
+      case 'acp_provider_overloaded':
+        return t(
+          'sessions.systemNotices.chatFailed.acpProviderOverloaded',
+          'Selected model is at capacity. Please try a different model.'
+        );
       case 'acp_session_storage_incompatible':
         return t(
           'sessions.systemNotices.chatFailed.acpSessionStorageIncompatible',
@@ -2336,19 +2365,35 @@ const ChatFailedNoticeView = ({
   // raw message at all — even one whose readable extract equals the title, the
   // full payload (stack, upstream JSON) is still worth reading and copying.
   const hasDetail = Boolean(rawMessage && rawMessage.trim() !== reasonMessage);
+  const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
 
   const noticeBody = (
     <>
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <AlertCircle
+        className={cn('mt-0.5 h-4 w-4 shrink-0', isProviderOverloaded && 'text-muted-foreground')}
+        aria-hidden="true"
+      />
       <span className="flex min-w-0 flex-col items-start">
-        <span className="break-words text-left text-xs font-medium leading-5">{reasonMessage}</span>
+        <span
+          className={cn(
+            'break-words text-left text-xs leading-5',
+            isProviderOverloaded ? 'font-normal text-foreground/80' : 'font-medium'
+          )}
+        >
+          {reasonMessage}
+        </span>
         {actionMessage ? (
           <span className="max-w-xl break-words text-left text-xs font-normal leading-5 text-muted-foreground">
             {actionMessage}
           </span>
         ) : null}
         {hasDetail ? (
-          <span className="mt-0.5 inline-flex items-center gap-0.5 text-xs font-normal leading-5 text-destructive/80 underline underline-offset-2">
+          <span
+            className={cn(
+              'mt-0.5 inline-flex items-center gap-0.5 text-xs font-normal leading-5 underline underline-offset-2',
+              isProviderOverloaded ? 'text-muted-foreground' : 'text-destructive/80'
+            )}
+          >
             {t('sessions.systemNotices.chatFailed.viewDetails', 'View details')}
             <ChevronRight className="h-3 w-3" aria-hidden="true" />
           </span>
@@ -2358,16 +2403,68 @@ const ChatFailedNoticeView = ({
   );
 
   const rowClassName = cn(
-    'flex w-fit max-w-full items-start gap-2 rounded-md px-2 py-1 text-left text-destructive',
-    'hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none'
+    'flex w-fit max-w-full items-start gap-2 rounded-md px-2 py-1 text-left focus-visible:outline-none',
+    isProviderOverloaded
+      ? 'text-muted-foreground hover:bg-muted/40 focus-visible:bg-muted/40'
+      : 'text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10'
   );
+
+  const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
+  const isRetryCountdown = retryInSeconds !== null;
+  const stopAutoRetryLabel = t(
+    'sessions.systemNotices.chatFailed.stopAutoRetry',
+    'Stop auto-retry'
+  );
+  const retryAction =
+    isProviderOverloaded && capacityRetry ? (
+      <button
+        type="button"
+        aria-label={isRetryCountdown ? stopAutoRetryLabel : undefined}
+        className="group relative isolate inline-grid h-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted-foreground/[0.04] px-2.5 text-xs font-normal tabular-nums text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        disabled={capacityRetry.pending || !capacityRetry.canRetry}
+        onClick={isRetryCountdown ? capacityRetry.stopAutoRetry : capacityRetry.retry}
+      >
+        {capacityRetry.retryRemainingRatio !== null ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 -z-10 bg-muted-foreground/[0.08] transition-[width] duration-300 ease-linear"
+            style={{ width: `${capacityRetry.retryRemainingRatio * 100}%` }}
+          />
+        ) : null}
+        {isRetryCountdown ? (
+          <>
+            <span className="relative z-10 col-start-1 row-start-1 group-hover:invisible group-focus-visible:invisible [@media(hover:none)]:invisible">
+              {t('sessions.systemNotices.chatFailed.retryIn', 'Retry in {{seconds}}s', {
+                seconds: retryInSeconds,
+              })}
+            </span>
+            <span className="invisible relative z-10 col-start-1 row-start-1 group-hover:visible group-focus-visible:visible [@media(hover:none)]:visible">
+              {stopAutoRetryLabel}
+            </span>
+          </>
+        ) : (
+          <span className="relative z-10">
+            {capacityRetry.pending
+              ? t('sessions.systemNotices.chatFailed.retrying', 'Retrying…')
+              : capacityRetry.autoRetryExhausted
+                ? t('sessions.systemNotices.chatFailed.retryAgain', 'Retry again')
+                : capacityRetry.autoRetryEnabled
+                  ? t('sessions.systemNotices.chatFailed.retryNow', 'Retry now')
+                  : t(
+                      'sessions.systemNotices.chatFailed.retryAndEnableAuto',
+                      'Retry and auto-retry'
+                    )}
+          </span>
+        )}
+      </button>
+    ) : null;
 
   return (
     <div className="space-y-2 py-1 @[640px]:pl-3">
       {/* Tapping the notice opens a modal instead of a hover tooltip: a tooltip
           is unreachable on touch devices, which left mobile users with no way to
           read or copy the actual agent error. */}
-      <div role="alert" className="w-fit max-w-full">
+      <div role="alert" className="flex w-fit max-w-full flex-wrap items-center gap-2">
         {hasDetail ? (
           <button
             type="button"
@@ -2380,6 +2477,7 @@ const ChatFailedNoticeView = ({
         ) : (
           <div className={rowClassName}>{noticeBody}</div>
         )}
+        {retryAction}
       </div>
       {hasDetail ? (
         <ChatFailedDetailDialog
@@ -5362,11 +5460,7 @@ const PlanPanel = ({
       <div className="relative">
         <div
           ref={bodyRef}
-          className={cn(
-            CONVERSATION_PANEL_BODY_CLASS,
-            !isOpen && 'max-h-56 overflow-hidden',
-            isOpen && 'scrollbar-pro max-h-[32rem] overflow-y-auto'
-          )}
+          className={cn(CONVERSATION_PANEL_BODY_CLASS, !isOpen && 'max-h-56 overflow-hidden')}
         >
           <MarkdownRenderer
             text={plan.markdown}

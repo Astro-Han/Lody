@@ -13,6 +13,7 @@
 | Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler. |
 | Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                           |
 | Code checks         | `workflows/ci.yml`                                             | Preserve the stable `Static checks` and `Tests` jobs used as required checks.    |
+| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.           |
 
 Do not duplicate a rule across these layers. Changes to required PR template
 headings must update the checker in the same commit and validate representative
@@ -34,11 +35,8 @@ complete and rejected bodies locally.
   reviewing Agent. Require concise review focus, decisions to challenge, and
   plausible failures or evidence gaps; generic checklists and review essays are
   not valid substitutes.
-- An Agent preparing a fork-based contribution does not treat creating an Issue
-  as approval. It tells its author-side user about the policy and waits for
-  explicit maintainer agreement on scope and approach before implementation or
-  a PR. It also warns that Context handoff is public and an invalid PR closes
-  after the seven-day correction period. Never invent notice or agreement.
+- An Agent preparing a fork-based contribution explains that the Context handoff
+  is public and an invalid PR closes after the seven-day correction period.
 - Same-repository branches do not create or require an Issue solely for intake,
   and their bodies are not subject to the external contribution template.
 
