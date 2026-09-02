@@ -34,9 +34,12 @@ Session conversation page chain:
     conversation inserts a mention of that tab; dropping onto another tab
     still reorders. Pointer-over-conversation wins over closest-tab collision.
     A lone parent Session tab is not draggable; enable tab drag only once a
-    second visible tab exists. On desktop, Cmd/Ctrl+W closes the focused side
-    panel or child tab; when the parent is the only conversation tab, it leaves
-    the Session view for Chat Landing without archiving the Session.
+    second visible tab exists. On desktop, Cmd/Ctrl+W is the native Close
+    accelerator. Session-detail registers a tab closer: focused side panel or
+    child tab closes; the lone parent leaves for Chat Landing without archiving.
+    A parent with siblings is not closeable and does not close the window. With
+    no closer mounted (Chat Landing and other surfaces) the chord closes the
+    window.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
     below that threshold the active tab keeps that width and the others share the remainder.
     **The tab pills' top border shares one line with the sidebar and side-panel
