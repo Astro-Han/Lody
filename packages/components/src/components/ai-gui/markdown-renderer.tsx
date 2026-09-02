@@ -289,6 +289,50 @@ type MarkdownFile = {
   toString: () => string;
 };
 
+const getMdastRoot = (tree: unknown): MdastNode | undefined => {
+  if (typeof tree !== 'object' || tree === null) return undefined;
+  const root = tree as MdastNode;
+  return typeof root.type === 'string' ? root : undefined;
+};
+
+const shouldSkipMdastChildren = (node: MdastNode) =>
+  node.type === 'link' || node.type === 'linkReference' || node.type === 'code';
+
+type MdastChildReplacement = {
+  nodes: MdastNode[];
+  skip?: number;
+};
+
+const replaceMdastChildren = (
+  node: MdastNode,
+  replaceChild: (
+    child: MdastNode,
+    index: number,
+    siblings: MdastNode[]
+  ) => MdastChildReplacement | undefined
+) => {
+  if (shouldSkipMdastChildren(node)) return;
+
+  const children = node.children;
+  if (!Array.isArray(children) || children.length === 0) return;
+
+  const nextChildren: MdastNode[] = [];
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    const replacement = replaceChild(child, index, children);
+    if (replacement) {
+      nextChildren.push(...replacement.nodes);
+      index += replacement.skip ?? 0;
+      continue;
+    }
+
+    replaceMdastChildren(child, replaceChild);
+    nextChildren.push(child);
+  }
+
+  node.children = nextChildren;
+};
+
 const isExactDoubleAsterisk = (value: string, offset: number) =>
   offset >= 0 &&
   value.slice(offset, offset + 2) === '**' &&
@@ -457,51 +501,30 @@ const remarkRepairMalformedGfmAutolinks = function (this: MarkdownParser) {
     return repaired;
   };
 
-  const walk = (node: MdastNode, source: string) => {
-    if (node.type === 'link' || node.type === 'linkReference' || node.type === 'code') return;
-
-    const children = node.children;
-    if (!Array.isArray(children) || children.length === 0) return;
-
-    const nextChildren: MdastNode[] = [];
-    for (let index = 0; index < children.length; index += 1) {
-      const child = children[index];
-      const repaired = tryRepairMalformedBoldAutolink(child, children[index + 1], source);
-      if (repaired) {
-        nextChildren.push(...repaired);
-        if (child.type !== 'strong') index += 1;
-        continue;
-      }
-
-      walk(child, source);
-      nextChildren.push(child);
-    }
-
-    node.children = nextChildren;
-  };
-
   return (tree: unknown, file: MarkdownFile) => {
-    if (typeof tree !== 'object' || tree === null) return;
-    const root = tree as MdastNode;
-    if (typeof root.type !== 'string') return;
-    walk(root, file.toString());
+    const root = getMdastRoot(tree);
+    if (!root) return;
+
+    const source = file.toString();
+    replaceMdastChildren(root, (child, index, siblings) => {
+      const repaired = tryRepairMalformedBoldAutolink(child, siblings[index + 1], source);
+      if (!repaired) return undefined;
+      return {
+        nodes: repaired,
+        skip: child.type !== 'strong' ? 1 : 0,
+      };
+    });
   };
 };
 
 const remarkLinkifyPlainUrls = () => {
-  const walk = (node: MdastNode) => {
-    if (node.type === 'link' || node.type === 'linkReference') return;
-    if (node.type === 'code') return;
+  return (tree: unknown) => {
+    const root = getMdastRoot(tree);
+    if (!root) return;
 
-    const children = node.children;
-    if (!Array.isArray(children) || children.length === 0) return;
-
-    const nextChildren: MdastNode[] = [];
-    for (const child of children) {
+    replaceMdastChildren(root, (child) => {
       if (child.type === 'text' && typeof child.value === 'string') {
-        const linkified = linkifyTextValue(child.value);
-        nextChildren.push(...linkified);
-        continue;
+        return { nodes: linkifyTextValue(child.value) };
       }
 
       if (child.type === 'inlineCode' && typeof child.value === 'string') {
@@ -518,25 +541,14 @@ const remarkLinkifyPlainUrls = () => {
             }
             return { type: 'inlineCode', value: n.value };
           });
-          nextChildren.push(...wrappedChildren);
-        } else {
-          nextChildren.push(child);
+          return { nodes: wrappedChildren };
         }
-        continue;
+
+        return { nodes: [child] };
       }
 
-      nextChildren.push(child);
-      walk(child);
-    }
-
-    node.children = nextChildren;
-  };
-
-  return (tree: unknown) => {
-    if (typeof tree !== 'object' || tree === null) return;
-    const root = tree as MdastNode;
-    if (typeof root.type !== 'string') return;
-    walk(root);
+      return undefined;
+    });
   };
 };
 
@@ -552,49 +564,33 @@ const buildFilePathLinkNode = (path: string): MdastNode => ({
 });
 
 const remarkLinkifyFilePaths = () => {
-  const walk = (node: MdastNode) => {
-    if (node.type === 'link' || node.type === 'linkReference') return;
-    if (node.type === 'code') return;
+  return (tree: unknown) => {
+    const root = getMdastRoot(tree);
+    if (!root) return;
 
-    const children = node.children;
-    if (!Array.isArray(children) || children.length === 0) return;
-
-    const nextChildren: MdastNode[] = [];
-    for (const child of children) {
+    replaceMdastChildren(root, (child) => {
       if (child.type === 'text' && typeof child.value === 'string') {
         const segments = splitTextIntoFilePathSegments(child.value);
         if (segments.length === 1 && segments[0]?.type === 'text') {
-          nextChildren.push(child);
-          continue;
+          return { nodes: [child] };
         }
-        for (const segment of segments) {
-          nextChildren.push(
+
+        return {
+          nodes: segments.map((segment) =>
             segment.type === 'path'
               ? buildFilePathLinkNode(segment.value)
               : { type: 'text', value: segment.value }
-          );
-        }
-        continue;
+          ),
+        };
       }
 
       if (child.type === 'inlineCode' && typeof child.value === 'string') {
         const path = matchWholeFilePath(child.value);
-        nextChildren.push(path ? buildFilePathLinkNode(path) : child);
-        continue;
+        return { nodes: path ? [buildFilePathLinkNode(path)] : [child] };
       }
 
-      nextChildren.push(child);
-      walk(child);
-    }
-
-    node.children = nextChildren;
-  };
-
-  return (tree: unknown) => {
-    if (typeof tree !== 'object' || tree === null) return;
-    const root = tree as MdastNode;
-    if (typeof root.type !== 'string') return;
-    walk(root);
+      return undefined;
+    });
   };
 };
 
