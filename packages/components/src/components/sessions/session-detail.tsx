@@ -200,6 +200,7 @@ import {
 import { useSessionDiffSummary } from './use-session-diff-summary';
 import { userAtom } from '@/atoms';
 import {
+  appendTabOrderId,
   createDraftSessionTab,
   filterPendingPromotedChildSessions,
   getDraftTabLabel,
@@ -1288,7 +1289,7 @@ const SessionDetail = ({
       });
       if (placement === 'tab') {
         setTabOrderState((current) =>
-          current.includes(targetSessionId) ? current : [...current, targetSessionId]
+          appendTabOrderId(current, sessionGroupIds, targetSessionId)
         );
       }
       if (response.partial && response.warnings.length > 0) {
@@ -1297,7 +1298,7 @@ const SessionDetail = ({
         );
       }
     },
-    [canForkSession, currentWorkspaceId, pendingForks, postHog, runtime, t, user?.id]
+    [canForkSession, currentWorkspaceId, pendingForks, postHog, runtime, sessionGroupIds, t, user?.id]
   );
   const pendingForkSourceByTargetSessionId = useMemo(() => {
     const sourceByTarget = new Map<SessionId, string>();
@@ -1915,6 +1916,7 @@ const SessionDetail = ({
       modelId: null,
     });
     setDraftTabs((prev) => [...prev, draft]);
+    setTabOrderState((prev) => appendTabOrderId(prev, sessionGroupIds, draft.id));
     if (isMobile) {
       setActiveViewerTabId(null);
     }
@@ -1923,7 +1925,14 @@ const SessionDetail = ({
       draft_tab_id: draft.id,
       source_session_id: activeSession.id,
     });
-  }, [activeSession, captureSessionDetailEvent, isMobile, navigateToSessionTab, setDraftTabs]);
+  }, [
+    activeSession,
+    captureSessionDetailEvent,
+    isMobile,
+    navigateToSessionTab,
+    sessionGroupIds,
+    setDraftTabs,
+  ]);
 
   const handleDraftChange = useCallback(
     (draftId: DraftSessionTab['id'], patch: Partial<DraftSessionTab>) => {
@@ -2066,7 +2075,13 @@ const SessionDetail = ({
           setSessionChatInputTextDraft(childSessionId, payload.preservedInputText);
         }
         setDraftTabs((prev) => prev.filter((draft) => draft.id !== payload.draftId));
-        setTabOrderState((prev) => replaceTabOrderId(prev, payload.draftId, childSessionId));
+        setTabOrderState((prev) =>
+          replaceTabOrderId(
+            appendTabOrderId(prev, sessionGroupIds, payload.draftId),
+            payload.draftId,
+            childSessionId
+          )
+        );
         if (isMobile) {
           setActiveViewerTabId(null);
         }
@@ -2177,6 +2192,7 @@ const SessionDetail = ({
       navigateToSessionTab,
       openSettings,
       requestSessionDispatch,
+      sessionGroupIds,
       setDraftTabs,
       startSession,
       t,
