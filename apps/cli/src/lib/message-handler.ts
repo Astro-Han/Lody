@@ -2836,6 +2836,7 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
+    const principal = operation.frozenContinuationConfig.principal;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {
@@ -2860,8 +2861,12 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        requesterUserId: operation.requesterUserId,
-        sessionOwnerUserId: requester.userId,
+        ...(principal
+          ? { principal, sessionOwnerUserId: principal.userId }
+          : {
+              requesterUserId: operation.requesterUserId,
+              sessionOwnerUserId: requester.userId,
+            }),
         defaultMachineId: requester.machineId,
         sessionId: item.target.sessionId,
         userTurnId: item.target.userTurnId,
@@ -2910,12 +2915,13 @@ export class MessageHandler {
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
       },
       undefined,
-      operation.requesterUserId,
+      principal ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
-      }
+      },
+      principal
     );
   }
 

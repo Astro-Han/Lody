@@ -28,6 +28,10 @@ Root and `apps/cli/AGENTS.md` instructions apply.
   the workspace catalog; no driving-Turn mention authorization is required. Resolve its target,
   Prompt prefix, revision, and concrete run config before Operation acceptance. Recovery uses
   the frozen canonical Prompt and target dispatch config and never rereads the mutable catalog.
+- Session orchestration derives its human principal from the exact persisted user/system Turn
+  driving the current Agent execution, not from the daemon credential or Session owner. Freeze
+  source Session/Turn ids, principal user, actor, and executor with every accepted Operation;
+  legacy synchronous paths use the same derivation and reject a source Turn without userId.
 - Direct Role creation stays on the ordinary `lody_session_create` and
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
   and run-config fields but remove them before resolution: the current Role row is authoritative

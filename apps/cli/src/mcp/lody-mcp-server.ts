@@ -51,6 +51,7 @@ import {
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionOperationPrincipal,
   type TaskId,
   type TaskIndexRow,
   type TaskPrProvider,
@@ -71,6 +72,7 @@ import {
   resolveActiveAssistantTurnId,
   resolveProjectGitHubRepo,
   type LodyOperationItemResult,
+  type StoredLodyOperation,
   type SessionTurnInputConfig,
   REVIEW_SEVERITY_VALUES,
   REVIEW_VERDICT_VALUES,
@@ -2088,6 +2090,7 @@ const canUseMachineForOptions = async (args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   requesterUserId: string;
+  principal: SessionOperationPrincipal;
   localProjectId?: string;
 }): Promise<boolean> => {
   const access = await readSessionMachineAccess({
@@ -2095,6 +2098,7 @@ const canUseMachineForOptions = async (args: {
     workspaceId: args.workspaceId,
     machineId: args.machineId,
     requesterUserId: args.requesterUserId,
+    principal: args.principal,
     ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
   });
   return access.allowed;
@@ -2104,7 +2108,8 @@ const filterAuthorizedMachinesForOptions = async (
   auth: AuthContext,
   workspaceId: WorkspaceId,
   machines: readonly MachineMeta[],
-  requesterUserId: string
+  requesterUserId: string,
+  principal: SessionOperationPrincipal
 ): Promise<MachineMeta[]> => {
   const rows = await Promise.all(
     machines.map(async (machine) => ({
@@ -2114,6 +2119,7 @@ const filterAuthorizedMachinesForOptions = async (
         workspaceId,
         machineId: machine.id,
         requesterUserId,
+        principal,
       }),
     }))
   );
@@ -2125,7 +2131,8 @@ const filterAuthorizedLocalProjectsForOptions = async (
   workspaceId: WorkspaceId,
   machineId: MachineId,
   localProjects: readonly LocalProjectMeta[],
-  requesterUserId: string
+  requesterUserId: string,
+  principal: SessionOperationPrincipal
 ): Promise<LocalProjectMeta[]> => {
   const rows = await Promise.all(
     localProjects.map(async (project) => ({
@@ -2135,6 +2142,7 @@ const filterAuthorizedLocalProjectsForOptions = async (
         workspaceId,
         machineId,
         requesterUserId,
+        principal,
         localProjectId: project.id,
       }),
     }))
@@ -2170,17 +2178,61 @@ const readCurrentSessionMeta = async (
 
 const bindMcpCreateContext = (
   options: CreateOptions,
-  auth: Pick<AuthContext, 'userId'>,
-  requester: Pick<SessionMeta, 'machineId' | 'userId'>
+  principal: SessionOperationPrincipal,
+  requester: Pick<SessionMeta, 'machineId'>
 ): void => {
-  options.requesterUserId = auth.userId;
-  options.sessionOwnerUserId = requester.userId;
+  options.principal = principal;
+  options.sessionOwnerUserId = principal.userId;
   options.defaultMachineId = requester.machineId;
 };
 
 type InvokingTurnContext = {
   chainDepth: number;
   frozenInputConfig: SessionTurnInputConfig;
+  principal: SessionOperationPrincipal;
+};
+
+const buildInvokingTurnPrincipal = (
+  session: Pick<SessionMeta, 'id'>,
+  source: Pick<SessionHistoryInput, 'id' | 'userId'>,
+  executorUserId: string
+): SessionOperationPrincipal => {
+  const userId = source.userId?.trim();
+  if (!userId) {
+    throw new LodyOperationStoreError(
+      'INVOKING_PRINCIPAL_UNAVAILABLE',
+      `The driving Turn ${source.id} has no authenticated human identity.`,
+      false
+    );
+  }
+  return {
+    userId,
+    sourceSessionId: session.id,
+    sourceTurnId: source.id,
+    actor: 'agent',
+    executorUserId,
+  };
+};
+
+const assertOperationRetryPrincipal = (
+  operation: StoredLodyOperation,
+  principal: SessionOperationPrincipal
+): void => {
+  const stored = operation.frozenContinuationConfig.principal;
+  if (!stored) return;
+  if (
+    stored.userId !== principal.userId ||
+    stored.sourceSessionId !== principal.sourceSessionId ||
+    stored.sourceTurnId !== principal.sourceTurnId ||
+    stored.actor !== principal.actor ||
+    stored.executorUserId !== principal.executorUserId
+  ) {
+    throw new LodyOperationStoreError(
+      'OPERATION_ID_REUSED',
+      `Operation id ${operation.operationId} is already bound to a different invoking Turn.`,
+      false
+    );
+  }
 };
 
 const resolveInvokingHistoryInput = (
@@ -2229,11 +2281,19 @@ const assertInvokingTurnTaskToolsEnabled = async (
 
 const resolveInvokingTurnContext = async (
   manager: LoroDocumentManager,
-  session: SessionMeta
+  session: SessionMeta,
+  executorUserId: string
 ): Promise<InvokingTurnContext> => {
   const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
   const history = await sessionDoc.getHistory();
   const source = resolveInvokingHistoryInput(history);
+  if (!source) {
+    throw new LodyOperationStoreError(
+      'INVOKING_TURN_NOT_FOUND',
+      'The exact Turn driving this MCP invocation is unavailable.',
+      false
+    );
+  }
   const chainDepth = source?.inputConfig?.chainDepth ?? 0;
   if (chainDepth >= LODY_MAX_CHAIN_DEPTH) {
     throw new LodyOperationStoreError(
@@ -2244,6 +2304,7 @@ const resolveInvokingTurnContext = async (
   }
   return {
     chainDepth,
+    principal: buildInvokingTurnPrincipal(session, source, executorUserId),
     frozenInputConfig: {
       ...(source?.inputConfig ?? {}),
       cliType: source?.inputConfig?.cliType ?? session.cliType,
@@ -2432,6 +2493,7 @@ const summarizeLocalProjectForOptions = async (
   machine: MachineMeta,
   project: LocalProjectMeta,
   requesterUserId: string,
+  principal: SessionOperationPrincipal,
   machineOnline: boolean
 ) => {
   const gitState =
@@ -2443,6 +2505,7 @@ const summarizeLocalProjectForOptions = async (
           localProjectId: project.id,
           localRootPath: project.rootPath,
           requesterUserId,
+          principal,
         }).catch((error: unknown) => ({
           success: false as const,
           error: String(error),
@@ -2474,7 +2537,8 @@ const buildSessionCreateOptions = async (
     if (!currentSession) {
       throw new Error(`Session not found: ${ctx.sessionId}`);
     }
-    const requesterUserId = auth.userId;
+    const invoking = await resolveInvokingTurnContext(manager, currentSession, auth.userId);
+    const requesterUserId = invoking.principal.userId;
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
     const onlineMachineIds = await manager.getOnlineMachineIds();
     const isMachineOnline = (machineId: MachineId): boolean =>
@@ -2487,7 +2551,8 @@ const buildSessionCreateOptions = async (
       auth,
       workspaceId,
       machineCandidates,
-      requesterUserId
+      requesterUserId,
+      invoking.principal
     );
     const selectedMachine = selectMachineForOptions(
       machines,
@@ -2540,7 +2605,8 @@ const buildSessionCreateOptions = async (
         workspaceId,
         selectedMachine.id,
         localProjectCandidates,
-        requesterUserId
+        requesterUserId,
+        invoking.principal
       )
     ).slice(0, MAX_MCP_CREATE_OPTION_MATCHES);
     const summarizedLocalProjects = await Promise.all(
@@ -2551,6 +2617,7 @@ const buildSessionCreateOptions = async (
           selectedMachine,
           project,
           requesterUserId,
+          invoking.principal,
           isMachineOnline(selectedMachine.id)
         )
       )
@@ -2608,7 +2675,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         false
       );
     }
-    const invoking = await resolveInvokingTurnContext(manager, currentSession);
+    const invoking = await resolveInvokingTurnContext(manager, currentSession, auth.userId);
     const roleCatalog = args.agentRoleId
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -2627,11 +2694,14 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         canonicalCommand
       )
     );
-    if (retry) return await withOperationStore((store) => store.snapshot(retry));
+    if (retry) {
+      assertOperationRetryPrincipal(retry, invoking.principal);
+      return await withOperationStore((store) => store.snapshot(retry));
+    }
     const targetMachineId = (resolved.input.machineId ?? currentSession.machineId) as MachineId;
     await assertMachineOnlineForSingleCommand(manager, targetMachineId, ctx);
     const createOptions = buildMcpCreateOptions(resolved.input, ctx);
-    bindMcpCreateContext(createOptions, auth, currentSession);
+    bindMcpCreateContext(createOptions, invoking.principal, currentSession);
     bindAgentRoleCreateOptions(createOptions, resolved.role);
     createOptions.workspaceMetaPrewriteSatisfied = true;
     let effectiveDispatchConfig: ResolvedTurnDispatchConfig;
@@ -2660,7 +2730,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           workspaceId: workspace.id as WorkspaceId,
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
-          requesterUserId: auth.userId,
+          requesterUserId: invoking.principal.userId,
           operationId: args.operationId!,
           kind: 'session_create',
           canonicalCommand,
@@ -2669,6 +2739,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
               ? { agentConfigId: currentSession.agentConfigId }
               : {}),
             inputConfig: invoking.frozenInputConfig,
+            principal: invoking.principal,
             targetDispatchConfigs: [effectiveDispatchConfig],
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -2752,6 +2823,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         false
       );
     }
+    const invoking = await resolveInvokingTurnContext(manager, currentSession, auth.userId);
     const canonicalCommand = {
       sessionId: args.sessionId,
       prompt: args.prompt,
@@ -2765,7 +2837,10 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         canonicalCommand
       )
     );
-    if (retry) return await withOperationStore((store) => store.snapshot(retry));
+    if (retry) {
+      assertOperationRetryPrincipal(retry, invoking.principal);
+      return await withOperationStore((store) => store.snapshot(retry));
+    }
     const targetSession = await readCurrentSessionMeta(manager, args.sessionId as SessionId);
     if (!targetSession) {
       throw new LodyOperationStoreError(
@@ -2782,7 +2857,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         workspace,
         manager,
         sessionId: targetSession.id,
-        requesterUserIdOverride: auth.userId,
+        principal: invoking.principal,
       });
     } catch (error) {
       if (error instanceof WorkspaceSyncUnavailableError) {
@@ -2790,7 +2865,6 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       }
       throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
     }
-    const invoking = await resolveInvokingTurnContext(manager, currentSession);
     const preallocatedUserTurnId = randomUUID();
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
@@ -2800,7 +2874,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           workspaceId: workspace.id as WorkspaceId,
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
-          requesterUserId: auth.userId,
+          requesterUserId: invoking.principal.userId,
           operationId: args.operationId!,
           kind: 'session_chat',
           canonicalCommand,
@@ -2809,6 +2883,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
               ? { agentConfigId: currentSession.agentConfigId }
               : {}),
             inputConfig: invoking.frozenInputConfig,
+            principal: invoking.principal,
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,
@@ -2836,11 +2911,12 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           taskToolsEnabled: invoking.frozenInputConfig.taskToolsEnabled === true,
         },
         undefined,
-        auth.userId,
+        undefined,
         {
           userTurnId: pendingItem.target.userTurnId,
           chainDepth: invoking.chainDepth + 1,
-        }
+        },
+        invoking.principal
       );
       if (result.userTurnId !== pendingItem.target.userTurnId) {
         throw new Error('Chat result did not preserve the preallocated target turn id.');
@@ -3014,7 +3090,7 @@ const startSessionCreateManyOperation = async (
       );
     }
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
-    const invoking = await resolveInvokingTurnContext(manager, requester);
+    const invoking = await resolveInvokingTurnContext(manager, requester, auth.userId);
     const roleCatalog = expanded.some((item) => Boolean(item.agentRoleId))
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -3066,7 +3142,10 @@ const startSessionCreateManyOperation = async (
         canonicalCommand
       )
     );
-    if (retry) return await withOperationStore((store) => store.snapshot(retry));
+    if (retry) {
+      assertOperationRetryPrincipal(retry, invoking.principal);
+      return await withOperationStore((store) => store.snapshot(retry));
+    }
     const isMachineOnline = makeMachineOnlineLookupForMcp(manager, ctx);
     const validatedItems = await mapWithConcurrency(
       expanded,
@@ -3137,7 +3216,7 @@ const startSessionCreateManyOperation = async (
           };
         }
         const options = buildMcpCreateOptions(resolved.input, ctx);
-        bindMcpCreateContext(options, auth, requester);
+        bindMcpCreateContext(options, invoking.principal, requester);
         bindAgentRoleCreateOptions(options, resolved.role);
         try {
           const effectiveDispatchConfig = await validateSessionCreateOptions({
@@ -3176,13 +3255,14 @@ const startSessionCreateManyOperation = async (
           workspaceId: workspace.id as WorkspaceId,
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
-          requesterUserId: auth.userId,
+          requesterUserId: invoking.principal.userId,
           operationId: args.operationId,
           kind: 'session_create_many',
           canonicalCommand,
           frozenContinuationConfig: {
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
+            principal: invoking.principal,
             targetDispatchConfigs,
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -3219,7 +3299,7 @@ const startSessionCreateManyOperation = async (
         }
         try {
           const options = buildMcpCreateOptions(resolved.input, ctx);
-          bindMcpCreateContext(options, auth, requester);
+          bindMcpCreateContext(options, invoking.principal, requester);
           bindAgentRoleCreateOptions(options, resolved.role);
           options.sessionId = storedItem.target.sessionId;
           options.userTurnId = storedItem.target.userTurnId;
@@ -3288,6 +3368,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
       );
     }
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
+    const invoking = await resolveInvokingTurnContext(manager, requester, auth.userId);
     const canonicalCommand = {
       items: expanded,
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
@@ -3300,8 +3381,10 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         canonicalCommand
       )
     );
-    if (retry) return await withOperationStore((store) => store.snapshot(retry));
-    const invoking = await resolveInvokingTurnContext(manager, requester);
+    if (retry) {
+      assertOperationRetryPrincipal(retry, invoking.principal);
+      return await withOperationStore((store) => store.snapshot(retry));
+    }
     const isMachineOnline = makeMachineOnlineLookupForMcp(manager, ctx);
     const initialItems = await mapWithConcurrency(
       expanded,
@@ -3346,7 +3429,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             workspace,
             manager,
             sessionId: target.id,
-            requesterUserIdOverride: auth.userId,
+            principal: invoking.principal,
           });
         } catch (error) {
           if (error instanceof WorkspaceSyncUnavailableError) {
@@ -3365,13 +3448,14 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           workspaceId: workspace.id as WorkspaceId,
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
-          requesterUserId: auth.userId,
+          requesterUserId: invoking.principal.userId,
           operationId: args.operationId,
           kind: 'session_chat_many',
           canonicalCommand,
           frozenContinuationConfig: {
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
+            principal: invoking.principal,
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,
@@ -3416,12 +3500,13 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
               taskToolsEnabled: invoking.frozenInputConfig.taskToolsEnabled === true,
             },
             undefined,
-            auth.userId,
+            undefined,
             {
               userTurnId: storedItem.target.userTurnId,
               chainDepth: invoking.chainDepth + 1,
               bypassSessionQuota: shouldBypassSessionQuota('session_chat_many'),
-            }
+            },
+            invoking.principal
           );
           await withOperationStore((store) =>
             store.markItemInputDurable(
@@ -3916,6 +4001,8 @@ export const __lodyMcpServerInternals = {
   applySessionRenameItems,
   persistSessionRenameItems,
   resolveInvokingHistoryInput,
+  buildInvokingTurnPrincipal,
+  assertOperationRetryPrincipal,
   buildOperationTargetCancelArgs,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
@@ -4240,11 +4327,7 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
           if (!currentSession) {
             throw new Error(`Session not found: ${ctx.sessionId}`);
           }
-          // Only a Role needs the driving Turn here, for the task-tool flag.
-          // This legacy path does not persist a continuation config.
-          const invoking = args.agentRoleId
-            ? await resolveInvokingTurnContext(manager, currentSession)
-            : undefined;
+          const invoking = await resolveInvokingTurnContext(manager, currentSession, auth.userId);
           const roleCatalog = args.agentRoleId
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
@@ -4255,7 +4338,7 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
             args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined
           );
           const options = buildMcpCreateOptions(resolved.input, ctx);
-          bindMcpCreateContext(options, auth, currentSession);
+          bindMcpCreateContext(options, invoking.principal, currentSession);
           bindAgentRoleCreateOptions(options, resolved.role);
           options.workspaceMetaPrewriteSatisfied = true;
           const result = await createSessionResult(
@@ -4337,6 +4420,7 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
             throw new Error(`Session not found: ${sessionId}`);
           }
           assertDifferentMcpSession(currentSession, targetSession);
+          const invoking = await resolveInvokingTurnContext(manager, currentSession, auth.userId);
           const result = await sendSessionChatResult(
             auth,
             workspace,
@@ -4345,7 +4429,9 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
             args.prompt,
             resolveTurnDispatchConfig({}),
             buildStructuredOutputOptions(args),
-            auth.userId
+            undefined,
+            undefined,
+            invoking.principal
           );
           const response = {
             ok: true,

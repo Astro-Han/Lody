@@ -25,6 +25,11 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
 - Create Operations freeze each target's effective dispatch config at
   acceptance; recovery must not re-read mutable requester history defaults.
   Full content stays in the target Session history.
+- Accepted Operations freeze the exact invoking principal and source Session/Turn. Recovery
+  routes attribution and member-scoped authorization through that frozen principal while the
+  owner Machine credential remains the executor credential. Completion system Turns retain the
+  same userId so a continuation cannot silently switch principals. Idempotent retries must match
+  the frozen principal; a later Turn reusing the id is `OPERATION_ID_REUSED`, not a retry.
 - `operation-coordinator.ts` is owned only by the local Host-lease Worker. MCP
   subprocesses may accept Operations but never schedule completion Turns.
 - Reconciliation is level-checked. Loro subscriptions and SQLite directory

@@ -9,13 +9,17 @@ message bus. The WS/DO path is DEPRECATED.
 Session CLI/MCP orchestration contract:
 specs/session-orchestration.md. Target-machine
 authorization is checked by the injected access capability with the source CLI token,
-which derives the requester identity at the trusted boundary. Do not send a caller-supplied requester
-through workspace Machine RPC: that transport does not authenticate member identity.
+which derives the requester identity for ordinary CLI calls and verifies the frozen Turn
+principal for MCP delegation. Do not send an untrusted caller-supplied requester through
+workspace Machine RPC: that transport does not authenticate member identity.
 Live status is a target-daemon Machine RPC read, and durable session metadata is not a
 live-presence substitute.
-Session orchestration MCP intentionally runs with the daemon owner's CLI credential,
-including for teammate-started Sessions on a shared machine. Do not add requester
-delegation proofs or a shared-machine gate without a new product and security decision.
+Session orchestration MCP authenticates execution with the daemon owner's CLI credential,
+but derives the human principal from the exact persisted Turn driving the Agent. Freeze that
+principal and its source Session/Turn into durable Operations; retries and recovery must not
+reread mutable history. Machine and Provider credentials remain execution-host scoped, while
+Session/Turn attribution, member authorization, GitHub access, and downstream Git identity use
+the frozen principal. Never fall back to the Session owner when the driving Turn has no userId.
 
 - `session-dispatch-watcher.ts` — the current dispatch entry: watches
   `repo.watch('doc-metadata')` + per-session mirror subscribe; dispatches when

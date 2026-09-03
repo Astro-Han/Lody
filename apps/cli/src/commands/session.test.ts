@@ -46,6 +46,7 @@ import {
   resolveOpenedBySessionRelation,
   resolveSessionCreateOwnerUserId,
   selectDefaultAgentConfigForCreate,
+  resolveSessionCommandPrincipalUserId,
   resolveSessionCommandRequesterUserId,
   resolveChatArgs,
   resolveRenameArgs,
@@ -345,6 +346,25 @@ describe('session command helpers', () => {
     expect(resolveSessionCommandRequesterUserId({ userId: 'machine-owner' }, '   ')).toBe(
       'machine-owner'
     );
+  });
+
+  it('accepts only a delegated principal bound to the authenticated executor', () => {
+    const principal = {
+      userId: 'collaborator-b',
+      sourceSessionId: 'source-session' as SessionId,
+      sourceTurnId: 'source-turn',
+      actor: 'agent' as const,
+      executorUserId: 'machine-owner-a',
+    };
+    expect(
+      resolveSessionCommandPrincipalUserId({ userId: 'machine-owner-a' }, undefined, principal)
+    ).toBe('collaborator-b');
+    expect(() =>
+      resolveSessionCommandPrincipalUserId({ userId: 'machine-owner-c' }, undefined, principal)
+    ).toThrow('executor must match');
+    expect(() =>
+      resolveSessionCommandPrincipalUserId({ userId: 'machine-owner-a' }, 'someone-else', principal)
+    ).toThrow('Requester identity must match the delegated Session principal.');
   });
 
   it('keeps Session ownership separate from the authenticated requester', () => {
