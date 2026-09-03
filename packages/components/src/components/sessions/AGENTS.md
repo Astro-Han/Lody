@@ -34,9 +34,12 @@ Session conversation page chain:
     conversation inserts a mention of that tab; dropping onto another tab
     still reorders. Pointer-over-conversation wins over closest-tab collision.
     A lone parent Session tab is not draggable; enable tab drag only once a
-    second visible tab exists. On desktop, Cmd/Ctrl+W closes the focused side
-    panel or child tab; when the parent is the only conversation tab, it leaves
-    the Session view for Chat Landing without archiving the Session.
+    second visible tab exists. On desktop, Cmd/Ctrl+W is the native Close
+    accelerator. Session-detail registers a tab closer: focused side panel or
+    child tab closes; the lone parent leaves for Chat Landing without archiving.
+    A parent with siblings is not closeable and does not close the window. With
+    no closer mounted (Chat Landing and other surfaces) the chord closes the
+    window.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
     below that threshold the active tab keeps that width and the others share the remainder.
     **The tab pills' top border shares one line with the sidebar and side-panel
@@ -242,6 +245,10 @@ Session conversation page chain:
   capability (Electron `WebContentsView` today); loopback/private targets use Managed Preview and
   are the only pages eligible for Visual Annotation. Never fall back from a missing public engine
   to iframe, system browser, CLI, Preview Gateway, or a different Machine RPC plane.
+  The public engine resolves every hostname and rejects non-public answers (DNS rebinding), with
+  one deliberate exception: a public name resolving into RFC 2544 `198.18.0.0/15` is a fake-IP
+  proxy's synthetic answer (Clash, Surge, sing-box, Shadowrocket) and is allowed via
+  `classifyResolvedBrowserAddress`; a literal `198.18.x.x` address stays prohibited.
   The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
   panel-open action. It opens the reported candidate even when another page is already visible.
   That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel

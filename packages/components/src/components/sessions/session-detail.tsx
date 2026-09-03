@@ -152,6 +152,7 @@ import {
 } from '@/components/files/mobile-project-file-browser';
 import { getAppShareUrl } from '@/lib/app-location';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
+import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { cn, getBasename } from '@/lib';
 
 import {
@@ -4080,30 +4081,23 @@ const SessionDetail = ({
     ]
   );
 
-  useCommand({
-    id: 'session.closeFocusedTab',
-    title: t('commands.session.closeFocusedTab', 'Close Focused Tab'),
-    category: 'Session',
-    keybindings: getCommandKeybindings('session.closeFocusedTab'),
-    // Consume the native close-window chord anywhere on a desktop session page. The lone
-    // parent tab returns to chat landing; a parent with siblings remains non-closeable.
-    when: () => !isMobile && Boolean(activeSession),
-    // Cmd/Ctrl+W is a tab-management command even while the composer or editor owns focus.
-    allowInTextInput: true,
-    run: () => {
+  useDesktopTabCloser(
+    () => {
       const target = resolveFocusedTabCloseTarget();
-      if (!target) return;
+      if (!target) return 'handled';
       if (target.kind === 'landing') {
         handleBackToList();
-        return;
+        return 'handled';
       }
       if (target.kind === 'side-panel') {
         handleSidePanelTabClose(target.tabId);
-        return;
+        return 'handled';
       }
       void handleTabClose(target.tabId);
+      return 'handled';
     },
-  });
+    !isMobile && Boolean(activeSession)
+  );
 
   useEffect(() => {
     if (
