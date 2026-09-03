@@ -376,7 +376,7 @@ describe('session MCP input schemas', () => {
     ).toBe(false);
   });
 
-  it('publishes session create work contexts as object schemas over MCP', async () => {
+  it('publishes session create work contexts and child workspace sharing over MCP', async () => {
     const server = new McpServer({ name: 'schema-test-server', version: '1.0.0' });
     server.registerTool(
       'lody_session_create',
@@ -423,6 +423,10 @@ describe('session MCP input schemas', () => {
       expect(createTool?.inputSchema).toMatchObject({
         type: 'object',
         properties: {
+          useCurrentSessionAsParent: {
+            description:
+              'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+          },
           workContext: workContextSchema,
         },
       });
@@ -431,13 +435,25 @@ describe('session MCP input schemas', () => {
         properties: {
           defaults: {
             type: 'object',
-            properties: { workContext: workContextSchema },
+            properties: {
+              useCurrentSessionAsParent: {
+                description:
+                  'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+              },
+              workContext: workContextSchema,
+            },
           },
           items: {
             type: 'array',
             items: {
               type: 'object',
-              properties: { workContext: workContextSchema },
+              properties: {
+                useCurrentSessionAsParent: {
+                  description:
+                    'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+                },
+                workContext: workContextSchema,
+              },
             },
           },
         },

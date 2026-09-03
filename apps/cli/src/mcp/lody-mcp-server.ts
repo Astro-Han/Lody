@@ -543,7 +543,9 @@ const SessionCreateToolInputSchema = z
     useCurrentSessionAsParent: z
       .boolean()
       .optional()
-      .describe('Create a child of the current Session; cannot be combined with workContext.'),
+      .describe(
+        'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.'
+      ),
     workContext: SessionWorkContextInputSchema.optional().describe(
       'Execution context for an independent Session; cannot be combined with useCurrentSessionAsParent=true.'
     ),
@@ -726,7 +728,9 @@ const SessionCreateBatchPublishedItemSchema = z
     useCurrentSessionAsParent: z
       .boolean()
       .optional()
-      .describe('Create a child of the current Session; cannot be combined with workContext.'),
+      .describe(
+        'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.'
+      ),
     workContext: SessionWorkContextInputSchema.optional().describe(
       'Execution context for an independent Session; cannot be combined with useCurrentSessionAsParent=true.'
     ),
