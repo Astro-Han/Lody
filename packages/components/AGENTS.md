@@ -165,7 +165,12 @@ mobile surfaces.
   watch, no All Changes recompute, no Flock publish. A local Electron target uses the
   IPC-only `file/preview-local` method and MUST NOT fall back to Streams RPC while its
   route is unresolved; remote targets use the restricted `file/preview` method. It handles
-  text and binary (PNG/JPEG/…) alike and is size-limited on the machine. So the file
+  text and binary (PNG/JPEG/…) alike and is size-limited on the machine — but that
+  limit is the REMOTE wire's: the local `file/preview-local` path reads to
+  `FILE_PREVIEW_V3_LOCAL_LIMITS`, derived from the 16 MiB local-IPC response cap,
+  so "too large to preview" is mostly a remote verdict rather than a fact about a
+  file on this machine. Every preview answers in ONE bounded response, which is
+  also the ceiling on the remote `Download file` action. So the file
   index is a HINT here, never a gate: a `binary` entry carries no `unavailableReason`
   (or the tree row goes unclickable via `canOpen` in
   `session-file-provider-view-model.ts`), and a path the index has never seen — an
