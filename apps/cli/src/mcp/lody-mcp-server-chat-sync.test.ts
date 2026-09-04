@@ -77,6 +77,15 @@ const targetSession = {
   agentType: 'codex',
 };
 
+const invokingTurn = {
+  id: 'requester-turn-id',
+  role: 'user' as const,
+  userId: 'requester-user-id',
+  timestamp: '2026-09-04T00:00:00.000Z',
+  items: [],
+  fileDiff: [],
+};
+
 const expectRetryableSyncResult = (result: ReturnType<typeof mcpErrorResult>): void => {
   const content = result.content[0];
   if (!content || content.type !== 'text') throw new Error('expected text result');
@@ -106,7 +115,7 @@ describe('session chat prevalidation sync failures', () => {
     vi.stubEnv('LODY_MCP_WORKSPACE_ID', 'workspace-id');
     vi.stubEnv('LODY_MCP_SESSION_ID', requesterSession.id);
     mocks.findMatchingRetry.mockReturnValue(undefined);
-    mocks.getHistory.mockResolvedValue([]);
+    mocks.getHistory.mockResolvedValue([invokingTurn]);
     mocks.getDocMeta
       .mockResolvedValueOnce({ meta: requesterSession })
       .mockResolvedValueOnce({ meta: targetSession });
