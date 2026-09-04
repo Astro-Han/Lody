@@ -119,18 +119,18 @@ export type LodyOperationSnapshot =
 
 export type SessionOperationPrincipal = {
   userId: string;
-  sourceSessionId: SessionId;
   sourceTurnId: string;
-  actor: 'agent';
   /** Authenticated machine user whose daemon executes the delegated action. */
   executorUserId: string;
 };
 
+export type SessionOperationDelegation = Omit<SessionOperationPrincipal, 'userId'>;
+
 export type FrozenOperationContinuationConfig = {
   agentConfigId?: string;
   inputConfig: SessionTurnInputConfig;
-  /** Exact driving Turn identity; retries and recovery must not re-resolve it. */
-  principal?: SessionOperationPrincipal;
+  /** Frozen provenance for the top-level requester; recovery must not re-resolve it. */
+  delegation?: SessionOperationDelegation;
   /**
    * Effective per-target create config captured at acceptance. Null entries
    * correspond to batch items rejected before a target was accepted.

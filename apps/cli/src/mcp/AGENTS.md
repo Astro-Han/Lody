@@ -30,7 +30,10 @@ Root and `apps/cli/AGENTS.md` instructions apply.
   the frozen canonical Prompt and target dispatch config and never rereads the mutable catalog.
 - Session orchestration derives its human principal from the exact persisted user/system Turn
   driving the current Agent execution, not from the daemon credential or Session owner. Freeze
-  source Session/Turn ids, principal user, actor, and executor with every accepted Operation;
+  the source Turn id, principal user, and executor with every accepted Operation. Store the user
+  once as `requesterUserId`; the delegation binding stores only source Turn and executor. The
+  Operation's requester Session id already identifies the source Session, and a single-value
+  actor tag adds no information.
   legacy synchronous paths use the same derivation and reject a source Turn without userId.
 - Direct Role creation stays on the ordinary `lody_session_create` and
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,

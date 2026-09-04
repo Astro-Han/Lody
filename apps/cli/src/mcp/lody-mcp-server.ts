@@ -2193,7 +2193,6 @@ type InvokingTurnContext = {
 };
 
 const buildInvokingTurnPrincipal = (
-  session: Pick<SessionMeta, 'id'>,
   source: Pick<SessionHistoryInput, 'id' | 'userId'>,
   executorUserId: string
 ): SessionOperationPrincipal => {
@@ -2207,24 +2206,25 @@ const buildInvokingTurnPrincipal = (
   }
   return {
     userId,
-    sourceSessionId: session.id,
     sourceTurnId: source.id,
-    actor: 'agent',
     executorUserId,
   };
 };
+
+const freezeOperationDelegation = ({
+  sourceTurnId,
+  executorUserId,
+}: SessionOperationPrincipal) => ({ sourceTurnId, executorUserId });
 
 const assertOperationRetryPrincipal = (
   operation: StoredLodyOperation,
   principal: SessionOperationPrincipal
 ): void => {
-  const stored = operation.frozenContinuationConfig.principal;
+  const stored = operation.frozenContinuationConfig.delegation;
   if (!stored) return;
   if (
-    stored.userId !== principal.userId ||
-    stored.sourceSessionId !== principal.sourceSessionId ||
+    operation.requesterUserId !== principal.userId ||
     stored.sourceTurnId !== principal.sourceTurnId ||
-    stored.actor !== principal.actor ||
     stored.executorUserId !== principal.executorUserId
   ) {
     throw new LodyOperationStoreError(
@@ -2304,7 +2304,7 @@ const resolveInvokingTurnContext = async (
   }
   return {
     chainDepth,
-    principal: buildInvokingTurnPrincipal(session, source, executorUserId),
+    principal: buildInvokingTurnPrincipal(source, executorUserId),
     frozenInputConfig: {
       ...(source?.inputConfig ?? {}),
       cliType: source?.inputConfig?.cliType ?? session.cliType,
@@ -2739,7 +2739,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
               ? { agentConfigId: currentSession.agentConfigId }
               : {}),
             inputConfig: invoking.frozenInputConfig,
-            principal: invoking.principal,
+            delegation: freezeOperationDelegation(invoking.principal),
             targetDispatchConfigs: [effectiveDispatchConfig],
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -2883,7 +2883,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
               ? { agentConfigId: currentSession.agentConfigId }
               : {}),
             inputConfig: invoking.frozenInputConfig,
-            principal: invoking.principal,
+            delegation: freezeOperationDelegation(invoking.principal),
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,
@@ -3262,7 +3262,7 @@ const startSessionCreateManyOperation = async (
           frozenContinuationConfig: {
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
-            principal: invoking.principal,
+            delegation: freezeOperationDelegation(invoking.principal),
             targetDispatchConfigs,
           },
           initiatorChainDepth: invoking.chainDepth,
@@ -3455,7 +3455,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           frozenContinuationConfig: {
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
             inputConfig: invoking.frozenInputConfig,
-            principal: invoking.principal,
+            delegation: freezeOperationDelegation(invoking.principal),
           },
           initiatorChainDepth: invoking.chainDepth,
           ...timing,

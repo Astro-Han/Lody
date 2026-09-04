@@ -112,12 +112,9 @@ const FrozenConfigSchema = z
   .object({
     agentConfigId: z.string().optional(),
     inputConfig: z.record(z.string(), z.unknown()),
-    principal: z
+    delegation: z
       .object({
-        userId: z.string().trim().min(1),
-        sourceSessionId: z.string().trim().min(1),
         sourceTurnId: z.string().trim().min(1),
-        actor: z.literal('agent'),
         executorUserId: z.string().trim().min(1),
       })
       .strict()

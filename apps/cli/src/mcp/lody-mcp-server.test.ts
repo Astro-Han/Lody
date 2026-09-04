@@ -302,38 +302,33 @@ describe('session MCP input schemas', () => {
 
   it('derives delegated identity from the exact driving Turn', () => {
     expect(
-      buildInvokingTurnPrincipal(
-        { id: 'source-session' as SessionId },
-        { id: 'source-turn', userId: 'collaborator-b' },
-        'machine-owner-a'
-      )
+      buildInvokingTurnPrincipal({ id: 'source-turn', userId: 'collaborator-b' }, 'machine-owner-a')
     ).toEqual({
       userId: 'collaborator-b',
-      sourceSessionId: 'source-session',
       sourceTurnId: 'source-turn',
-      actor: 'agent',
       executorUserId: 'machine-owner-a',
     });
-    expect(() =>
-      buildInvokingTurnPrincipal(
-        { id: 'source-session' as SessionId },
-        { id: 'legacy-turn' },
-        'machine-owner-a'
-      )
-    ).toThrow('has no authenticated human identity');
+    expect(() => buildInvokingTurnPrincipal({ id: 'legacy-turn' }, 'machine-owner-a')).toThrow(
+      'has no authenticated human identity'
+    );
   });
 
   it('binds Operation retries to the original invoking Turn', () => {
     const principal = {
       userId: 'collaborator-b',
-      sourceSessionId: 'source-session' as SessionId,
       sourceTurnId: 'source-turn-b',
-      actor: 'agent' as const,
       executorUserId: 'machine-owner-a',
     };
     const operation = {
       operationId: 'review-1',
-      frozenContinuationConfig: { inputConfig: {}, principal },
+      requesterUserId: principal.userId,
+      frozenContinuationConfig: {
+        inputConfig: {},
+        delegation: {
+          sourceTurnId: principal.sourceTurnId,
+          executorUserId: principal.executorUserId,
+        },
+      },
     } as StoredLodyOperation;
 
     expect(() => assertOperationRetryPrincipal(operation, principal)).not.toThrow();
@@ -528,9 +523,7 @@ describe('session MCP input schemas', () => {
       options,
       {
         userId: 'collaborator-b',
-        sourceSessionId: 'current-session-id' as SessionId,
         sourceTurnId: 'source-turn',
-        actor: 'agent',
         executorUserId: 'machine-owner-a',
       },
       { machineId: 'machine-id' }
@@ -544,9 +537,7 @@ describe('session MCP input schemas', () => {
       useCurrentSessionAsParent: true,
       principal: {
         userId: 'collaborator-b',
-        sourceSessionId: 'current-session-id',
         sourceTurnId: 'source-turn',
-        actor: 'agent',
         executorUserId: 'machine-owner-a',
       },
       sessionOwnerUserId: 'collaborator-b',

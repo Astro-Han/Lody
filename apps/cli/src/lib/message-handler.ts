@@ -2836,7 +2836,8 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
-    const principal = operation.frozenContinuationConfig.principal;
+    const delegation = operation.frozenContinuationConfig.delegation;
+    const principal = delegation ? { userId: operation.requesterUserId, ...delegation } : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {

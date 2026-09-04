@@ -351,9 +351,7 @@ describe('session command helpers', () => {
   it('accepts only a delegated principal bound to the authenticated executor', () => {
     const principal = {
       userId: 'collaborator-b',
-      sourceSessionId: 'source-session' as SessionId,
       sourceTurnId: 'source-turn',
-      actor: 'agent' as const,
       executorUserId: 'machine-owner-a',
     };
     expect(

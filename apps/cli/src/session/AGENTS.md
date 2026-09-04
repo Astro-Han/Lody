@@ -16,7 +16,8 @@ Live status is a target-daemon Machine RPC read, and durable session metadata is
 live-presence substitute.
 Session orchestration MCP authenticates execution with the daemon owner's CLI credential,
 but derives the human principal from the exact persisted Turn driving the Agent. Freeze that
-principal and its source Session/Turn into durable Operations; retries and recovery must not
+principal and source Turn into durable Operations; the Operation already identifies the source
+Session and stores the principal user once as `requesterUserId`. Retries and recovery must not
 reread mutable history. Machine and Provider credentials remain execution-host scoped, while
 Session/Turn attribution, member authorization, GitHub access, and downstream Git identity use
 the frozen principal. Never fall back to the Session owner when the driving Turn has no userId.

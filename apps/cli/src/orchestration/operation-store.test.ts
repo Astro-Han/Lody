@@ -39,11 +39,8 @@ const baseInput = () => ({
   frozenContinuationConfig: {
     agentConfigId: 'agent-1',
     inputConfig: { cliType: 'builtin' as const, agentType: 'codex', chainDepth: 0 },
-    principal: {
-      userId: 'user-1',
-      sourceSessionId: 'requester-1' as SessionId,
+    delegation: {
       sourceTurnId: 'source-turn-1',
-      actor: 'agent' as const,
       executorUserId: 'machine-owner-1',
     },
   },
@@ -91,11 +88,8 @@ describe('LodyOperationStore', () => {
       expect(first.created).toBe(true);
       expect(retry.created).toBe(false);
       expect(retry.operation.operationId).toBe('review-round-1');
-      expect(retry.operation.frozenContinuationConfig.principal).toEqual({
-        userId: 'user-1',
-        sourceSessionId: 'requester-1',
+      expect(retry.operation.frozenContinuationConfig.delegation).toEqual({
         sourceTurnId: 'source-turn-1',
-        actor: 'agent',
         executorUserId: 'machine-owner-1',
       });
       expect(store.snapshot(retry.operation)).toMatchObject({ state: 'active' });
