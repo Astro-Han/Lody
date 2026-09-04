@@ -333,6 +333,15 @@ describe('session MCP input schemas', () => {
 
     expect(() => assertOperationRetryPrincipal(operation, principal)).not.toThrow();
     expect(() =>
+      assertOperationRetryPrincipal(
+        {
+          ...operation,
+          frozenContinuationConfig: { inputConfig: {} },
+        } as StoredLodyOperation,
+        principal
+      )
+    ).toThrow('has no frozen delegated principal provenance');
+    expect(() =>
       assertOperationRetryPrincipal(operation, {
         ...principal,
         userId: 'collaborator-c',

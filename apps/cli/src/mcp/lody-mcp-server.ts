@@ -2221,7 +2221,13 @@ const assertOperationRetryPrincipal = (
   principal: SessionOperationPrincipal
 ): void => {
   const stored = operation.frozenContinuationConfig.delegation;
-  if (!stored) return;
+  if (!stored) {
+    throw new LodyOperationStoreError(
+      'OPERATION_ID_REUSED',
+      `Operation id ${operation.operationId} has no frozen delegated principal provenance.`,
+      false
+    );
+  }
   if (
     operation.requesterUserId !== principal.userId ||
     stored.sourceTurnId !== principal.sourceTurnId ||
