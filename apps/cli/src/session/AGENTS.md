@@ -9,13 +9,21 @@ message bus. The WS/DO path is DEPRECATED.
 Session CLI/MCP orchestration contract:
 specs/session-orchestration.md. Target-machine
 authorization is checked by the injected access capability with the source CLI token,
-which derives the requester identity at the trusted boundary. Do not send a caller-supplied requester
-through workspace Machine RPC: that transport does not authenticate member identity.
+which derives the requester identity for ordinary CLI calls and verifies the frozen Turn
+requester for MCP delegation. Session command boundaries receive an optional delegated requester;
+its presence selects delegated access, while source-Turn provenance stays at the MCP/Operation
+boundary. Do not send an untrusted requester through
+workspace Machine RPC: that transport does not authenticate member identity.
 Live status is a target-daemon Machine RPC read, and durable session metadata is not a
 live-presence substitute.
-Session orchestration MCP intentionally runs with the daemon owner's CLI credential,
-including for teammate-started Sessions on a shared machine. Do not add requester
-delegation proofs or a shared-machine gate without a new product and security decision.
+Session orchestration MCP authenticates execution with the daemon owner's CLI credential,
+but derives the human identity causally from the active dispatch/execution runtime. Persisted
+history must never reconstruct a missing invocation; fail closed when no active runtime exists. Freeze that identity
+and source Turn into durable Operations; the Operation already identifies the source
+Session and stores the invoking user once as `requesterUserId`. Retries and recovery must not
+reread mutable history. Machine and Provider credentials remain execution-host scoped, while
+Session/Turn attribution, member authorization, GitHub access, and downstream Git identity use
+the frozen identity. Never fall back to the Session owner when the driving Turn has no userId.
 
 - `session-dispatch-watcher.ts` — the current dispatch entry: watches
   `repo.watch('doc-metadata')` + per-session mirror subscribe; dispatches when
@@ -111,7 +119,9 @@ delegation proofs or a shared-machine gate without a new product and security de
   quiescent. Use live execution/presence for current-work signals; goal activity may
   still protect history rewrites or an in-memory runtime that can resume autonomously.
   It is the per-session execution mutex: never mint a second visible turn while a
-  `TurnRuntimeState` is registered. User-dispatch turns derive assistant entry ids
+  `TurnRuntimeState` is registered. Its optional `invocation` atomically owns source Turn,
+  requester, and input config; steer replaces that object before tool execution can continue.
+  User-dispatch turns derive assistant entry ids
   from `userTurnId` (`assistant:<userTurnId>`), so a retried/recovered dispatch reuses
   the same history entry.
   INVARIANT: a steer (guide) the agent never accepted must not stay parked in

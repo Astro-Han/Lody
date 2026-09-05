@@ -2837,6 +2837,9 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
+    const delegatedRequester = operation.frozenContinuationConfig.sourceTurnId
+      ? ({ userId: operation.requesterUserId } as const)
+      : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {
@@ -2861,8 +2864,12 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        requesterUserId: operation.requesterUserId,
-        sessionOwnerUserId: requester.userId,
+        ...(delegatedRequester
+          ? { delegatedRequester }
+          : {
+              requesterUserId: operation.requesterUserId,
+              sessionOwnerUserId: requester.userId,
+            }),
         defaultMachineId: requester.machineId,
         sessionId: item.target.sessionId,
         userTurnId: item.target.userTurnId,
@@ -2911,12 +2918,13 @@ export class MessageHandler {
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
       },
       undefined,
-      operation.requesterUserId,
+      delegatedRequester ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
-      }
+      },
+      delegatedRequester
     );
   }
 
@@ -6584,6 +6592,22 @@ export class MessageHandler {
           allowArbitraryPaths: true,
           sameMachine: true,
         });
+      case 'session/get-active-invocation-context': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        return invocation
+          ? {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: true as const,
+              ...invocation,
+            }
+          : {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: false as const,
+            };
+      }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({
           type: 'session/cancel',
