@@ -26,9 +26,8 @@ Root and `apps/cli/AGENTS.md` apply. Normative behavior lives in
   acceptance; recovery must not re-read mutable requester history defaults.
   Full content stays in the target Session history.
 - Accepted Operations store the principal user once as `requesterUserId`; their frozen delegation
-  binds the exact source Turn and executor. `requesterSessionId` already identifies the source
-  Session. Recovery
-  routes attribution and member-scoped authorization through that frozen principal while the
+  binds the exact source Turn. `requesterSessionId` already identifies the source Session. Recovery
+  routes attribution and member-scoped authorization through that frozen user while the current
   owner Machine credential remains the executor credential. Completion system Turns retain the
   same userId so a continuation cannot silently switch principals. Idempotent retries must match
   the frozen principal; a later Turn reusing the id is `OPERATION_ID_REUSED`, not a retry.

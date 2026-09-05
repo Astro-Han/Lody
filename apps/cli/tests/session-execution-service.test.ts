@@ -267,9 +267,11 @@ describe('SessionExecutionService', () => {
       sessionId,
       turnId: 'assistant:user-1',
       userTurnId: 'user-1',
+      sourceTurnId: 'user-1',
       session: activeSession,
       promptInFlight: true,
       requesterUserId: 'user-1',
+      invocationInputConfig: { prompt: 'initial prompt' },
       activePromptRun: initialPromptRun,
       yieldedFinalization: Promise.resolve(),
     };
@@ -305,6 +307,11 @@ describe('SessionExecutionService', () => {
     );
     expect(runtime.turnId).toBe('assistant:user-2');
     expect(runtime.userTurnId).toBe('user-2');
+    expect(service.getActiveInvocationContext(sessionId)).toEqual({
+      requesterUserId: 'user-1',
+      sourceTurnId: 'user-2',
+      inputConfig: { prompt: 'change direction' },
+    });
     expect(initialPromptRun.successor?.turnId).toBe('assistant:user-2');
     expect(runtime.activePromptRun.turnId).toBe('assistant:user-2');
 
@@ -1342,7 +1349,7 @@ describe('SessionExecutionService', () => {
     );
   });
 
-  it('starts active presence before prepared dispatch awaits machine access', async () => {
+  it('exposes RPC invocation identity before prepared dispatch awaits machine access', async () => {
     let resolveAccess!: (value: {
       outcome: 'indeterminate';
       cause: 'network';
@@ -1370,7 +1377,9 @@ describe('SessionExecutionService', () => {
       sessionId: 'session-prepared-presence' as SessionId,
       sessionDoc,
       userTurnId: 'turn-prepared-presence',
-      dispatchSource: 'crdt',
+      requesterUserId: 'user-b',
+      invocationInputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
+      dispatchSource: 'rpc',
       accessPromise,
       requestPromise: new Promise<never>(() => {}),
       onAccessAllowed,
@@ -1385,11 +1394,16 @@ describe('SessionExecutionService', () => {
     expect(deps.beginConversationTurn).toHaveBeenCalledWith(
       'session-prepared-presence',
       'turn-prepared-presence',
-      { dispatchSource: 'crdt', sessionDoc, deferACPUpdateTarget: true }
+      { dispatchSource: 'rpc', sessionDoc, deferACPUpdateTarget: true }
     );
     expect(service.getExecutionSnapshot('session-prepared-presence' as SessionId)).toMatchObject({
       activeTurnId: 'assistant:turn-prepared-presence',
       hasActiveTurn: true,
+    });
+    expect(service.getActiveInvocationContext('session-prepared-presence' as SessionId)).toEqual({
+      requesterUserId: 'user-b',
+      sourceTurnId: 'turn-prepared-presence',
+      inputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
     });
     expect(onAccessAllowed).not.toHaveBeenCalled();
 
@@ -1458,6 +1472,9 @@ describe('SessionExecutionService', () => {
       activeTurnId: turnId,
       hasActiveTurn: true,
     });
+    expect(() => service.getActiveInvocationContext(sessionId)).toThrow(
+      'Active invocation identity is unavailable'
+    );
 
     await expect(
       service.cancelSession({

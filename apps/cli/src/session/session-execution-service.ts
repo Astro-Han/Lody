@@ -217,7 +217,10 @@ type TurnRuntimeState = {
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
   turnId: string;
   userTurnId?: string;
+  /** Causal input Turn for authorization and durable provenance. */
+  sourceTurnId?: string;
   requesterUserId?: string;
+  invocationInputConfig?: SessionTurnInputConfig;
   session?: ISession;
   project?: ProjectRef;
   baseCommitHash?: string | null;
@@ -309,6 +312,9 @@ type VisibleSessionTurnOptions = {
   sessionDoc: SessionDocument;
   session?: ISession;
   userTurnId?: string;
+  sourceTurnId?: string;
+  requesterUserId?: string;
+  invocationInputConfig: SessionTurnInputConfig;
   /**
    * How the turn payload reached this machine. 'rpc' turns can start before the
    * user's history entry syncs locally, so their turn-scoped history writes go
@@ -346,6 +352,9 @@ export type PreparedSessionDispatchOptions = {
   sessionId: SessionId;
   sessionDoc: SessionDocument;
   userTurnId: string;
+  /** Exact requester carried by the driving Turn; absent legacy values stay absent. */
+  requesterUserId?: string;
+  invocationInputConfig: SessionTurnInputConfig;
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
@@ -1273,6 +1282,12 @@ export class SessionExecutionService {
           return reject('stale-turn', 'Steer application arrived after ownership changed');
         }
 
+        // The provider has accepted this steer and may execute tools before
+        // history/finalization catches up. Switch causal identity first.
+        runtime.sourceTurnId = options.userTurnId;
+        runtime.requesterUserId = options.userId;
+        runtime.invocationInputConfig = options.inputConfig;
+
         try {
           await this.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
         } catch (error) {
@@ -1325,7 +1340,6 @@ export class SessionExecutionService {
         runtime.activePromptRun = nextPromptRun;
         runtime.turnId = nextTurnId;
         runtime.userTurnId = options.userTurnId;
-        runtime.requesterUserId = options.userId;
         this.markCurrentTurn(options.sessionId, nextTurnId);
         ownedPromptRun.signalSuccessor();
         return {
@@ -1458,6 +1472,9 @@ export class SessionExecutionService {
           sessionId,
           sessionDoc: options.sessionDoc,
           userTurnId,
+          sourceTurnId: userTurnId,
+          requesterUserId: options.requesterUserId,
+          invocationInputConfig: options.invocationInputConfig,
           dispatchSource,
           unhandledErrorCode: 'session_chat_failed',
           describeUnhandledError: (error) =>
@@ -1529,16 +1546,24 @@ export class SessionExecutionService {
   }
 
   private createTurnRuntime(
-    sessionId: SessionId,
-    turnId: string,
-    userTurnId?: string,
-    session?: ISession
+    options: Pick<
+      VisibleSessionTurnOptions,
+      | 'sessionId'
+      | 'session'
+      | 'userTurnId'
+      | 'sourceTurnId'
+      | 'requesterUserId'
+      | 'invocationInputConfig'
+    > & { turnId: string }
   ): TurnRuntimeState {
     return {
-      sessionId,
-      turnId,
-      userTurnId,
-      session,
+      sessionId: options.sessionId,
+      turnId: options.turnId,
+      userTurnId: options.userTurnId,
+      sourceTurnId: options.sourceTurnId,
+      requesterUserId: options.requesterUserId,
+      invocationInputConfig: options.invocationInputConfig,
+      session: options.session,
       promptStarted: false,
       promptInFlight: false,
       autoPromptInFlight: false,
@@ -2529,7 +2554,7 @@ export class SessionExecutionService {
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
   ): Promise<string> {
-    const { sessionId, sessionDoc, session, userTurnId } = options;
+    const { sessionId, sessionDoc, userTurnId } = options;
     const span = startTraceSpan(this.deps.logger, 'execution.visible_turn', {
       sessionId,
       ...(userTurnId ? { userTurnId } : {}),
@@ -2564,7 +2589,7 @@ export class SessionExecutionService {
         deferACPUpdateTarget: true,
       });
       this.markCurrentTurn(sessionId, turnId);
-      runtime = this.createTurnRuntime(sessionId, turnId, userTurnId, session);
+      runtime = this.createTurnRuntime({ ...options, turnId });
       this.registerTurnRuntime(runtime);
     } finally {
       releaseConflict();
@@ -2984,6 +3009,27 @@ export class SessionExecutionService {
   /** The `userTurnId` owned by the session's active turn runtime, if any. */
   getActiveUserTurnId(sessionId: SessionId): string | undefined {
     return this.turnRuntimeBySession.get(sessionId)?.userTurnId;
+  }
+
+  getActiveInvocationContext(sessionId: SessionId):
+    | {
+        requesterUserId: string;
+        sourceTurnId: string;
+        inputConfig: SessionTurnInputConfig;
+      }
+    | undefined {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (!runtime) {
+      return undefined;
+    }
+    if (!runtime.requesterUserId || !runtime.sourceTurnId || !runtime.invocationInputConfig) {
+      throw new Error(`Active invocation identity is unavailable for session ${sessionId}`);
+    }
+    return {
+      requesterUserId: runtime.requesterUserId,
+      sourceTurnId: runtime.sourceTurnId,
+      inputConfig: runtime.invocationInputConfig,
+    };
   }
 
   private async setDispatchProcessing(
@@ -3605,7 +3651,6 @@ export class SessionExecutionService {
     ): Effect.Effect<void, unknown, Scope.Scope> =>
       Effect.gen(function* () {
         const { turnId, runtime, abortIfCancelled, openAssistantEntry, prompt } = ctx;
-        runtime.requesterUserId = message.userId;
         let activeSession = readySession;
         let staleAcpPromptRecoveryAttempted = false;
         let baseCommitHash: string | null = null;
@@ -4002,6 +4047,9 @@ export class SessionExecutionService {
         sessionDoc,
         ...(session ? { session } : {}),
         userTurnId: executionUserTurnId,
+        sourceTurnId: userTurnId,
+        requesterUserId: userId,
+        invocationInputConfig: acpSessionConfig,
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),
@@ -4322,6 +4370,9 @@ export class SessionExecutionService {
         sessionId,
         sessionDoc,
         userTurnId,
+        sourceTurnId: userTurnId,
+        requesterUserId: message.userId,
+        invocationInputConfig: acpSessionConfig,
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),
@@ -4343,7 +4394,6 @@ export class SessionExecutionService {
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
-          runtime.requesterUserId = message.userId;
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );

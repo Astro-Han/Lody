@@ -10,13 +10,15 @@ Session CLI/MCP orchestration contract:
 specs/session-orchestration.md. Target-machine
 authorization is checked by the injected access capability with the source CLI token,
 which derives the requester identity for ordinary CLI calls and verifies the frozen Turn
-principal for MCP delegation. Do not send an untrusted caller-supplied requester through
+request subject for MCP delegation. Session commands receive only `{ userId, kind }`; source-Turn
+provenance stays at the MCP/Operation boundary. Do not send an untrusted requester through
 workspace Machine RPC: that transport does not authenticate member identity.
 Live status is a target-daemon Machine RPC read, and durable session metadata is not a
 live-presence substitute.
 Session orchestration MCP authenticates execution with the daemon owner's CLI credential,
-but derives the human principal from the exact persisted Turn driving the Agent. Freeze that
-principal and source Turn into durable Operations; the Operation already identifies the source
+but derives the human principal causally from the active dispatch/execution runtime. Persisted
+history is only a legacy fallback when no active runtime identity exists. Freeze that principal
+and source Turn into durable Operations; the Operation already identifies the source
 Session and stores the principal user once as `requesterUserId`. Retries and recovery must not
 reread mutable history. Machine and Provider credentials remain execution-host scoped, while
 Session/Turn attribution, member authorization, GitHub access, and downstream Git identity use

@@ -115,7 +115,10 @@ const FrozenConfigSchema = z
     delegation: z
       .object({
         sourceTurnId: z.string().trim().min(1),
-        executorUserId: z.string().trim().min(1),
+        // Accepted for upgrade compatibility; new Operations do not freeze the
+        // daemon account because machine ownership plus current authorization
+        // govern recovery.
+        executorUserId: z.string().trim().min(1).optional(),
       })
       .strict()
       .optional(),

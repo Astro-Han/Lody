@@ -41,7 +41,6 @@ const baseInput = () => ({
     inputConfig: { cliType: 'builtin' as const, agentType: 'codex', chainDepth: 0 },
     delegation: {
       sourceTurnId: 'source-turn-1',
-      executorUserId: 'machine-owner-1',
     },
   },
   initiatorChainDepth: 0,
@@ -90,9 +89,30 @@ describe('LodyOperationStore', () => {
       expect(retry.operation.operationId).toBe('review-round-1');
       expect(retry.operation.frozenContinuationConfig.delegation).toEqual({
         sourceTurnId: 'source-turn-1',
-        executorUserId: 'machine-owner-1',
       });
       expect(store.snapshot(retry.operation)).toMatchObject({ state: 'active' });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('reads legacy delegation records that froze an executor account', async () => {
+    const store = await makeStore();
+    try {
+      const input = baseInput();
+      const accepted = store.accept({
+        ...input,
+        frozenContinuationConfig: {
+          ...input.frozenContinuationConfig,
+          delegation: {
+            sourceTurnId: 'source-turn-1',
+            executorUserId: 'machine-owner-1',
+          },
+        },
+      });
+      expect(accepted.operation.frozenContinuationConfig.delegation).toMatchObject({
+        sourceTurnId: 'source-turn-1',
+      });
     } finally {
       store.close();
     }

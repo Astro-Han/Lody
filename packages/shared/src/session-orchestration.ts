@@ -117,14 +117,9 @@ export type LodyOperationSnapshot =
       completion: LodyOperationCompletion;
     };
 
-export type SessionOperationPrincipal = {
-  userId: string;
+export type SessionOperationDelegation = {
   sourceTurnId: string;
-  /** Authenticated machine user whose daemon executes the delegated action. */
-  executorUserId: string;
 };
-
-export type SessionOperationDelegation = Omit<SessionOperationPrincipal, 'userId'>;
 
 export type FrozenOperationContinuationConfig = {
   agentConfigId?: string;

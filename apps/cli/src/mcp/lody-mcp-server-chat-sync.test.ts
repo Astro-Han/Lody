@@ -51,6 +51,26 @@ vi.mock('@/orchestration/operation-store', async (importOriginal) => {
   };
 });
 
+vi.mock('@lody/shared/node/local-ipc', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lody/shared/node/local-ipc')>();
+  const { Effect } = await import('effect');
+  return {
+    ...actual,
+    makeLocalControlClientAuto: vi.fn(() => ({
+      machineRpc: vi.fn(() =>
+        Effect.succeed({
+          ok: true as const,
+          result: {
+            type: 'session/active-invocation-context' as const,
+            sessionId: 'requester-session-id',
+            active: false as const,
+          },
+        })
+      ),
+    })),
+  };
+});
+
 import {
   WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
   WorkspaceSyncUnavailableError,

@@ -81,6 +81,7 @@ const {
   resolveOperationStorePathForContext,
   resolveUploadPath,
   resolveInvokingHistoryInput,
+  selectInvokingTurnSource,
   buildInvokingTurnPrincipal,
   assertOperationRetryPrincipal,
   summarizeProjectRefForMcp,
@@ -300,15 +301,59 @@ describe('session MCP input schemas', () => {
     );
   });
 
-  it('derives delegated identity from the exact driving Turn', () => {
+  it('uses RPC runtime identity while the driving user Turn is absent from local history', () => {
+    const previousUser = { ...historyTurn('turn-a', 'user'), userId: 'user-a' };
+    const previousAssistant = {
+      ...historyTurn('assistant:turn-a', 'assistant'),
+      userTurnId: previousUser.id,
+    };
+
     expect(
-      buildInvokingTurnPrincipal({ id: 'source-turn', userId: 'collaborator-b' }, 'machine-owner-a')
+      selectInvokingTurnSource([previousUser, previousAssistant], {
+        type: 'session/active-invocation-context',
+        sessionId: 'current-session-id',
+        active: true,
+        requesterUserId: 'user-b',
+        sourceTurnId: 'turn-b',
+        inputConfig: { chainDepth: 1, taskToolsEnabled: true },
+      })
     ).toEqual({
+      id: 'turn-b',
+      userId: 'user-b',
+      inputConfig: { chainDepth: 1, taskToolsEnabled: true },
+    });
+  });
+
+  it('keeps RPC runtime identity after the history gate times out', () => {
+    const previousUser = { ...historyTurn('turn-a', 'user'), userId: 'user-a' };
+    const previousAssistant = {
+      ...historyTurn('assistant:turn-a', 'assistant'),
+      userTurnId: previousUser.id,
+    };
+    const unlinkedCurrentAssistant = {
+      ...historyTurn('assistant:turn-b', 'assistant'),
+      userTurnId: 'turn-b',
+    };
+    const history = [previousUser, previousAssistant, unlinkedCurrentAssistant];
+    expect(resolveInvokingHistoryInput(history)).toBe(previousUser);
+    expect(
+      selectInvokingTurnSource(history, {
+        type: 'session/active-invocation-context',
+        sessionId: 'current-session-id',
+        active: true,
+        requesterUserId: 'user-b',
+        sourceTurnId: 'turn-b',
+        inputConfig: { chainDepth: 2 },
+      })
+    ).toMatchObject({ id: 'turn-b', userId: 'user-b' });
+  });
+
+  it('derives delegated identity from the exact driving Turn', () => {
+    expect(buildInvokingTurnPrincipal({ id: 'source-turn', userId: 'collaborator-b' })).toEqual({
       userId: 'collaborator-b',
       sourceTurnId: 'source-turn',
-      executorUserId: 'machine-owner-a',
     });
-    expect(() => buildInvokingTurnPrincipal({ id: 'legacy-turn' }, 'machine-owner-a')).toThrow(
+    expect(() => buildInvokingTurnPrincipal({ id: 'legacy-turn' })).toThrow(
       'has no authenticated human identity'
     );
   });
@@ -317,7 +362,6 @@ describe('session MCP input schemas', () => {
     const principal = {
       userId: 'collaborator-b',
       sourceTurnId: 'source-turn-b',
-      executorUserId: 'machine-owner-a',
     };
     const operation = {
       operationId: 'review-1',
@@ -326,7 +370,6 @@ describe('session MCP input schemas', () => {
         inputConfig: {},
         delegation: {
           sourceTurnId: principal.sourceTurnId,
-          executorUserId: principal.executorUserId,
         },
       },
     } as StoredLodyOperation;
@@ -533,7 +576,6 @@ describe('session MCP input schemas', () => {
       {
         userId: 'collaborator-b',
         sourceTurnId: 'source-turn',
-        executorUserId: 'machine-owner-a',
       },
       { machineId: 'machine-id' }
     );
@@ -544,12 +586,10 @@ describe('session MCP input schemas', () => {
       machine: 'machine-id',
       agentConfig: 'agent-config-id',
       useCurrentSessionAsParent: true,
-      principal: {
+      requestSubject: {
         userId: 'collaborator-b',
-        sourceTurnId: 'source-turn',
-        executorUserId: 'machine-owner-a',
+        kind: 'delegated',
       },
-      sessionOwnerUserId: 'collaborator-b',
       defaultMachineId: 'machine-id',
     });
   });

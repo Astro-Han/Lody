@@ -2837,7 +2837,9 @@ export class MessageHandler {
     }
     const requester = requesterRecord.meta as SessionMeta;
     const delegation = operation.frozenContinuationConfig.delegation;
-    const principal = delegation ? { userId: operation.requesterUserId, ...delegation } : undefined;
+    const requestSubject = delegation
+      ? ({ userId: operation.requesterUserId, kind: 'delegated' } as const)
+      : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
       const runConfig: AgentRunConfigSelection = {
@@ -2862,8 +2864,8 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        ...(principal
-          ? { principal, sessionOwnerUserId: principal.userId }
+        ...(requestSubject
+          ? { requestSubject }
           : {
               requesterUserId: operation.requesterUserId,
               sessionOwnerUserId: requester.userId,
@@ -2916,13 +2918,13 @@ export class MessageHandler {
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
       },
       undefined,
-      principal ? undefined : operation.requesterUserId,
+      requestSubject ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
       },
-      principal
+      requestSubject
     );
   }
 
@@ -6598,6 +6600,22 @@ export class MessageHandler {
         return await this.filePreviewService.previewFile(request.params, {
           allowArbitraryPaths: true,
         });
+      case 'session/get-active-invocation-context': {
+        const sessionId = request.params.sessionId as SessionId;
+        const invocation = this.executionService.getActiveInvocationContext(sessionId);
+        return invocation
+          ? {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: true as const,
+              ...invocation,
+            }
+          : {
+              type: 'session/active-invocation-context' as const,
+              sessionId,
+              active: false as const,
+            };
+      }
       case 'session/cancel': {
         const result = await this.executionService.cancelSession({
           type: 'session/cancel',
