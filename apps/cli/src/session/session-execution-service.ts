@@ -4893,6 +4893,7 @@ export class SessionExecutionService {
           agentType: config.agentType,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
+          env: config.env,
         });
       const existing = await this.deps.workspaceDocument.getAcpCapabilities(
         this.deps.machineId,
@@ -5245,7 +5246,7 @@ export class SessionExecutionService {
       );
 
       options.signal?.throwIfAborted();
-      await this.deps.workspaceDocument.updateAcpCapabilities(
+      const capability = await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         message.configId,
         message.cliType,
@@ -5261,6 +5262,7 @@ export class SessionExecutionService {
             agentType: message.agentType,
             customAcp: message.customAcp,
             runtimeOverrides: message.runtimeOverrides,
+            env: message.env,
           }),
         modelReasoningEfforts,
         acknowledgedSteer,
@@ -5282,6 +5284,7 @@ export class SessionExecutionService {
           category: opt.category,
           optionCount: opt.options.length,
         })),
+        capability,
         availableCommands,
       };
     } catch (error) {
