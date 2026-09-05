@@ -262,6 +262,7 @@ import {
   resolveImageGenerationStatusWrite,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
+import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
 import { resolveGitBranchName } from './git/resolve-git-branch-name';
 import {
@@ -5807,20 +5808,9 @@ export class MessageHandler {
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory((history) => {
-        for (let i = history.length - 1; i >= 0; i--) {
-          const entry = history[i];
-          if (entry && entry.role === 'assistant' && (!turnId || entry.id === turnId)) {
-            entry.finished = true;
-            entry.endedAt = endedAt;
-            if (permissionWaitMs !== undefined) {
-              entry.permissionWaitMs = permissionWaitMs;
-            }
-            break;
-          }
-        }
-        return history;
-      });
+      await sessionDoc.updateHistory((history) =>
+        markAssistantTurnFinished(history, { turnId, endedAt, permissionWaitMs })
+      );
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
