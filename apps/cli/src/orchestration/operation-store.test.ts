@@ -39,9 +39,7 @@ const baseInput = () => ({
   frozenContinuationConfig: {
     agentConfigId: 'agent-1',
     inputConfig: { cliType: 'builtin' as const, agentType: 'codex', chainDepth: 0 },
-    delegation: {
-      sourceTurnId: 'source-turn-1',
-    },
+    sourceTurnId: 'source-turn-1',
   },
   initiatorChainDepth: 0,
   createdAt: '2026-07-20T00:00:00.000Z',
@@ -87,32 +85,8 @@ describe('LodyOperationStore', () => {
       expect(first.created).toBe(true);
       expect(retry.created).toBe(false);
       expect(retry.operation.operationId).toBe('review-round-1');
-      expect(retry.operation.frozenContinuationConfig.delegation).toEqual({
-        sourceTurnId: 'source-turn-1',
-      });
+      expect(retry.operation.frozenContinuationConfig.sourceTurnId).toBe('source-turn-1');
       expect(store.snapshot(retry.operation)).toMatchObject({ state: 'active' });
-    } finally {
-      store.close();
-    }
-  });
-
-  it('reads legacy delegation records that froze an executor account', async () => {
-    const store = await makeStore();
-    try {
-      const input = baseInput();
-      const accepted = store.accept({
-        ...input,
-        frozenContinuationConfig: {
-          ...input.frozenContinuationConfig,
-          delegation: {
-            sourceTurnId: 'source-turn-1',
-            executorUserId: 'machine-owner-1',
-          },
-        },
-      });
-      expect(accepted.operation.frozenContinuationConfig.delegation).toMatchObject({
-        sourceTurnId: 'source-turn-1',
-      });
     } finally {
       store.close();
     }
@@ -160,6 +134,50 @@ describe('LodyOperationStore', () => {
       store.accept(baseInput());
       expect(() =>
         store.accept({ ...baseInput(), canonicalCommand: { prompt: 'implement' } })
+      ).toThrowError(
+        expect.objectContaining<LodyOperationStoreError>({ code: 'OPERATION_ID_REUSED' })
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  it('binds accept and retry lookup to requester and source Turn identity', async () => {
+    const store = await makeStore();
+    try {
+      const input = baseInput();
+      store.accept(input);
+
+      expect(
+        store.findMatchingRetry(
+          input.requesterSessionId,
+          input.operationId,
+          input.kind,
+          input.canonicalCommand,
+          input.requesterUserId,
+          input.frozenContinuationConfig.sourceTurnId
+        )
+      ).toMatchObject({ operationId: input.operationId });
+      expect(() =>
+        store.findMatchingRetry(
+          input.requesterSessionId,
+          input.operationId,
+          input.kind,
+          input.canonicalCommand,
+          'user-2',
+          input.frozenContinuationConfig.sourceTurnId
+        )
+      ).toThrowError(
+        expect.objectContaining<LodyOperationStoreError>({ code: 'OPERATION_ID_REUSED' })
+      );
+      expect(() =>
+        store.accept({
+          ...input,
+          frozenContinuationConfig: {
+            ...input.frozenContinuationConfig,
+            sourceTurnId: 'source-turn-2',
+          },
+        })
       ).toThrowError(
         expect.objectContaining<LodyOperationStoreError>({ code: 'OPERATION_ID_REUSED' })
       );

@@ -2836,9 +2836,8 @@ export class MessageHandler {
       throw new Error(`Requester Session not found: ${operation.requesterSessionId}`);
     }
     const requester = requesterRecord.meta as SessionMeta;
-    const delegation = operation.frozenContinuationConfig.delegation;
-    const requestSubject = delegation
-      ? ({ userId: operation.requesterUserId, kind: 'delegated' } as const)
+    const delegatedRequester = operation.frozenContinuationConfig.sourceTurnId
+      ? ({ userId: operation.requesterUserId } as const)
       : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
@@ -2864,8 +2863,8 @@ export class MessageHandler {
         workspace: this.workspaceId,
         currentSessionId: operation.requesterSessionId,
         workspaceMetaPrewriteSatisfied: true,
-        ...(requestSubject
-          ? { requestSubject }
+        ...(delegatedRequester
+          ? { delegatedRequester }
           : {
               requesterUserId: operation.requesterUserId,
               sessionOwnerUserId: requester.userId,
@@ -2918,13 +2917,13 @@ export class MessageHandler {
         taskToolsEnabled: operation.frozenContinuationConfig.inputConfig.taskToolsEnabled === true,
       },
       undefined,
-      requestSubject ? undefined : operation.requesterUserId,
+      delegatedRequester ? undefined : operation.requesterUserId,
       {
         userTurnId: item.target.userTurnId,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
       },
-      requestSubject
+      delegatedRequester
     );
   }
 

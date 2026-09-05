@@ -117,15 +117,11 @@ export type LodyOperationSnapshot =
       completion: LodyOperationCompletion;
     };
 
-export type SessionOperationDelegation = {
-  sourceTurnId: string;
-};
-
 export type FrozenOperationContinuationConfig = {
   agentConfigId?: string;
   inputConfig: SessionTurnInputConfig;
-  /** Frozen provenance for the top-level requester; recovery must not re-resolve it. */
-  delegation?: SessionOperationDelegation;
+  /** Frozen causal Turn for delegated Operations; recovery must not re-resolve it. */
+  sourceTurnId?: string;
   /**
    * Effective per-target create config captured at acceptance. Null entries
    * correspond to batch items rejected before a target was accepted.

@@ -212,15 +212,19 @@ type PromptHandoffRun = {
   signalSuccessor: () => void;
 };
 
+type TurnInvocation = {
+  /** Causal input Turn for authorization and durable provenance. */
+  sourceTurnId: string;
+  requesterUserId?: string;
+  inputConfig: SessionTurnInputConfig;
+};
+
 type TurnRuntimeState = {
   sessionId: SessionId;
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
   turnId: string;
   userTurnId?: string;
-  /** Causal input Turn for authorization and durable provenance. */
-  sourceTurnId?: string;
-  requesterUserId?: string;
-  invocationInputConfig?: SessionTurnInputConfig;
+  invocation?: TurnInvocation;
   session?: ISession;
   project?: ProjectRef;
   baseCommitHash?: string | null;
@@ -312,9 +316,7 @@ type VisibleSessionTurnOptions = {
   sessionDoc: SessionDocument;
   session?: ISession;
   userTurnId?: string;
-  sourceTurnId?: string;
-  requesterUserId?: string;
-  invocationInputConfig: SessionTurnInputConfig;
+  invocation?: TurnInvocation;
   /**
    * How the turn payload reached this machine. 'rpc' turns can start before the
    * user's history entry syncs locally, so their turn-scoped history writes go
@@ -352,9 +354,7 @@ export type PreparedSessionDispatchOptions = {
   sessionId: SessionId;
   sessionDoc: SessionDocument;
   userTurnId: string;
-  /** Exact requester carried by the driving Turn; absent legacy values stay absent. */
-  requesterUserId?: string;
-  invocationInputConfig: SessionTurnInputConfig;
+  invocation: TurnInvocation;
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
@@ -1284,9 +1284,11 @@ export class SessionExecutionService {
 
         // The provider has accepted this steer and may execute tools before
         // history/finalization catches up. Switch causal identity first.
-        runtime.sourceTurnId = options.userTurnId;
-        runtime.requesterUserId = options.userId;
-        runtime.invocationInputConfig = options.inputConfig;
+        runtime.invocation = {
+          sourceTurnId: options.userTurnId,
+          requesterUserId: options.userId,
+          inputConfig: options.inputConfig,
+        };
 
         try {
           await this.finalizeYieldedTurnOutput(runtime, options.sessionId, previousTurnId);
@@ -1472,9 +1474,7 @@ export class SessionExecutionService {
           sessionId,
           sessionDoc: options.sessionDoc,
           userTurnId,
-          sourceTurnId: userTurnId,
-          requesterUserId: options.requesterUserId,
-          invocationInputConfig: options.invocationInputConfig,
+          invocation: options.invocation,
           dispatchSource,
           unhandledErrorCode: 'session_chat_failed',
           describeUnhandledError: (error) =>
@@ -1548,21 +1548,14 @@ export class SessionExecutionService {
   private createTurnRuntime(
     options: Pick<
       VisibleSessionTurnOptions,
-      | 'sessionId'
-      | 'session'
-      | 'userTurnId'
-      | 'sourceTurnId'
-      | 'requesterUserId'
-      | 'invocationInputConfig'
+      'sessionId' | 'session' | 'userTurnId' | 'invocation'
     > & { turnId: string }
   ): TurnRuntimeState {
     return {
       sessionId: options.sessionId,
       turnId: options.turnId,
       userTurnId: options.userTurnId,
-      sourceTurnId: options.sourceTurnId,
-      requesterUserId: options.requesterUserId,
-      invocationInputConfig: options.invocationInputConfig,
+      invocation: options.invocation,
       session: options.session,
       promptStarted: false,
       promptInFlight: false,
@@ -3022,13 +3015,14 @@ export class SessionExecutionService {
     if (!runtime) {
       return undefined;
     }
-    if (!runtime.requesterUserId || !runtime.sourceTurnId || !runtime.invocationInputConfig) {
+    const { invocation } = runtime;
+    if (!invocation?.requesterUserId) {
       throw new Error(`Active invocation identity is unavailable for session ${sessionId}`);
     }
     return {
-      requesterUserId: runtime.requesterUserId,
-      sourceTurnId: runtime.sourceTurnId,
-      inputConfig: runtime.invocationInputConfig,
+      requesterUserId: invocation.requesterUserId,
+      sourceTurnId: invocation.sourceTurnId,
+      inputConfig: invocation.inputConfig,
     };
   }
 
@@ -3918,7 +3912,7 @@ export class SessionExecutionService {
 
         const completedTurnId = runtime.turnId;
         const completedUserTurnId = runtime.userTurnId ?? executionUserTurnId;
-        const completedRequesterUserId = runtime.requesterUserId ?? userId;
+        const completedRequesterUserId = runtime.invocation?.requesterUserId ?? userId;
         // Read before finalization clears the turn's ACP update state.
         const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
 
@@ -4047,9 +4041,11 @@ export class SessionExecutionService {
         sessionDoc,
         ...(session ? { session } : {}),
         userTurnId: executionUserTurnId,
-        sourceTurnId: userTurnId,
-        requesterUserId: userId,
-        invocationInputConfig: acpSessionConfig,
+        invocation: {
+          sourceTurnId: userTurnId,
+          requesterUserId: userId,
+          inputConfig: acpSessionConfig,
+        },
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),
@@ -4370,9 +4366,15 @@ export class SessionExecutionService {
         sessionId,
         sessionDoc,
         userTurnId,
-        sourceTurnId: userTurnId,
-        requesterUserId: message.userId,
-        invocationInputConfig: acpSessionConfig,
+        ...(userTurnId
+          ? {
+              invocation: {
+                sourceTurnId: userTurnId,
+                requesterUserId: message.userId,
+                inputConfig: acpSessionConfig,
+              },
+            }
+          : {}),
         ...(dispatchOptions?.dispatchSource
           ? { dispatchSource: dispatchOptions.dispatchSource }
           : {}),
@@ -4595,7 +4597,8 @@ export class SessionExecutionService {
 
           const completedTurnId = runtime.turnId;
           const completedUserTurnId = runtime.userTurnId ?? userTurnId;
-          const completedRequesterUserId = runtime.requesterUserId ?? sessionConfig.requesterUserId;
+          const completedRequesterUserId =
+            runtime.invocation?.requesterUserId ?? sessionConfig.requesterUserId;
           // Read before finalization clears the turn's ACP update state.
           const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
 

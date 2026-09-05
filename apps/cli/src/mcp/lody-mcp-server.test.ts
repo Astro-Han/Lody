@@ -13,10 +13,8 @@ import {
   type AgentRole,
   type AgentRoleId,
   type MachineId,
-  type SessionHistoryInput,
   type SessionId,
   type SessionTurnInputConfig,
-  type StoredLodyOperation,
   type WorkspaceId,
 } from '@lody/shared';
 import {
@@ -80,28 +78,12 @@ const {
   getSessionContext,
   resolveOperationStorePathForContext,
   resolveUploadPath,
-  resolveInvokingHistoryInput,
-  selectInvokingTurnSource,
-  buildInvokingTurnPrincipal,
-  assertOperationRetryPrincipal,
+  buildInvocationIdentity,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
   makeMachineOnlineLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
-
-const historyTurn = (
-  id: string,
-  role: SessionHistoryInput['role'],
-  chainDepth?: number
-): SessionHistoryInput => ({
-  id,
-  role,
-  timestamp: '2026-07-20T00:00:00.000Z',
-  items: [],
-  fileDiff: [],
-  ...(chainDepth === undefined ? {} : { inputConfig: { chainDepth } }),
-});
 
 const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   machineId: 'machine-id',
@@ -291,106 +273,13 @@ describe('session MCP input schemas', () => {
     expect(result.isError).toBe(true);
   });
 
-  it('anchors continuation depth before a later queued human input', () => {
-    const completion = historyTurn('operation-completion', 'system', 5);
-    const executingAssistant = historyTurn('assistant:continuation', 'assistant');
-    const queuedHumanInput = historyTurn('queued-human', 'user', 0);
-
-    expect(resolveInvokingHistoryInput([completion, executingAssistant, queuedHumanInput])).toBe(
-      completion
-    );
-  });
-
-  it('uses RPC runtime identity while the driving user Turn is absent from local history', () => {
-    const previousUser = { ...historyTurn('turn-a', 'user'), userId: 'user-a' };
-    const previousAssistant = {
-      ...historyTurn('assistant:turn-a', 'assistant'),
-      userTurnId: previousUser.id,
-    };
-
-    expect(
-      selectInvokingTurnSource([previousUser, previousAssistant], {
-        type: 'session/active-invocation-context',
-        sessionId: 'current-session-id',
-        active: true,
-        requesterUserId: 'user-b',
-        sourceTurnId: 'turn-b',
-        inputConfig: { chainDepth: 1, taskToolsEnabled: true },
-      })
-    ).toEqual({
-      id: 'turn-b',
-      userId: 'user-b',
-      inputConfig: { chainDepth: 1, taskToolsEnabled: true },
-    });
-  });
-
-  it('keeps RPC runtime identity after the history gate times out', () => {
-    const previousUser = { ...historyTurn('turn-a', 'user'), userId: 'user-a' };
-    const previousAssistant = {
-      ...historyTurn('assistant:turn-a', 'assistant'),
-      userTurnId: previousUser.id,
-    };
-    const unlinkedCurrentAssistant = {
-      ...historyTurn('assistant:turn-b', 'assistant'),
-      userTurnId: 'turn-b',
-    };
-    const history = [previousUser, previousAssistant, unlinkedCurrentAssistant];
-    expect(resolveInvokingHistoryInput(history)).toBe(previousUser);
-    expect(
-      selectInvokingTurnSource(history, {
-        type: 'session/active-invocation-context',
-        sessionId: 'current-session-id',
-        active: true,
-        requesterUserId: 'user-b',
-        sourceTurnId: 'turn-b',
-        inputConfig: { chainDepth: 2 },
-      })
-    ).toMatchObject({ id: 'turn-b', userId: 'user-b' });
-  });
-
   it('derives delegated identity from the exact driving Turn', () => {
-    expect(buildInvokingTurnPrincipal({ id: 'source-turn', userId: 'collaborator-b' })).toEqual({
-      userId: 'collaborator-b',
-      sourceTurnId: 'source-turn',
-    });
-    expect(() => buildInvokingTurnPrincipal({ id: 'legacy-turn' })).toThrow(
-      'has no authenticated human identity'
-    );
-  });
-
-  it('binds Operation retries to the original invoking Turn', () => {
-    const principal = {
-      userId: 'collaborator-b',
-      sourceTurnId: 'source-turn-b',
-    };
-    const operation = {
-      operationId: 'review-1',
-      requesterUserId: principal.userId,
-      frozenContinuationConfig: {
-        inputConfig: {},
-        delegation: {
-          sourceTurnId: principal.sourceTurnId,
-        },
-      },
-    } as StoredLodyOperation;
-
-    expect(() => assertOperationRetryPrincipal(operation, principal)).not.toThrow();
+    expect(
+      buildInvocationIdentity({ id: 'source-turn', userId: 'collaborator-b', inputConfig: {} })
+    ).toEqual({ userId: 'collaborator-b', sourceTurnId: 'source-turn' });
     expect(() =>
-      assertOperationRetryPrincipal(
-        {
-          ...operation,
-          frozenContinuationConfig: { inputConfig: {} },
-        } as StoredLodyOperation,
-        principal
-      )
-    ).toThrow('has no frozen delegated principal provenance');
-    expect(() =>
-      assertOperationRetryPrincipal(operation, {
-        ...principal,
-        userId: 'collaborator-c',
-        sourceTurnId: 'source-turn-c',
-      })
-    ).toThrow('already bound to a different invoking Turn');
+      buildInvocationIdentity({ id: 'legacy-turn', userId: ' ', inputConfig: {} })
+    ).toThrow('has no authenticated human identity');
   });
 
   it('uses stable ids and rejects legacy selector names', () => {
@@ -586,10 +475,7 @@ describe('session MCP input schemas', () => {
       machine: 'machine-id',
       agentConfig: 'agent-config-id',
       useCurrentSessionAsParent: true,
-      requestSubject: {
-        userId: 'collaborator-b',
-        kind: 'delegated',
-      },
+      delegatedRequester: { userId: 'collaborator-b' },
       defaultMachineId: 'machine-id',
     });
   });

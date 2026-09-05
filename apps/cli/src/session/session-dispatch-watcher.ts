@@ -1574,8 +1574,11 @@ export class SessionDispatchWatcher {
             sessionId,
             sessionDoc,
             userTurnId: nextUserTurn.id,
-            requesterUserId: nextUserTurn.userId,
-            invocationInputConfig: nextUserTurn.inputConfig ?? {},
+            invocation: {
+              sourceTurnId: nextUserTurn.id,
+              requesterUserId: nextUserTurn.userId,
+              inputConfig: nextUserTurn.inputConfig ?? {},
+            },
             dispatchSource,
             accessPromise: executionAccessPromise,
             requestPromise,
