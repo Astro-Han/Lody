@@ -1423,17 +1423,26 @@ export const SessionChatStreamView = forwardRef<
       return undefined;
     }, [scrollRowToTop, virtualRows]);
 
+    // Whether this render reaches the virtualized branch below. A session whose
+    // document is still being acquired renders the empty sentinel and returns
+    // before `Virtualizer` mounts, yet every hook above that return has already
+    // run — including the one that reads the stored row measurements.
+    const hasVirtualizedRows = virtualRows.length > 0;
+
     const {
       scrollRef: scrollContainerRef,
       scrollElement: scrollViewportElement,
       isSticky,
       scrollToBottom,
       initialScrollRestored,
+      initialVirtualizerCache,
+      persistVirtualizerCache,
       handleScroll,
     } = useStickyScroll({
       sessionId,
       initialContentReady: initialWindowReady,
       vlistRef,
+      hasVirtualizedRows,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
       itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivity ? 1 : 0),
@@ -1578,6 +1587,8 @@ export const SessionChatStreamView = forwardRef<
     );
 
     const handleStreamScrollEnd = useCallback(() => {
+      // Scrolling measured more rows; keep them for the next open.
+      persistVirtualizerCache();
       const pending = pendingOutlineJumpRef.current;
       if (!pending) return;
       if (
@@ -1595,7 +1606,7 @@ export const SessionChatStreamView = forwardRef<
         attempts: pending.attempts + 1,
       };
       scrollRowToTop(pending.rowIndex);
-    }, [outlineJumpDrift, scrollRowToTop]);
+    }, [outlineJumpDrift, persistVirtualizerCache, scrollRowToTop]);
 
     // Any real input abandons the correction: a reader who starts scrolling
     // must never be yanked back by a jump they have already moved on from.
@@ -1826,6 +1837,10 @@ export const SessionChatStreamView = forwardRef<
               <Virtualizer
                 ref={vlistRef}
                 item={ConversationVirtualRow}
+                // Row heights measured the last time this session was open, so
+                // the first layout is the real one instead of an estimate that
+                // has to be corrected before the conversation can be shown.
+                cache={initialVirtualizerCache}
                 shift={false}
                 onScroll={handleStreamScroll}
                 onScrollEnd={handleStreamScrollEnd}
