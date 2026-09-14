@@ -39,7 +39,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
 import {
   type AgentConfigCliType,
   type ChatFailedCode,
@@ -172,6 +172,8 @@ import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-dur
 import { resolveSessionHistoryDurationMs } from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import type { TurnIndexRow } from '@/lib/conversation-view';
+import { TurnPlaceholderRow } from './turn-placeholder-row';
 import { CreatedSessionOperationCard } from './created-session-operation-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
@@ -310,10 +312,22 @@ export interface SessionMessageItem {
   type: 'message';
   sessionId: SessionId;
   message: SessionHistoryParsed;
+  /** Absolute position of the turn in the conversation (`ConversationView` index). */
+  turnIndex: number;
 }
 
 export interface EmptySessionItem {
   type: 'empty';
+}
+
+/**
+ * A turn the view has not hydrated: renders as `TurnPlaceholderRow` under the
+ * turn's id so hydration swaps content beneath a stable Virtua key.
+ */
+export interface PlaceholderSessionItem {
+  type: 'placeholder';
+  row: TurnIndexRow;
+  turnIndex: number;
 }
 
 export type MessageFileDiffEntriesByTurn = Readonly<
@@ -331,7 +345,7 @@ const OUTLINE_JUMP_TOLERANCE_PX = 2;
  */
 const OUTLINE_JUMP_MAX_CORRECTIONS = 3;
 
-export type ChatStreamItem = SessionMessageItem | EmptySessionItem;
+export type ChatStreamItem = SessionMessageItem | EmptySessionItem | PlaceholderSessionItem;
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
@@ -372,11 +386,21 @@ type AssistantChatVirtualRow = {
 type StandardChatVirtualRow = {
   type: 'standard';
   key: string;
+  /** Absolute turn index (the `empty` item uses its list position). */
   messageIndex: number;
-  item: ChatStreamItem;
+  item: SessionMessageItem | EmptySessionItem;
 };
 
-type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow;
+type PlaceholderChatVirtualRow = {
+  type: 'placeholder';
+  key: string;
+  messageIndex: number;
+  item: PlaceholderSessionItem;
+};
+
+type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | PlaceholderChatVirtualRow;
+
+/** One row per placeholder item, identity-stable while the item is. */
 
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
@@ -422,9 +446,25 @@ export const resolveAssistantMessageActions = (
 
 export type GoalCommand = SessionGoalCommand;
 
+export type VisibleTurnRange = { from: number; to: number };
+
+/** Exposes row identity at the measurement boundary without inspecting message DOM. */
+function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
+  return <div {...props} data-virtual-index={index} />;
+}
+
 export interface SessionChatStreamViewProps {
+  initialWindowReady?: boolean;
   items: ChatStreamItem[];
   sessionId: SessionId;
+  /**
+   * Reports the turn indexes currently inside the viewport (`[from, to)`), on
+   * scroll and after the initial position restore. The connected stream turns
+   * this into the hydrated window.
+   */
+  onVisibleTurnRangeChange?: (range: VisibleTurnRange) => void;
+  /** The outline hovered a round with no preview yet; hydrate it so one appears. */
+  onOutlinePreviewRound?: (turnIndex: number) => void;
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
@@ -861,11 +901,20 @@ export const buildChatVirtualRows = ({
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
-  for (let messageIndex = 0; messageIndex < items.length; messageIndex += 1) {
-    const item = items[messageIndex];
-    // Empty presentation must never seed Virtua's index-based size cache:
-    // its zero height would otherwise be inherited by the first user row.
+  for (let position = 0; position < items.length; position += 1) {
+    const item = items[position];
+    // Empty presentation must not seed Virtua's size cache for the first row.
     if (!item || item.type === 'empty') continue;
+    if (item.type === 'placeholder') {
+      // No per-row cache: `TurnPlaceholderRow` is memoized on `item.row`, which
+      // `buildChatStreamItems` already keeps stable, so the row object is never
+      // compared by identity (unlike an assistant row, which is passed whole).
+      rows.push({ type: 'placeholder', key: item.row.id, messageIndex: item.turnIndex, item });
+      continue;
+    }
+    // Rows speak in absolute turn indexes so outline anchors and scroll
+    // targets are independent of which turns happen to be hydrated.
+    const messageIndex = item.turnIndex;
     if (item.message.role !== 'assistant') {
       rows.push({
         type: 'standard',
@@ -1186,6 +1235,7 @@ export const SessionChatStreamView = forwardRef<
     {
       items,
       sessionId,
+      initialWindowReady = true,
       className,
       leadingContent,
       emptyState,
@@ -1212,6 +1262,8 @@ export const SessionChatStreamView = forwardRef<
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
+      onVisibleTurnRangeChange,
+      onOutlinePreviewRound,
     },
     ref
   ) => {
@@ -1339,7 +1391,7 @@ export const SessionChatStreamView = forwardRef<
      * `resolveActiveOutlineIndex` reads positions back out of. Without the
      * `offset` compensation a jump settles a padding's worth low, and the
      * outline rail then reports the round BEFORE the one that was asked for.
-     * (`scrollViewportToRealBottom` compensates the bottom padding the same way.)
+     * Bottom following uses the DOM extent, which already includes padding.
      */
     const scrollRowToTop = useCallback(
       (rowIndex: number, smooth = false) => {
@@ -1380,6 +1432,7 @@ export const SessionChatStreamView = forwardRef<
       handleScroll,
     } = useStickyScroll({
       sessionId,
+      initialContentReady: initialWindowReady,
       vlistRef,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
@@ -1567,18 +1620,65 @@ export const SessionChatStreamView = forwardRef<
     // message while the list sits at its start. setState with an unchanged
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
+
+    // Which turns are in the viewport, from Virtua's own index math; the only
+    // input the hydration window has. Read through refs so a report never
+    // re-creates the scroll handler, and deduplicated so a settled viewport
+    // stops producing updates.
+    const virtualRowsRef = useLatestRef(virtualRows);
+    const onVisibleTurnRangeChangeRef = useLatestRef(onVisibleTurnRangeChange);
+    const lastVisibleRangeRef = useRef<VisibleTurnRange | null>(null);
+    const reportVisibleTurnRange = useCallback(() => {
+      const vlist = vlistRef.current;
+      const report = onVisibleTurnRangeChangeRef.current;
+      if (!vlist || !report) return;
+      const rows = virtualRowsRef.current;
+      if (rows.length === 0) return;
+      const clampRow = (index: number) => Math.max(0, Math.min(rows.length - 1, index));
+      const startRow = clampRow(vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount);
+      const endRow = clampRow(
+        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+      );
+      const from = rows[startRow]?.messageIndex;
+      const to = rows[endRow]?.messageIndex;
+      if (from === undefined || to === undefined) return;
+      const next = { from: Math.min(from, to), to: Math.max(from, to) + 1 };
+      const last = lastVisibleRangeRef.current;
+      if (last && last.from === next.from && last.to === next.to) return;
+      lastVisibleRangeRef.current = next;
+      report(next);
+    }, [leadingRowCount, onVisibleTurnRangeChangeRef, virtualRowsRef]);
+    useEffect(() => {
+      if (!initialScrollRestored) return;
+      reportVisibleTurnRange();
+    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
         syncActiveOutlineIndex();
+        reportVisibleTurnRange();
       },
-      [handleScroll, syncActiveOutlineIndex]
+      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex]
+    );
+
+    const handleOutlinePreview = useCallback(
+      (outlineIndex: number) => {
+        const entry = outlineEntries[outlineIndex];
+        if (!entry || entry.preview) return;
+        onOutlinePreviewRound?.(entry.messageIndex);
+      },
+      [onOutlinePreviewRound, outlineEntries]
     );
 
     const scrollToIndex = useCallback(
       (messageIndex: number, smooth?: boolean) => {
-        const messageItem = items[messageIndex];
+        // `messageIndex` is an absolute turn index; a placeholder row exists for
+        // every non-hydrated turn, so a target is always addressable.
+        const messageItem = items.find(
+          (candidate) => candidate.type === 'message' && candidate.turnIndex === messageIndex
+        );
         let virtualIndex = -1;
         if (messageItem?.type === 'message' && activeSearchBlockId) {
           const prefix = getMessageItemPrefix(messageItem.message.id, 0).slice(0, -1);
@@ -1714,6 +1814,7 @@ export const SessionChatStreamView = forwardRef<
               // header at rest while later content scrolls under it and blurs.
               // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
               style={{
+                visibility: initialWindowReady && initialScrollRestored ? 'visible' : 'hidden',
                 display: 'block',
                 overflowY: 'auto',
                 contain: 'strict',
@@ -1724,6 +1825,7 @@ export const SessionChatStreamView = forwardRef<
             >
               <Virtualizer
                 ref={vlistRef}
+                item={ConversationVirtualRow}
                 shift={false}
                 onScroll={handleStreamScroll}
                 onScrollEnd={handleStreamScrollEnd}
@@ -1739,6 +1841,9 @@ export const SessionChatStreamView = forwardRef<
                   <div data-conversation-leading-content="">{leadingContent}</div>
                 )}
                 {virtualRows.map((row, rowIndex) => {
+                  if (row.type === 'placeholder') {
+                    return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
+                  }
                   if (row.type === 'standard') {
                     // Standard rows are only ever system or user messages
                     // (assistant turns are flattened into `assistant` rows below),
@@ -1820,6 +1925,7 @@ export const SessionChatStreamView = forwardRef<
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
                 onJumpToRound={handleOutlineJump}
+                onPreviewRound={handleOutlinePreview}
                 overlayRoot={outlineOverlayRoot}
                 enableArrivalIntent
               />

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { openStaticShare, prepareSharePackage } from '@lody/shared/session-sharing';
-import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { createSharedChatStreamBuilder } from '../src/components/sharing/session-share-stream-items';
 import type { SessionId } from '@lody/shared';
 import {
   createSessionShareReader,
@@ -69,7 +69,14 @@ describe('anonymous static conversation reader', () => {
     expect(changed.mock.calls.map(([value]) => value.status)).toEqual(['loading', 'ready']);
     const history = changed.mock.calls[1]![0].history;
     expect(history[0]?.items?.[0]).toMatchObject({ type: 'text', text: 'Published answer' });
-    expect(buildChatStreamItems(history, 'c1' as SessionId).items.length).toBeGreaterThan(0);
+    const builder = createSharedChatStreamBuilder();
+    try {
+      const stream = builder.build(history, 'c1' as SessionId);
+      expect(stream.items).toHaveLength(1);
+      expect(stream.items[0]).toMatchObject({ type: 'message', message: { id: 'm1' } });
+    } finally {
+      builder.dispose();
+    }
     reader.close();
   });
 

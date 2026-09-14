@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -292,9 +293,9 @@ describe('SessionExecutionService', () => {
       steerPrompt,
       currentModel: undefined,
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
       workspaceDocument: {
@@ -531,16 +532,16 @@ describe('SessionExecutionService', () => {
       { id: 'user-c', role: 'user', status: 'pending_apply', read: false },
       { id: 'user-d', role: 'user', status: 'pending_apply', read: false },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
       waitUntilSynced: vi.fn(async () => {}),
-    };
+    });
     let meta: Record<string, unknown> = {};
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
@@ -729,7 +730,9 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({
       workspaceDocument: {
         repo: { upsertDocMeta: vi.fn(async () => {}) },
-        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+        getOrCreateSessionDoc: vi.fn(async () =>
+          withHistoryPort({ updateHistory: vi.fn(async () => {}) })
+        ),
       } as unknown as LoroDocumentManager,
       buildAcpPromptBlocks: vi.fn(() => promptBlocks.promise),
     });
@@ -782,7 +785,9 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({
       workspaceDocument: {
         repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
-        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+        getOrCreateSessionDoc: vi.fn(async () =>
+          withHistoryPort({ updateHistory: vi.fn(async () => {}) })
+        ),
       } as unknown as LoroDocumentManager,
     });
     const service = new SessionExecutionService(deps);
@@ -864,13 +869,13 @@ describe('SessionExecutionService', () => {
           inputConfig: { prompt: 'do it differently' },
         } as SessionHistoryInput,
       ];
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         updateHistory: vi.fn(
           async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
             history = update(history);
           }
         ),
-      };
+      });
       const upsertDocMeta = vi.fn(async () => {});
       const deps = createBaseDeps({
         workspaceDocument: {
@@ -956,13 +961,13 @@ describe('SessionExecutionService', () => {
     let history: SessionHistoryInput[] = [
       { id: 'user-2', role: 'user', status: 'processing', read: true } as SessionHistoryInput,
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       updateHistory: vi.fn(
         async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = update(history);
         }
       ),
-    };
+    });
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
       workspaceDocument: {
@@ -998,11 +1003,13 @@ describe('SessionExecutionService', () => {
           upsertDocMeta,
           getDocMeta,
         },
-        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+        getOrCreateSessionDoc: vi.fn(async () =>
+          withHistoryPort({ updateHistory: vi.fn(async () => {}) })
+        ),
       } as unknown as LoroDocumentManager,
     });
     const service = new SessionExecutionService(deps);
-    const sessionDoc = { updateHistory: vi.fn(async () => {}) };
+    const sessionDoc = withHistoryPort({ updateHistory: vi.fn(async () => {}) });
     const setDispatchProcessing = (
       service as unknown as {
         setDispatchProcessing: (
@@ -1050,7 +1057,7 @@ describe('SessionExecutionService', () => {
 
     const completion = setDispatchHandled(
       'session-terminal-pointer' as SessionId,
-      { updateHistory },
+      withHistoryPort({ updateHistory }),
       'user-old'
     );
     await vi.waitFor(() => expect(updateHistory).toHaveBeenCalledTimes(1));
@@ -1069,7 +1076,9 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({
       workspaceDocument: {
         repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
-        getOrCreateSessionDoc: vi.fn(async () => ({ updateHistory: vi.fn(async () => {}) })),
+        getOrCreateSessionDoc: vi.fn(async () =>
+          withHistoryPort({ updateHistory: vi.fn(async () => {}) })
+        ),
       } as unknown as LoroDocumentManager,
     });
     const service = new SessionExecutionService(deps);
@@ -1159,15 +1168,15 @@ describe('SessionExecutionService', () => {
       createAgent: vi.fn(async () => 'acp-goal-active'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false, latestGoal: activeGoal })),
       setStatus: vi.fn(async () => {}),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     const notifySessionCompleted = vi.fn(async () => {});
     const deps = createBaseDeps({
       sessionManager: {
@@ -1237,18 +1246,18 @@ describe('SessionExecutionService', () => {
       createAgent: vi.fn(async () => 'acp-owner'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({
         isArchived: false,
         acpSessionId: 'acp-owner' as ACPSessionId,
       })),
       setStatus: vi.fn(async () => {}),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     const terminateSession = vi.fn(async () => {});
     const createSession = vi.fn();
     const deps = createBaseDeps({
@@ -1341,17 +1350,17 @@ describe('SessionExecutionService', () => {
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
     let status = SessionStatusFactory.idle();
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async (next: typeof status) => {
         status = next;
       }),
       setLastMessageAt: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     const notifySessionCompleted = vi.fn(async () => {});
     const onTurnSettled = options.onTurnSettled ?? vi.fn(async () => {});
     const finalizationOwners: boolean[] = [];
@@ -1424,7 +1433,7 @@ describe('SessionExecutionService', () => {
       );
     }
 
-    return {
+    return withHistoryPort({
       deps,
       sessionDoc,
       notifySessionCompleted,
@@ -1435,7 +1444,7 @@ describe('SessionExecutionService', () => {
       getStatus: () => status,
       finalizationOwners,
       service,
-    };
+    });
   };
 
   it('fails a turn whose prompt completed without emitting any agent output', async () => {
@@ -1708,14 +1717,14 @@ describe('SessionExecutionService', () => {
       createAgent: vi.fn(async () => 'acp-1'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
       sessionManager: {
@@ -1860,13 +1869,13 @@ describe('SessionExecutionService', () => {
         read: false,
       },
     ];
-    const sessionDoc = {
-      getHistory: vi.fn(async () => history),
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
       setStatus: vi.fn(async () => {}),
-    };
+    });
     const onAccessAllowed = vi.fn(async () => {});
     const onAccessDenied = vi.fn(async () => {});
     const onAccessIndeterminate = vi.fn(async () => {});
@@ -1942,15 +1951,15 @@ describe('SessionExecutionService', () => {
         read: false,
       },
     ];
-    const preparedSessionDoc = {
-      getHistory: vi.fn(async () => preparedHistory),
+    const preparedSessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => preparedHistory),
       updateHistory: vi.fn(
         async (updater: (prev: typeof preparedHistory) => typeof preparedHistory) => {
           preparedHistory = updater(preparedHistory);
         }
       ),
       setStatus: vi.fn(async () => {}),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -2078,17 +2087,17 @@ describe('SessionExecutionService', () => {
       createAgent: vi.fn(async () => 'acp-1'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async (status: { type: string }) => {
         events.push(`status:${status.type}`);
       }),
       waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     const deps = createBaseDeps({
       sessionManager: {
         getSession: vi.fn(() => activeSession),
@@ -2208,15 +2217,15 @@ describe('SessionExecutionService', () => {
         agentClient: restoredAgentClient,
         createAgent: vi.fn(async () => restoredAcpSessionId),
       };
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         getMetaState: vi.fn(async () => ({ isArchived: false })),
         setStatus: vi.fn(async () => {}),
         waitUntilSynced: vi.fn(async () => {}),
-        getHistory: vi.fn(async () => history),
+        getHistory: vi.fn(() => history),
         updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
           history = updater(history);
         }),
-      };
+      });
       const deps = createBaseDeps({});
       const sessionManager = deps.sessionManager as unknown as {
         getSession: ReturnType<typeof vi.fn>;
@@ -2318,15 +2327,15 @@ describe('SessionExecutionService', () => {
       createAgent: vi.fn(async () => acpSessionId),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       waitUntilSynced: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     const deps = createBaseDeps({});
     const sessionManager = deps.sessionManager as unknown as {
       getSession: ReturnType<typeof vi.fn>;
@@ -2398,15 +2407,15 @@ describe('SessionExecutionService', () => {
       createAgent: vi.fn(async () => 'acp-1'),
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     const refreshCodeCollabSharedState = vi.fn(async () => {});
     const deps = createBaseDeps({
       sessionManager: {
@@ -2465,15 +2474,15 @@ describe('SessionExecutionService', () => {
   it('starts a local project session creation', async () => {
     const localProjectId = 'local-project-1' as LocalProjectId;
     const machineId = 'machine-1' as MachineId;
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ agentConfigId: capabilityConfigId })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-local-code-collab',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -2610,16 +2619,16 @@ describe('SessionExecutionService', () => {
         read: false,
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
       roomId: 'session-session-1',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -2706,17 +2715,17 @@ describe('SessionExecutionService', () => {
         read: false,
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
       roomId: 'session-session-create-dag',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -2822,17 +2831,17 @@ describe('SessionExecutionService', () => {
         read: false,
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
       roomId: 'session-session-file-create',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -2926,15 +2935,15 @@ describe('SessionExecutionService', () => {
       isArchived: false,
     };
     let history: unknown[] = [];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
-    };
+    });
 
     const agentClient = {
       isCreated: vi.fn(() => true),
@@ -3042,17 +3051,17 @@ describe('SessionExecutionService', () => {
         items: [{ type: 'text', text: '?' }],
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updater: (prev: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updater(history);
         }
       ),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3149,11 +3158,11 @@ describe('SessionExecutionService', () => {
     };
     let history: SessionHistoryInput[] = [currentTurn];
     let notifyMirror: (() => void) | undefined;
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updater: (prev: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updater(history);
@@ -3173,7 +3182,21 @@ describe('SessionExecutionService', () => {
           };
         },
       },
-    };
+      // `subscribeSessionChanges` needs the session-data surface; the fake drives
+      // the late-sync signal through the raw Mirror's subscribe.
+      sessionData: {
+        history: {
+          count: async () => 0,
+          readAt: async () => ({ state: 'missing' as const }),
+          readTurn: async () => ({ state: 'missing' as const }),
+          readRange: async () => [],
+          readDirectory: async () => [],
+          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+        },
+        commands: {},
+        durability: { waitDurable: async () => {} },
+      },
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3282,15 +3305,15 @@ describe('SessionExecutionService', () => {
       isArchived: false,
     };
     let history: unknown[] = [];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3403,15 +3426,15 @@ describe('SessionExecutionService', () => {
       isArchived: false,
     };
     let history: unknown[] = [];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3519,7 +3542,7 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
     });
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({
         repoFullName: 'owner/repo',
         acpSessionId: 'acp-restore-interrupt' as ACPSessionId,
@@ -3527,10 +3550,10 @@ describe('SessionExecutionService', () => {
       })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-restore-interrupt',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3617,15 +3640,15 @@ describe('SessionExecutionService', () => {
   });
 
   it('creates and starts a new session turn', async () => {
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-2',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3732,7 +3755,7 @@ describe('SessionExecutionService', () => {
       localProjectId,
       branch: 'feature/remote-local',
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       // This is the metadata createSessionResult writes before it dispatches
       // session/create. It identifies the project but has no ACP session yet.
       getMetaState: vi.fn(async () => ({
@@ -3748,13 +3771,13 @@ describe('SessionExecutionService', () => {
         project,
         latestUserMsgId: 'turn-local-branch',
       })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-local-project-branch',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3859,15 +3882,15 @@ describe('SessionExecutionService', () => {
     runGit(rootPath, ['commit', '-m', 'old session']);
 
     const localProjectId = 'local-project-diverged-tracking' as LocalProjectId;
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-local-project-diverged-tracking',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -3957,15 +3980,15 @@ describe('SessionExecutionService', () => {
     const rootPath = createGitLocalProject();
     fs.writeFileSync(path.join(rootPath, 'dirty.txt'), 'dirty\n', 'utf8');
     const localProjectId = 'local-project-dirty' as LocalProjectId;
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-local-project-dirty',
-    };
+    });
     const createSession = vi.fn();
     const deps = createBaseDeps({
       sessionManager: {
@@ -4030,18 +4053,18 @@ describe('SessionExecutionService', () => {
       localProjectId,
       branch: 'feature/remote-local',
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({
         project,
         acpSessionId: 'acp-local-project-existing-dirty' as ACPSessionId,
       })),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-local-project-existing-dirty',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -4121,14 +4144,14 @@ describe('SessionExecutionService', () => {
   });
 
   it('records an actionable diagnostic when Git is unavailable for a GitHub worktree', async () => {
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-github-git-missing',
-    };
+    });
     const gitError = new GitExecutableNotFoundError(
       Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' })
     );
@@ -4182,15 +4205,15 @@ describe('SessionExecutionService', () => {
   it('fails a local project worktree when the requested base branch no longer exists', async () => {
     const rootPath = createGitLocalProject();
     const localProjectId = 'local-project-missing-worktree-branch' as LocalProjectId;
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-local-project-missing-worktree-branch',
-    };
+    });
     const createSession = vi.fn();
     const deps = createBaseDeps({
       sessionManager: {
@@ -4252,9 +4275,9 @@ describe('SessionExecutionService', () => {
 
   it('does not prompt a startSession turn that was cancelled before the first prompt runs', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => [
+      getHistory: vi.fn(() => [
         {
           id: 'turn-create-cancelled',
           role: 'user',
@@ -4271,7 +4294,7 @@ describe('SessionExecutionService', () => {
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-create-cancelled',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -4346,15 +4369,15 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
     });
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-create-interrupt',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -4446,15 +4469,15 @@ describe('SessionExecutionService', () => {
 
   it('releases active presence and marks dispatch failed when start session creation fails', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-create-fail',
-    };
+    });
     const sessionManager = {
       getSession: vi.fn(() => null),
       getPendingSession: vi.fn(() => null),
@@ -4513,15 +4536,15 @@ describe('SessionExecutionService', () => {
   });
 
   it('reports authentication required when a first turn cannot create its session', async () => {
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-create-auth',
-    };
+    });
     const sessionManager = {
       getSession: vi.fn(() => null),
       getPendingSession: vi.fn(() => null),
@@ -4637,19 +4660,20 @@ describe('SessionExecutionService', () => {
       expectedCreateSessionCalls: 1,
     },
   ])('$name', async (testCase) => {
+    vi.useFakeTimers();
     const { errors, expectedReason, expectedMessage, resumeSessionId, history } = testCase;
     const expectedCreateSessionCalls = testCase.expectedCreateSessionCalls;
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({
         repoFullName: 'owner/repo',
         isArchived: false,
       })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const sessionManager = {
       getSession: vi.fn(() => null),
       getPendingSession: vi.fn(() => null),
@@ -4675,7 +4699,7 @@ describe('SessionExecutionService', () => {
     });
 
     const service = new SessionExecutionService(deps);
-    await service.continueSession({
+    const execution = service.continueSession({
       type: 'session/chat',
       sessionId: 'session-restore-fail' as SessionId,
       machineId: 'machine-1',
@@ -4692,6 +4716,10 @@ describe('SessionExecutionService', () => {
       userName: 'User',
       userEmail: 'user@example.com',
     });
+
+    await vi.advanceTimersByTimeAsync(16000);
+    await execution;
+    vi.useRealTimers();
 
     expect(deps.startSessionActivePresence).toHaveBeenCalledTimes(1);
     expect(deps.clearSessionActivePresence).toHaveBeenCalledTimes(1);
@@ -4741,13 +4769,13 @@ describe('SessionExecutionService', () => {
     'reports pending session initialization failure through the owner effect path: $name',
     async ({ error, expectedReason, expectedMessage }) => {
       const upsertDocMeta = vi.fn(async () => {});
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         getMetaState: vi.fn(async () => ({ isArchived: false })),
         setStatus: vi.fn(async () => {}),
         setBaseBranch: vi.fn(async () => {}),
-        getHistory: vi.fn(async () => []),
+        getHistory: vi.fn(() => []),
         updateHistory: vi.fn(async () => {}),
-      };
+      });
       const session = {
         sessionId: 'session-pending-init-fail' as SessionId,
         acpSessionId: null,
@@ -4813,13 +4841,13 @@ describe('SessionExecutionService', () => {
 
   it('marks chat dispatch as failed when prompt execution throws after processing starts', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       prompt: vi.fn(async () => {
@@ -4921,17 +4949,17 @@ describe('SessionExecutionService', () => {
         ],
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(
         async (updater: (current: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = updater(history);
         }
       ),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       prompt: vi.fn(async () => {
@@ -5013,13 +5041,13 @@ describe('SessionExecutionService', () => {
   it('records a visible failure when a chat turn fails before prompt starts', async () => {
     const events: string[] = [];
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       prompt: vi.fn(async () => ({})),
@@ -5124,13 +5152,13 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
     });
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -5226,13 +5254,13 @@ describe('SessionExecutionService', () => {
   });
 
   it('stops a turn before prompt starts when the matching active turn is cancelled', async () => {
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -5354,15 +5382,15 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
     });
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
-    };
+    });
     let activeTurnId: string | undefined;
     const promptStarted = createDeferred();
     const cancelSubmitted = createDeferred();
@@ -5718,17 +5746,17 @@ describe('SessionExecutionService', () => {
         },
       ];
       let status: unknown;
-      const sessionDoc = {
+      const sessionDoc = withHistoryPort({
         getMetaState: vi.fn(async () => ({ isArchived: false })),
         setStatus: vi.fn(async (next: unknown) => {
           status = next;
         }),
         setBaseBranch: vi.fn(async () => {}),
-        getHistory: vi.fn(async () => history),
+        getHistory: vi.fn(() => history),
         updateHistory: vi.fn(async (update: (prev: typeof history) => typeof history) => {
           history = update(history);
         }),
-      };
+      });
       let activeTurnId: string | undefined;
       let promptSignal: AbortSignal | undefined;
       let rawPending = true;
@@ -5946,13 +5974,13 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
     });
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     let activeTurnId: string | undefined;
     let service: SessionExecutionService;
     const agentClient = {
@@ -6060,9 +6088,9 @@ describe('SessionExecutionService', () => {
         fileDiff: [],
       },
     ];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
@@ -6070,7 +6098,7 @@ describe('SessionExecutionService', () => {
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       roomId: 'session-session-finalizing-cancel',
-    };
+    });
     const agentClient = {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
@@ -6175,15 +6203,15 @@ describe('SessionExecutionService', () => {
 
   it('fails startSession when the agent client is missing instead of silently finalizing', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => undefined),
-      getHistory: vi.fn(async () => []),
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       setProject: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
       roomId: 'session-session-4',
-    };
+    });
     const createdSession = {
       sessionId: 'session-4' as SessionId,
       acpSessionId: 'acp-4' as ACPSessionId,
@@ -6241,11 +6269,11 @@ describe('SessionExecutionService', () => {
 
   it('cancels an active session and reports success', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
-      getHistory: vi.fn(async () => []),
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const session = {
       acpSessionId: 'acp-3' as ACPSessionId,
       agentClient: {
@@ -6301,13 +6329,13 @@ describe('SessionExecutionService', () => {
   });
 
   it('keeps cancel successful when cancellation finalization side effects fail', async () => {
-    const sessionDoc = {
-      getHistory: vi.fn(async () => []),
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {
         throw new Error('status write failed');
       }),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const session = {
       acpSessionId: 'acp-cancel-finalizer-fail' as ACPSessionId,
       agentClient: {
@@ -6357,11 +6385,11 @@ describe('SessionExecutionService', () => {
 
   it('ignores a cancel request for a stale turn id', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
-      getHistory: vi.fn(async () => []),
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const session = {
       acpSessionId: 'acp-stale-cancel' as ACPSessionId,
       agentClient: {
@@ -6428,13 +6456,13 @@ describe('SessionExecutionService', () => {
         finished: false,
       },
     ];
-    const sessionDoc = {
-      getHistory: vi.fn(async () => history),
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => history),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async (update: (value: typeof history) => typeof history) => {
         update(history);
       }),
-    };
+    });
     const sessionManager = {
       getSession: vi.fn(() => null),
       getPendingSession: vi.fn(() => null),
@@ -6466,7 +6494,9 @@ describe('SessionExecutionService', () => {
     });
 
     expect(result).toEqual({ success: true });
-    expect(compactionItem.status).toBe('failed');
+    expect((await sessionDoc.sessionData.history.readAll())[0]?.items[0]).toMatchObject({
+      status: 'failed',
+    });
     expect(sessionDoc.updateHistory).toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stale-compaction', {
@@ -6476,11 +6506,11 @@ describe('SessionExecutionService', () => {
 
   it('keeps a newer queued turn pending when cancelling the currently running turn', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const sessionDoc = {
-      getHistory: vi.fn(async () => []),
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => []),
       setStatus: vi.fn(async () => {}),
       updateHistory: vi.fn(async () => {}),
-    };
+    });
     const session = {
       acpSessionId: 'acp-queued-cancel' as ACPSessionId,
       agentClient: {
@@ -7258,18 +7288,18 @@ describe('SessionExecutionService goal control', () => {
       updateGitIdentity: () => {},
       applyExecutionPlaneLimits: async () => {},
     };
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: async () => ({
         id: goalSessionId,
         cliType: 'builtin',
         agentType: 'codex',
         acpSessionId: 'acp-goal',
       }),
-      getHistory: async () => [],
+      getHistory: () => [],
       setStatus: async () => {},
       setLastMessageAt: async () => {},
       updateHistory: async () => {},
-    };
+    });
     const deps = createBaseDeps({
       sessionManager: {
         getSession: () => session,

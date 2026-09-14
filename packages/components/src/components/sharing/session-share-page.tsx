@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Moon, Sun, PanelLeft, Languages } from 'lucide-react';
 import {
@@ -27,10 +27,7 @@ import { buildOpenedBySessionTree } from '@/lib/session-opened-by-tree';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionChatStreamView, MessageRowView } from '../ai-gui/view';
-import {
-  buildChatStreamItems,
-  type BuildChatStreamItemsCache,
-} from '../ai-gui/build-chat-stream-items';
+import { createSharedChatStreamBuilder } from './session-share-stream-items';
 import { SessionReadonlyContext } from '../ai-gui/session-readonly-context';
 import {
   SharedAttachmentUnavailable,
@@ -133,12 +130,12 @@ function ShareConversationPane({
 }) {
   const { t } = useTranslation();
   const [copying, setCopying] = useState(false);
-  const cacheRef = useRef<BuildChatStreamItemsCache | undefined>(undefined);
+  const [streamBuilder] = useState(createSharedChatStreamBuilder);
+  useEffect(() => () => streamBuilder.dispose(), [streamBuilder]);
   const stream = useMemo(
-    () => buildChatStreamItems(snapshot.history, conversationId as SessionId, cacheRef.current),
-    [snapshot.history, conversationId]
+    () => streamBuilder.build(snapshot.history, conversationId as SessionId),
+    [streamBuilder, snapshot.history, conversationId]
   );
-  cacheRef.current = stream.cache;
   const attachments = useMemo(
     () => ({
       renderImage: (entry: Parameters<typeof SharedImage>[0]['entry']) => (

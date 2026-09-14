@@ -12,7 +12,6 @@ import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
-  resolveActiveAssistantTurnId,
   type SessionMeta,
   type VisualAnnotationReferencePayload,
 } from '@lody/shared';
@@ -56,6 +55,8 @@ import {
 } from '@/components/chat/visual-annotation-reference-state';
 import { usePreviewVisualCommentDoc } from '@/hooks/use-preview-visual-comment-doc';
 import { useSessionDoc } from '@/hooks/use-session-doc';
+import { useConversationVersion } from '@/hooks/use-conversation-view';
+import { resolveActiveAssistantTurnIdFromIndex } from '@/lib/conversation-view';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
@@ -350,8 +351,17 @@ export function ManagedPreviewSurface({
       )
       .map((comment) => comment.id);
   }, [comments, visualAnnotationReferenceKeys]);
-  const commentTurnId =
-    resolveActiveAssistantTurnId(sessionDoc.doc.history) ?? session.latestUserMsgId ?? session.id;
+  const { history: conversationView } = sessionDoc;
+  const conversationVersion = useConversationVersion(conversationView);
+  const commentTurnId = useMemo(
+    () =>
+      (conversationView ? resolveActiveAssistantTurnIdFromIndex(conversationView) : undefined) ??
+      session.latestUserMsgId ??
+      session.id,
+    // `conversationVersion` is the change signal for the view's index.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conversationVersion, conversationView, session.latestUserMsgId, session.id]
+  );
 
   const trackedAnchors = useMemo<TrackedVisualAnnotationAnchor[]>(() => {
     const next = comments.map((comment) => ({

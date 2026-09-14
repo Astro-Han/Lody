@@ -23,10 +23,12 @@ it('acquires sources concurrently but preserves selected order and releases all 
         sessionId: id,
         firstSynced: Promise.resolve(),
         acquireSync: () => () => syncReleased.push(id),
-        historyWriter: {
-          readStored: () => [
-            { id: 't', role: 'assistant', items: [{ type: 'text', text: id.repeat(1000) }] },
-          ],
+        sessionData: {
+          history: {
+            readAll: async () => [
+              { id: 't', role: 'assistant', items: [{ type: 'text', text: id.repeat(1000) }] },
+            ],
+          },
         },
       };
     },

@@ -58,6 +58,10 @@ export async function captureSessionShare(options: {
       )
     );
     options.signal.throwIfAborted();
+    const histories = await Promise.all(
+      orderedStores.map((store) => store.sessionData.history.readAll())
+    );
+    options.signal.throwIfAborted();
     const prepared = prepareSharePackage({
       fileAttachmentOmissionText: i18next.t(
         'sharing.fileAttachmentOmitted',
@@ -66,12 +70,12 @@ export async function captureSessionShare(options: {
       rootSourceId: options.rootSessionId,
       previousSourceIds: options.previousSourceIds,
       capturedAt: new Date().toISOString(),
-      conversations: orderedStores.map((store, index) => {
+      conversations: orderedStores.map((_, index) => {
         const meta = options.sessions[index]!;
         return {
           sourceId: meta.id,
           title: meta.title ?? '',
-          history: store.historyWriter.readStored(),
+          history: histories[index]!,
           parentSourceId: meta.parentSessionId ?? undefined,
           openedBySourceId: meta.openedBySessionId ?? undefined,
           childSessionPlacement:
