@@ -23,9 +23,9 @@ the message's `role` and visible actor attribution remain. Terminal commands rem
 but typed terminal output blocks are omitted completely, including exit status.
 A tool title identical to its first terminal command is omitted on the wire;
 readers restore the missing title from that command. Other titles remain unchanged.
-The confirmation screen discloses these omissions. Opaque tool payloads are not
-heuristically rewritten. It does not export Loro operation history or the surrounding document's
-runtime configuration, queued messages, agent sessions or workspace credentials.
+Opaque tool payloads are not heuristically rewritten. It does not export Loro
+operation history or the surrounding document's runtime configuration, queued
+messages, agent sessions or workspace credentials.
 History itself can contain sensitive text: publication is disclosure, not
 automatic sanitization.
 
@@ -88,7 +88,7 @@ bytes already downloaded.
 
 A client freezes the complete package before upload, and only a human action in
 the authenticated app starts that publication. There is no publication preview:
-confirmation approves the selected scope and disclosure, then freezes and uploads. Upload authority is limited to one immutable inventory and
+confirmation approves the selected scope, then freezes and uploads. Upload authority is limited to one immutable inventory and
 cannot publish. Only the authenticated app commits
 a sealed deployment. Publication uses the expected share revision; begin retries
 bind the complete request identity, including credentials and confirmation
@@ -142,6 +142,8 @@ The tool echoes the caller's `requestId` for retries and returns `shareRequestId
 separately as the server record identity. Closing the editor discards upload
 credentials: an unpublished request must then be abandoned and recreated with a
 new retry key; an ordinary draft must be revoked before preparing another copy.
+The client revokes a stale draft as part of the next publish, not when the dialog
+opens.
 
 Fork is out of scope for version one. A future fork may import displayable history
 and attachments into the visitor's workspace; a new agent receives Markdown in a
