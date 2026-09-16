@@ -20,8 +20,8 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   may show a percentage; capture and the publish commit use the indeterminate
   sweep. Auto-copy may claim "copied" only after the clipboard write resolves; a
   rejected write shows the manual-copy field.
-- MCP requests require explicit human confirmation of the locked target set.
-  Opening the dialog does not capture or publish; confirmation starts freeze/upload.
+- MCP consent names purpose, exact targets and full URL delivery to the agent.
+  One approval starts an independent share and encrypted result delivery.
 - `SessionShareDialogFrame` keeps its fixed header and one keyboard-aware scroll
   body; the manager's action row sticks to the bottom of that body. Opening
   focuses the panel and never a control, so the link field is not preselected and
@@ -37,9 +37,9 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   Settings reuses `useSessionShareLinkActions` for copy/reset/revoke. Keep retry
   credentials and request identity stable; publish only after sealing.
 - `session-share-request-cards.tsx` reads canonical requests outside virtual rows.
-  Scrolling must not unmount its query/editor. Review locks targets; approval is app-only.
-  Keep the editor through confirmation; unfinished deployments remain abandonable.
-  Cancelling a published request cannot revoke its share.
+  Approval is app-only; scrolling/confirmation must not unmount the publisher.
+  Unfinished deployments are abandonable; cancelling cannot revoke published shares.
+  Known capability fragments are omitted from exports, never live history.
 - `lib/session-share-publisher.ts` is app-only: hydrate all sources before
   synchronous capture, copy attachments under app authority, and release every
   source lease. Never import it from the anonymous entry. Workspace E2EE will

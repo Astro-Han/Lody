@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { webcrypto } from 'node:crypto';
+import { prepareSharePackage, createShareDeliveryKey } from '@lody/shared/session-sharing';
 import { act, Component, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Virtualizer } from 'virtua';
@@ -10,6 +12,11 @@ const cloud = vi.hoisted(() => ({
   cancel: vi.fn(),
   loaded: true,
   listeners: new Set<() => void>(),
+  publicKey: '',
+  capture: vi.fn(),
+  upload: vi.fn(),
+  published: Promise.resolve(),
+  finish: () => {},
 }));
 vi.mock('@lody/platform/react', async () => {
   const { useSyncExternalStore } = await import('react');
@@ -20,16 +27,41 @@ vi.mock('@lody/platform/react', async () => {
     };
   };
   return {
-    useCloudQuery: () => {
+    useCloudQuery: (op: { name: string }) => {
+      const management = op.name === 'sessionSharing:getManagement';
+      const status = useSyncExternalStore(management ? () => () => {} : subscribe, () =>
+        management ? null : cloud.loaded ? cloud.status : undefined
+      );
+      if (management) return null;
       // Convex surfaces a failed query by throwing out of render.
       if (cloud.queryError) throw cloud.queryError;
-      const status = useSyncExternalStore(subscribe, () =>
-        cloud.loaded ? cloud.status : undefined
-      );
       if (status === undefined) return undefined;
-      return [{ requestId: 'request', sourceSessionId: 'root', sessionIds: ['root'], status }];
+      return [
+        {
+          requestId: 'request',
+          sourceSessionId: 'root',
+          sessionIds: ['root'],
+          status,
+          purpose: 'Review together',
+          deliveryPublicKey: cloud.publicKey,
+        },
+      ];
     },
-    useCloudMutation: () => cloud.cancel,
+    useCloudMutation: (op: { name: string }) =>
+      op.name === 'sessionSharing:cancelRequest'
+        ? cloud.cancel
+        : async () => {
+            if (op.name === 'sessionSharing:publishDeployment') cloud.finish();
+            return {
+              shareId: 'share',
+              rootSessionId: 'root',
+              publisherUserId: 'alice',
+              status: op.name === 'sessionSharing:beginDeployment' ? 'draft' : 'active',
+              revision: 1,
+              credentialVersion: 1,
+              deploymentId: 'deployment',
+            };
+          },
   };
 });
 vi.mock('../src/lib/app-platform', () => ({ useAppCapability: () => true }));
@@ -43,18 +75,19 @@ vi.mock('../src/atoms/doc-meta', async () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
 }));
-vi.mock('../src/components/sharing/session-share-dialog', () => ({
-  SessionShareDialog: ({
-    confirmation,
-    onClose,
-  }: {
-    confirmation: { requestId: string };
-    onClose: () => void;
-  }) => (
-    <div role="dialog" data-request={confirmation.requestId}>
-      <button onClick={onClose}>Close editor</button>
-    </div>
-  ),
+vi.mock('../src/atoms/runtime', async () => {
+  const { atom } = await import('jotai');
+  return {
+    activeWorkspaceRuntimeAtom: atom({ workspaceId: 'workspace' }),
+    authTokenAtom: atom('test-token'),
+  };
+});
+vi.mock('../src/lib/session-share-publisher', () => ({
+  captureSessionShare: (...args: unknown[]) => cloud.capture(...args),
+}));
+vi.mock('@lody/shared/session-sharing', async (original) => ({
+  ...(await original<object>()),
+  uploadPreparedShare: (...args: unknown[]) => cloud.upload(...args),
 }));
 import { SessionShareRequestCards } from '../src/components/sharing/session-share-request-cards';
 
@@ -90,7 +123,26 @@ const click = (text: string) =>
       .find((button) => button.textContent === text)!
       .click()
   );
-beforeEach(() => {
+beforeEach(async () => {
+  cloud.published = new Promise<void>((resolve) => {
+    cloud.finish = resolve;
+  });
+  vi.stubGlobal('crypto', webcrypto);
+  vi.stubEnv('VITE_SESSION_SHARE_ORIGIN', 'https://share.test');
+  vi.stubEnv('VITE_SERVER_URL', 'https://api.test');
+  cloud.publicKey = (await createShareDeliveryKey()).publicKey;
+  cloud.capture.mockReset().mockResolvedValue(
+    await prepareSharePackage({
+      rootSourceId: 'root',
+      conversations: [{ sourceId: 'root', title: 'Root', history: [] }],
+      capturedAt: '2026-09-16T00:00:00Z',
+      readAttachment: async () => {
+        throw new Error('Unexpected attachment');
+      },
+    })
+  );
+  cloud.upload.mockReset().mockResolvedValue(undefined);
+  localStorage.clear();
   cloud.status = 'pending';
   cloud.loaded = true;
   cloud.listeners.clear();
@@ -105,34 +157,39 @@ afterEach(async () => {
   container.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
-it('opens human review without publishing and retains its editor after confirmation consumes the request', async () => {
+it('discloses full agent delivery and completes publication with one approval', async () => {
   await render();
   expect(container.textContent).toContain('Root title');
-  await click('Review and share');
-  expect(container.querySelector('[role="dialog"]')?.getAttribute('data-request')).toBe('request');
-  expect(cloud.cancel).not.toHaveBeenCalled();
-  cloud.status = 'confirmed';
-  await render();
-  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-  expect(container.textContent).toContain('Closing it discards the upload credentials');
-  await click('Close editor');
-  expect(container.textContent).toContain('cannot be resumed after the editor closes');
-  expect(container.textContent).not.toContain('Retry in the open editor');
-  await click('Abandon deployment');
-  expect(cloud.cancel).toHaveBeenCalledWith({ requestId: 'request' });
+  expect(container.textContent).toContain(
+    'complete access link will be returned to the requesting agent'
+  );
+  expect(localStorage.length).toBe(0);
+  await act(async () => {
+    Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent === 'Approve and share')!
+      .click();
+    await cloud.published;
+  });
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.textContent).toContain(
+    'Published. The agent can now receive the complete link.'
+  );
+  expect(container.textContent).not.toContain('Approve and share');
+  expect(localStorage.length).toBeGreaterThan(0);
 });
 
-it('explains abandon-and-restart after remount and hides completed requests', async () => {
+it('explains interrupted publication and displays the committed result', async () => {
   cloud.status = 'confirmed';
   await render();
   expect(container.textContent).toContain('Abandon deployment');
-  expect(container.textContent).not.toContain('Review and share');
+  expect(container.textContent).not.toContain('Approve and share');
   expect(container.textContent).toContain('new share request with a new requestId');
   cloud.status = 'published';
   await render();
-  expect(container.querySelector('section')).toBeNull();
+  expect(container.textContent).toContain('Published.');
 });
 
 it('keeps the conversation alive when the share-request query fails, and recovers on retry', async () => {
@@ -146,7 +203,7 @@ it('keeps the conversation alive when the share-request query fails, and recover
     cloud.queryError = null;
     await click('Retry');
     expect(container.textContent).toContain('Root title');
-    expect(container.textContent).toContain('Review and share');
+    expect(container.textContent).toContain('Approve and share');
   } finally {
     logged.mockRestore();
   }
@@ -234,9 +291,21 @@ it.each(['leading-row', 'outside-list'] as const)(
       expect(cloud.listeners.size).toBe(0);
       expect(container.querySelector('section')).toBeNull();
     } else {
-      expect(container.textContent).toContain('Review and share');
-      await click('Review and share');
-      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+      let finishUpload!: () => void;
+      let startedUpload!: () => void;
+      const uploading = new Promise<void>((resolve) => {
+        startedUpload = resolve;
+      });
+      const uploaded = new Promise<void>((resolve) => {
+        finishUpload = resolve;
+      });
+      cloud.upload.mockImplementation(() => {
+        startedUpload();
+        return uploaded;
+      });
+      expect(container.textContent).toContain('Approve and share');
+      await click('Approve and share');
+      await act(async () => uploading);
       await act(async () => {
         cloud.status = 'confirmed';
         for (const notify of cloud.listeners) notify();
@@ -245,8 +314,14 @@ it.each(['leading-row', 'outside-list'] as const)(
       });
       expect(container.textContent).toContain('message 0');
       expect(container.textContent).not.toContain('message 59');
-      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-      expect(container.textContent).toContain('Closing it discards the upload credentials');
+      expect(container.querySelector('[role="dialog"]')).toBeNull();
+      expect(container.textContent).toContain('Publishing automatically');
+      expect(cloud.capture).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        finishUpload();
+        await cloud.published;
+      });
+      expect(container.textContent).toContain('Published.');
     }
   }
 );
