@@ -1174,6 +1174,72 @@ describe('useSessionActions', () => {
     expect(requestSessionDispatchTurn).not.toHaveBeenCalled();
   });
 
+  it('closes only the selected tab while retaining all lifecycle and dispatch state', async () => {
+    const tree = createContainmentSessions('close', false);
+    const rootSession = {
+      ...tree.rootSession,
+      latestUserMsgId: 'turn-pending',
+      status: { type: 'running' },
+    } as SessionMeta;
+    const metaRepo = createSessionMetaRepo([rootSession, ...tree.sessions.slice(1)]);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await actions.setSessionTabClosed(rootSession.id, true);
+    expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: true });
+    expect(metaRepo.getSession(tree.tabSession.id)).toEqual(tree.tabSession);
+    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
+    await actions.reopenSessionTab(rootSession.id);
+    expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: false });
+  });
+
+  it('reopens a historical archived child without restoring the root or opened sessions', async () => {
+    const tree = createContainmentSessions('legacy-close', true);
+    const child = { ...tree.tabSession, isTabClosed: true };
+    const metaRepo = createSessionMetaRepo([tree.rootSession, child, tree.openedSession]);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: tree.sessionMetaCache,
+    });
+    await actions.reopenSessionTab(child.id);
+    expect(metaRepo.getSession(child.id)).toEqual({
+      ...child,
+      isArchived: false,
+      isTabClosed: false,
+    });
+    expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
+    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
+  });
+
+  it('restores root containment but retains independent child close flags', async () => {
+    const tree = createContainmentSessions('root-reopen', true);
+    const child = { ...tree.tabSession, isTabClosed: true };
+    const metaRepo = createSessionMetaRepo([tree.rootSession, child, tree.openedSession]);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: tree.sessionMetaCache,
+    });
+    await actions.reopenSessionTab(tree.rootSession.id);
+    expect(metaRepo.getSession(tree.rootSession.id)).toMatchObject({
+      isArchived: false,
+      isTabClosed: false,
+    });
+    expect(metaRepo.getSession(child.id)).toEqual({ ...child, isArchived: false });
+    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
+  });
+
+  it('preserves state when closing fails and refuses incomplete archive restoration', async () => {
+    const tree = createContainmentSessions('failed-close', true);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    metaRepo.repo.upsertDocMeta = async () => {
+      throw new Error('disk full');
+    };
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      docMetaCacheReady: false,
+    });
+    await expect(actions.setSessionTabClosed(tree.rootSession.id, true)).rejects.toThrow(
+      'disk full'
+    );
+    await expect(actions.reopenSessionTab(tree.rootSession.id)).rejects.toThrow('still loading');
+    expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
+  });
+
   it('archives by writing the archived state only, never a machine command or queue', async () => {
     const sessionId = 'session-archive-legacy-queue' as SessionId;
     const machineId = 'machine-1';
