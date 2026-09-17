@@ -53,6 +53,8 @@ import {
   resolveRenameArgs,
   resolvePromptCandidate,
   resolveTurnDispatchConfigFromInputConfig,
+  resolveTurnDispatchDefaultsFromHistory,
+  resolveEffectiveSessionChatDispatchConfig,
   resolveLocalProjectBranchForCreate,
   resolveLocalProjectCreateGitContext,
   resolveLocalProjectRefOrThrow,
@@ -731,6 +733,392 @@ describe('session command helpers', () => {
         currentSession
       )
     ).toBeUndefined();
+  });
+
+  it('inherits chat follow-up run config from the last target turn that recorded a model', () => {
+    const agent = { cliType: 'builtin' as const, agentType: 'codex' };
+    const history = [
+      createHistoryEntry({
+        id: 'turn-1',
+        role: 'user',
+        inputConfig: {
+          prompt: 'first',
+          cliType: 'builtin',
+          agentType: 'codex',
+          modeId: 'plan',
+          modelId: 'model-a',
+          configOptionValues: { approval_policy: 'never' },
+        },
+      }),
+      createHistoryEntry({ id: 'assistant-1', role: 'assistant' }),
+      createHistoryEntry({
+        id: 'turn-2',
+        role: 'user',
+        inputConfig: {
+          prompt: 'follow-up without a model',
+          cliType: 'builtin',
+          agentType: 'codex',
+          modeId: 'agent-auto-review',
+        },
+      }),
+    ];
+
+    expect(resolveTurnDispatchDefaultsFromHistory(history, agent)).toEqual({
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          ...history,
+          createHistoryEntry({
+            id: 'turn-3',
+            role: 'user',
+            inputConfig: {
+              prompt: 'later selected model',
+              cliType: 'builtin',
+              agentType: 'codex',
+              modeId: 'default',
+              modelId: 'model-a',
+              configOptionValues: { approval_policy: 'on-request' },
+            },
+          }),
+        ],
+        agent
+      )
+    ).toEqual({
+      modeId: 'default',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'on-request' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            id: 'turn-claude',
+            role: 'user',
+            inputConfig: {
+              prompt: 'other agent',
+              cliType: 'builtin',
+              agentType: 'claude',
+              modelId: 'ignored',
+            },
+          }),
+          ...history,
+        ],
+        agent
+      )
+    ).toEqual({
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            id: 'mode-only',
+            role: 'user',
+            inputConfig: {
+              prompt: 'mode only',
+              cliType: 'builtin',
+              agentType: 'codex',
+              modeId: 'plan',
+            },
+          }),
+        ],
+        agent
+      )
+    ).toEqual({ modeId: 'plan' });
+    expect(resolveTurnDispatchDefaultsFromHistory([], agent)).toBeUndefined();
+  });
+
+  it('fills omitted chat follow-up selectors from the target turn and keeps explicit overrides', () => {
+    const target = createSessionMeta();
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'default', name: 'Default' },
+        { id: 'plan', name: 'Plan' },
+        { id: 'agent-auto-review', name: 'Auto' },
+      ],
+    };
+    const inherited = {
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    };
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject(inherited);
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'model-a' },
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject(inherited);
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modeId: 'default' },
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject({
+      modeId: 'default',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        inheritedDispatchConfig: {
+          modeId: 'plan',
+          modelId: 'retired-model',
+          configOptionValues: { approval_policy: 'never' },
+        },
+        target,
+        capability: createAcpCapability(),
+      })
+    ).toMatchObject({
+      configOptionValues: { approval_policy: 'never' },
+    });
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        target,
+      })
+    ).toMatchObject({ modeId: 'agent-auto-review' });
+  });
+
+  it.each([undefined, false, true])(
+    'takes Task tool consent only from the chat caller (%s)',
+    (taskToolsEnabled) => {
+      const target = createSessionMeta();
+      const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            role: 'user',
+            inputConfig: {
+              prompt: 'previous',
+              cliType: target.cliType,
+              agentType: target.agentType,
+              modelId: 'model-a',
+              taskToolsEnabled: true,
+            },
+          }),
+        ],
+        target
+      );
+      const result = resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { taskToolsEnabled },
+        inheritedDispatchConfig,
+        target,
+        capability: createAcpCapability(),
+      });
+      expect(result.modelId).toBe('model-a');
+      expect(result.taskToolsEnabled).toBe(taskToolsEnabled);
+    }
+  );
+
+  it.each(['xhigh', 'medium'])(
+    'checks inherited effort %s against the inherited model',
+    (effort) => {
+      const capability: AcpCapabilityCacheEntry = {
+        ...createAcpCapability(),
+        models: [{ modelId: 'model-b', name: 'B' }],
+        modelReasoningEfforts: { 'model-b': ['xhigh'] },
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'model-a',
+            options: [
+              { value: 'model-a', name: 'A' },
+              { value: 'model-b', name: 'B' },
+            ],
+          },
+          {
+            id: 'reasoning_effort',
+            name: 'Effort',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'medium',
+            options: [{ value: 'medium', name: 'Medium' }],
+          },
+        ],
+      };
+      const resolve = (cache: AcpCapabilityCacheEntry) =>
+        resolveEffectiveSessionChatDispatchConfig({
+          dispatchConfig: {},
+          target: createSessionMeta(),
+          capability: cache,
+          inheritedDispatchConfig: {
+            modelId: 'model-b',
+            configOptionValues: { reasoning_effort: effort, fast: true, unknown: 'value' },
+          },
+        });
+      expect(resolve(capability).configOptionValues).toEqual(
+        effort === 'xhigh' ? { reasoning_effort: 'xhigh', fast: true } : { fast: true }
+      );
+      expect(
+        resolve({ ...capability, modelReasoningEfforts: undefined }).configOptionValues
+      ).toEqual({ reasoning_effort: effort, fast: true });
+      expect(resolve({ ...capability, configOptions: [] }).configOptionValues).toEqual(
+        effort === 'xhigh' ? { reasoning_effort: 'xhigh', fast: true } : { fast: true }
+      );
+    }
+  );
+
+  it('validates explicit options against the inherited or explicitly selected model', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modelReasoningEfforts: { 'model-a': ['medium'], 'model-b': ['xhigh'] },
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'A' },
+            { value: 'model-b', name: 'B' },
+          ],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+          options: [{ value: 'medium', name: 'Medium' }],
+        },
+      ],
+    };
+    const resolve = (configOptionValues: Record<string, string>) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { configOptionValues },
+        inheritedDispatchConfig: { modelId: 'model-b' },
+        target: createSessionMeta(),
+        capability,
+      });
+
+    expect(resolve({ reasoning_effort: 'xhigh' })).toMatchObject({
+      modelId: 'model-b',
+      configOptionValues: { reasoning_effort: 'xhigh' },
+    });
+    expect(() => resolve({ reasoning_effort: 'medium' })).toThrow(
+      'Invalid reasoning effort for model model-b'
+    );
+    expect(resolve({ model: 'model-b', reasoning_effort: 'xhigh' })).toMatchObject({
+      modelId: undefined,
+      configOptionValues: { model: 'model-b', reasoning_effort: 'xhigh' },
+    });
+  });
+
+  it('lets explicit selector config options replace inherited top-level selectors', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'default', name: 'Default' },
+        { id: 'plan', name: 'Plan' },
+      ],
+      models: [
+        { modelId: 'model-a', name: 'A' },
+        { modelId: 'model-b', name: 'B' },
+      ],
+      configOptions: [
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'A' },
+            { value: 'model-b', name: 'B' },
+          ],
+        },
+      ],
+    };
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { configOptionValues: { mode: 'plan', model: 'model-b' } },
+        inheritedDispatchConfig: { modeId: 'default', modelId: 'model-a' },
+        target: createSessionMeta(),
+        capability,
+      })
+    ).toEqual({
+      modeId: undefined,
+      modelId: undefined,
+      configOptionValues: { mode: 'plan', model: 'model-b' },
+      taskToolsEnabled: undefined,
+    });
+  });
+
+  it('drops old-model options on a model switch while preserving explicit options', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      models: [
+        { modelId: 'model-a', name: 'A' },
+        { modelId: 'model-b', name: 'B' },
+      ],
+      configOptions: [{ id: 'fast', name: 'Fast', type: 'boolean', currentValue: true }],
+    };
+    const inheritedDispatchConfig = {
+      modelId: 'model-a',
+      modeId: 'default',
+      configOptionValues: { fast: true },
+    };
+    const resolve = (
+      dispatchConfig: Parameters<
+        typeof resolveEffectiveSessionChatDispatchConfig
+      >[0]['dispatchConfig']
+    ) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig,
+        inheritedDispatchConfig,
+        target: createSessionMeta(),
+        capability,
+      });
+    expect(resolve({ modelId: 'model-b' })).toEqual({
+      modelId: 'model-b',
+      modeId: 'default',
+      configOptionValues: undefined,
+      taskToolsEnabled: undefined,
+    });
+    expect(resolve({ modelId: 'model-a' }).configOptionValues).toEqual({ fast: true });
+    expect(resolve({}).configOptionValues).toEqual({ fast: true });
+    expect(
+      resolve({ modelId: 'model-b', configOptionValues: { fast: false } }).configOptionValues
+    ).toEqual({ fast: false });
   });
 
   it('filters frozen inherited config against the resolved target agent kind', () => {
