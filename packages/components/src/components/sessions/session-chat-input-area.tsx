@@ -147,6 +147,10 @@ import {
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
 import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-role';
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
+import {
+  isPlainLinkPasteShortcut,
+  parseAppSessionUrl,
+} from '@/lib/session-app-url';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 
@@ -496,7 +500,10 @@ export type SessionChatInputAreaHandle = {
    * written (archived draft, unknown/own session, already mentioned), so the
    * caller can leave the gesture unacknowledged instead of implying a change.
    */
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
   /** Role identity committed in the currently rendered composer. */
   getAgentRoleSelection: (
     runConfigOverrides?: ComposerRunConfigOverrides
@@ -1644,12 +1651,35 @@ export const SessionChatInputArea = memo(
       },
       [disableImageUpload, enqueueFileAttachments, handleAddFiles]
     );
+    const insertSessionMention = useCallback(
+      (sessionId: string, options?: { at?: number; replaceEnd?: number }) => {
+        if (isArchived) {
+          return false;
+        }
+        return mentionActionsRef.current?.insertSessionMention(sessionId, options) ?? false;
+      },
+      [isArchived]
+    );
     const handlePaste = useCallback(
       (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
         if (isArchived) {
           return;
         }
         const text = event.clipboardData.getData('text/plain');
+
+        // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
+        if (text && !isPlainLinkPasteShortcut(event)) {
+          const sessionUrl = parseAppSessionUrl(text);
+          if (sessionUrl) {
+            const target = event.currentTarget;
+            const at = target.selectionStart ?? target.value.length;
+            const replaceEnd = target.selectionEnd ?? at;
+            if (insertSessionMention(sessionUrl.sessionId, { at, replaceEnd })) {
+              event.preventDefault();
+              return;
+            }
+          }
+        }
 
         // Refuse the whole paste rather than silently truncating it: a blob this
         // large is a log dump, and a half-pasted log is worse than none.
@@ -1705,7 +1735,7 @@ export const SessionChatInputArea = memo(
         event.preventDefault();
         attachPastedFiles(pastedFiles);
       },
-      [attachPastedFiles, insertLargePastedTextAtSelection, isArchived, t]
+      [attachPastedFiles, insertLargePastedTextAtSelection, insertSessionMention, isArchived, t]
     );
     const handleImageDrop = useCallback(
       (files: File[]) => {
@@ -1735,16 +1765,6 @@ export const SessionChatInputArea = memo(
           return localPath ? [toPathMentionInsertion(localPath, 'dir')] : [];
         });
         mentionActionsRef.current?.insertPathMentions(insertions);
-      },
-      [isArchived]
-    );
-
-    const insertSessionMention = useCallback(
-      (sessionId: string) => {
-        if (isArchived) {
-          return false;
-        }
-        return mentionActionsRef.current?.insertSessionMention(sessionId) ?? false;
       },
       [isArchived]
     );
@@ -2179,10 +2199,11 @@ export const SessionChatInputArea = memo(
           : undefined,
       [isArchived, session.agentType, session.cliType, session.machineId]
     );
-    const expandPromptMentions = useMentionPromptExpansion({
+    const { expand: expandPromptMentions } = useMentionPromptExpansion({
       source: isArchived ? undefined : mentionSource,
       skillAgent,
       promptValue: userInput,
+      currentSessionId: session.id,
     });
     expandPromptMentionsRef.current = expandPromptMentions;
 
