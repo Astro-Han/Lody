@@ -98,27 +98,11 @@ interface SessionTabBarProps {
 }
 
 /* One canvas: `bg-background` runs unbroken from this bar down through the
-   message list, and the tabs sit ON it without breaking it. The ACTIVE tab is
-   the heaviest thing in the row — it wears the app's floating-panel material
-   (`bg-sidebar` + `border-sidebar-border` + the same drop shadow as the side
-   panel and terminal dock), so "the one in a box" reads as the current page.
-   Inactive tabs get a flat borderless wash and dimmed text; they must stay
-   lighter-weight than the active tab, since chrome is what the eye scores as
-   selected among siblings.
-
-   Keep the surface ladder ordered — canvas → inactive → active — measured, not
-   assumed. `bg-sidebar` gives light that ladder for free (canvas 241 → active
-   229), but DARK needs the override: Vesper's sideBar is #161616, a mere 6
-   above the #101010 canvas and BELOW the inactive wash (26), so the active pill
-   rendered as a dent and only its border kept it legible. Hence the `dark:`
-   pair, which lands canvas 16 → inactive 26 → active 42, border 70.
-   `--tab-active`/`--tab-inactive` are useless here: both collapse onto
-   `--background` in dark, which is what forced the original `/[0.22]` vs
-   `/[0.12]` tints — a 10% gap that rendered as one gray.
-   `border-transparent` on the base keeps every state on the same box model, so
-   switching tabs never shifts a label by a pixel. */
+   message list. Active/inactive fills come from `TAB_PILL_*_CLASS` — the same
+   tokens as the right side-panel tab strip. `border-transparent` on the base
+   keeps every state on the same box model. */
 const TAB_ITEM_CLASS =
-  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
+  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[0.9em] transition-colors cursor-pointer';
 const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
 const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
 const TAB_INLINE_ACTION_CLASS =
@@ -306,7 +290,7 @@ function TabContent({
             if (e.key === 'Enter') commitRename();
             if (e.key === 'Escape') cancelRename();
           }}
-          className="w-full min-w-0 bg-transparent outline-hidden text-[13px]"
+          className="w-full min-w-0 bg-transparent outline-hidden text-[0.9em]"
         />
       ) : (
         <span className="truncate">{label}</span>
@@ -893,7 +877,7 @@ export function ClosedTabsPopover({
       </Tooltip>
       <PopoverContent align="end" className="w-72 p-0" sideOffset={4}>
         <div className="border-b border-border px-3 py-2">
-          <p className="text-xs font-medium text-popover-foreground/70">
+          <p className="text-[0.8em] font-medium text-popover-foreground/70">
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
           </p>
         </div>
@@ -906,7 +890,7 @@ export function ClosedTabsPopover({
                 <button
                   key={session.id}
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-hover/60"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.9em] transition-colors hover:bg-hover/60"
                   onClick={() => {
                     void onRestore(session.id);
                   }}

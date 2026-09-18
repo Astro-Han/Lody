@@ -18,12 +18,16 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
+import { Kbd } from '@/ui/kbd';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import {
   DropdownMenu,
@@ -46,6 +50,8 @@ import {
   SquarePen,
   Link2,
   MessageSquareMore,
+  ChevronLeft,
+  ChevronRight,
   PanelLeft,
   Plus,
   Search,
@@ -406,17 +412,6 @@ function GlassSurface({ className, children }: { className?: string; children: R
   );
 }
 
-function LineChangeBadge({ lineChange }: { lineChange: LoroSidebarRepoItemDelta }) {
-  const addedText = `+${lineChange.add}`;
-  const removedText = `-${lineChange.del}`;
-  return (
-    <div className="flex items-center gap-1 text-[11px] tabular-nums">
-      <span className="text-code-added">{addedText}</span>
-      <span className="text-code-removed">{removedText}</span>
-    </div>
-  );
-}
-
 type WorkspaceIdentityStatus = 'loading' | 'reconnecting' | 'offline' | 'syncing';
 
 function ConnectionPill({
@@ -489,6 +484,129 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
   );
 });
 
+/**
+ * The live binding for a command, formatted for this platform, or null when the
+ * command is unbound (or not registered). Read from the registry rather than
+ * `COMMAND_SHORTCUTS` so a rebound key is what the tooltip teaches.
+ */
+function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
+  const binding = useSyncExternalStore(
+    (onChange) => commands.subscribe(onChange),
+    // A string, not the array: `getKeybindingsFor` allocates, and an unstable
+    // snapshot would re-render forever.
+    () => commands.getKeybindingsFor(id)[0] ?? '',
+    () => ''
+  );
+  return binding ? formatKeyBinding(binding) : null;
+}
+
+type NavigationAvailability = {
+  canGoBack: boolean;
+  canGoForward: boolean;
+};
+
+type WindowNavigation = {
+  canGoBack: boolean;
+  canGoForward: boolean;
+  addEventListener: (type: string, listener: () => void) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
+};
+
+const readNavigationAvailability = (): NavigationAvailability => {
+  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
+  if (navigation && typeof navigation.canGoBack === 'boolean') {
+    return { canGoBack: navigation.canGoBack, canGoForward: navigation.canGoForward };
+  }
+  return {
+    canGoBack: window.history.length > 1,
+    canGoForward: false,
+  };
+};
+
+let navigationAvailabilitySnapshot: NavigationAvailability = {
+  canGoBack: false,
+  canGoForward: false,
+};
+
+const getNavigationAvailabilitySnapshot = (): NavigationAvailability => {
+  const next = readNavigationAvailability();
+  if (
+    next.canGoBack === navigationAvailabilitySnapshot.canGoBack &&
+    next.canGoForward === navigationAvailabilitySnapshot.canGoForward
+  ) {
+    return navigationAvailabilitySnapshot;
+  }
+  navigationAvailabilitySnapshot = next;
+  return next;
+};
+
+const subscribeNavigationAvailability = (onStoreChange: () => void) => {
+  window.addEventListener('popstate', onStoreChange);
+  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
+  navigation?.addEventListener('currententrychange', onStoreChange);
+  navigation?.addEventListener('navigate', onStoreChange);
+  return () => {
+    window.removeEventListener('popstate', onStoreChange);
+    navigation?.removeEventListener('currententrychange', onStoreChange);
+    navigation?.removeEventListener('navigate', onStoreChange);
+  };
+};
+
+function useNavigationAvailability(): NavigationAvailability {
+  return useSyncExternalStore(
+    subscribeNavigationAvailability,
+    getNavigationAvailabilitySnapshot,
+    () => navigationAvailabilitySnapshot
+  );
+}
+
+function SidebarHeaderIconButton({
+  label,
+  shortcut,
+  onClick,
+  className,
+  disabled = false,
+  compact = false,
+  children,
+}: {
+  label: string;
+  shortcut?: string | null;
+  onClick?: () => void;
+  className?: string;
+  disabled?: boolean;
+  compact?: boolean;
+  children: ReactNode;
+}) {
+  const button = (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-md outline-hidden',
+        compact ? 'h-5 w-5' : 'h-7 w-7',
+        disabled
+          ? 'cursor-default text-sidebar-foreground-muted/40'
+          : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+  if (disabled) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="bottom" className="flex items-center gap-1.5">
+        <span>{label}</span>
+        {shortcut ? <Kbd>{shortcut}</Kbd> : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function NavButton({
   active,
   label,
@@ -516,7 +634,7 @@ function NavButton({
         type="button"
         onClick={onClick}
         className={cn(
-          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-hidden transition',
+          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em] outline-hidden transition',
           'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30',
           active
             ? 'bg-sidebar-selection text-sidebar-selection-foreground'
@@ -531,7 +649,7 @@ function NavButton({
         </span>
         <span className="truncate">{label}</span>
         {badge !== undefined && badge > 0 ? (
-          <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
+          <span className="ml-auto shrink-0 text-[0.8em] tabular-nums text-muted-foreground">
             {badge > 99 ? '99+' : badge}
           </span>
         ) : null}
@@ -543,7 +661,7 @@ function NavButton({
 
 export function getLoroSidebarFooterClassName(isMobile: boolean): string {
   return cn(
-    'flex shrink-0 items-center justify-between border-t',
+    'flex shrink-0 items-center justify-between border-t-[0.5px]',
     isMobile
       ? 'pl-[calc(6px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-1 pb-2'
       : 'px-1.5 py-1',
@@ -553,7 +671,9 @@ export function getLoroSidebarFooterClassName(isMobile: boolean): string {
 
 export function getLoroSidebarFooterIconButtonClassName(isMobile: boolean, active = false): string {
   return cn(
-    isMobile ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5' : 'h-7 w-7 rounded-md',
+    isMobile
+      ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5'
+      : 'h-6 w-6 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5',
     'transition-colors focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
     active
       ? 'bg-sidebar-selection text-sidebar-selection-foreground'
@@ -571,7 +691,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   connectionUiState,
   workspaceSyncing = false,
   isElectron = false,
-  isElectronMacOS = false,
+  isElectronMacOS: _isElectronMacOS = false,
   defaultWidth = 280,
   minWidth = 240,
   maxWidth = 420,
@@ -625,6 +745,10 @@ export const LoroSidebar = memo(function LoroSidebar({
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   const { t } = useTranslation();
+  const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
+  const backShortcut = useCommandShortcutLabel('nav.back');
+  const forwardShortcut = useCommandShortcutLabel('nav.forward');
+  const { canGoBack, canGoForward } = useNavigationAvailability();
   const mergedLabels: LoroSidebarLabels = {
     ...defaultLabels,
     ...labels,
@@ -737,7 +861,7 @@ export const LoroSidebar = memo(function LoroSidebar({
       labels={mergedLabels.filter}
       side="bottom"
       align="end"
-      triggerClassName="h-5 w-5 [&_svg]:h-3.5 [&_svg]:w-3.5"
+      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
     />
   ) : null;
   const sectionHeaderFilterPlaceholder = !isMobile
@@ -770,23 +894,133 @@ export const LoroSidebar = memo(function LoroSidebar({
   );
   const windowDrag = isElectron && !isElectronFullscreen;
   const workspaceIdentityClassName = cn(
-    'grid w-full min-w-0 select-none grid-cols-[20px_1fr_16px] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
+    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em]',
     isMobile ? 'h-9' : 'h-8',
     'text-sidebar-foreground dark:text-sidebar-foreground/75',
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
   );
+  const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
+    workspaceSwitcherEnabled ? (
+      <DropdownMenu modal={!isMobile}>
+        <div className="min-w-0 flex-1">
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
+              data-workspace-switcher-trigger
+              data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+              aria-busy={workspaceSyncing || undefined}
+            >
+              {workspaceIdentity}
+            </button>
+          </DropdownMenuTrigger>
+        </div>
+        <DropdownMenuContent align="start" side={menuSide} className="w-64">
+          <DropdownMenuLabel className="normal-case text-xs font-normal tracking-normal">
+            {userEmail}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+
+          {workspaces.length > 0 ? (
+            <>
+              <DropdownMenuLabel className="text-xs font-medium">
+                {mergedLabels.switchWorkspace}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={currentWorkspaceId}
+                onValueChange={(value) => onWorkspaceSelected?.(value)}
+              >
+                {workspaces.map((ws) => {
+                  const workspaceSlug = ws.slug;
+                  const row = (
+                    <DropdownMenuRadioItem
+                      key={ws.id}
+                      value={ws.id}
+                      className="gap-2"
+                      onClickCapture={(event) => {
+                        if (!workspaceSlug || !isNewWindowClick(event)) return;
+                        if (openDesktopWindow(undefined, workspaceSlug)) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }
+                      }}
+                    >
+                      <WorkspaceAvatar
+                        workspace={{ name: ws.name, logo: ws.logo }}
+                        className="h-5 w-5 shrink-0 text-[10px]"
+                      />
+                      <span className="min-w-0 truncate">{ws.name}</span>
+                      {ws.planTier ? (
+                        <Badge
+                          variant="secondary"
+                          className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+                        >
+                          {ws.planTier === 'enterprise'
+                            ? mergedLabels.planEnterprise
+                            : mergedLabels.planPlus}
+                        </Badge>
+                      ) : null}
+                    </DropdownMenuRadioItem>
+                  );
+
+                  if (!isElectronRenderer() || !workspaceSlug) return row;
+
+                  return (
+                    <ContextMenu key={ws.id}>
+                      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem
+                          onSelect={() => {
+                            openDesktopWindow(undefined, workspaceSlug);
+                          }}
+                        >
+                          <AppWindow />
+                          {t('workspace.openInNewWindow')}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                })}
+              </DropdownMenuRadioGroup>
+              {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                  {t('workspace.openInNewWindowHint', {
+                    key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
+                  })}
+                </p>
+              ) : null}
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+
+          <DropdownMenuItem onSelect={() => onCreateWorkspaceClicked?.()}>
+            <Plus className="h-4 w-4" />
+            {mergedLabels.createWorkspace}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onInviteClicked?.()}>
+            <Users className="h-4 w-4" />
+            {mergedLabels.inviteMembers}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onLinkRepoClicked?.()}>
+            <Link2 className="h-4 w-4" />
+            {mergedLabels.connectGithubRepo}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : (
+      <div className="min-w-0 flex-1">
+        <div className={workspaceIdentityClassName} data-workspace-identity>
+          {workspaceIdentity}
+        </div>
+      </div>
+    );
 
   return (
     <div
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
-      className={cn(
-        'relative h-full select-none rounded-2xl border-x',
-        // Linear-like: soft cool wash + hairline edge, not a heavy gray slab.
-        'border-sidebar-border/70 bg-sidebar text-sidebar-foreground shadow-[0_1px_2px_hsl(0_0%_0%/0.03)]',
-        className
-      )}
+      className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
       style={
         isMobile
           ? undefined
@@ -802,10 +1036,9 @@ export const LoroSidebar = memo(function LoroSidebar({
         <div
           className={cn(
             'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
-            // Line spans only the border's straight segment (card corners are
-            // 12px rounded), with soft rounded ends.
-            'after:absolute after:right-[5px] after:top-3 after:bottom-3 after:w-[2px]',
-            'after:rounded-full after:bg-transparent after:transition-colors after:duration-150',
+            // 2px line covers the panel's `border-r` for the full height.
+            'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
+            'after:bg-transparent after:transition-colors after:duration-150',
             isResizing
               ? 'after:bg-sidebar-ring/70'
               : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
@@ -817,171 +1050,77 @@ export const LoroSidebar = memo(function LoroSidebar({
         />
       )}
 
-      <div
-        className={cn(
-          'relative flex h-full flex-col overflow-hidden rounded-[inherit]',
-          !isMobile && 'p-[2px]'
-        )}
-      >
+      <div className="relative flex h-full flex-col overflow-hidden">
         <div
           className={cn(
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : isElectronMacOS
-                ? 'h-[72px] px-1.5 pt-7'
-                : 'h-11 px-1.5',
+              : 'h-11 px-1.5',
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
-          {workspaceSwitcherEnabled ? (
-            <DropdownMenu modal={!isMobile}>
-              <div className="min-w-0 flex-1">
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      workspaceIdentityClassName,
-                      windowDrag && WINDOW_DRAG_EXEMPT_CLASS
-                    )}
-                    data-workspace-switcher-trigger
-                    data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-                    aria-busy={workspaceSyncing || undefined}
-                  >
-                    {workspaceIdentity}
-                  </button>
-                </DropdownMenuTrigger>
-              </div>
-              <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel className="text-xs font-normal">{userEmail}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-
-                {workspaces.length > 0 ? (
-                  <>
-                    <DropdownMenuLabel className="text-xs font-medium">
-                      {mergedLabels.switchWorkspace}
-                    </DropdownMenuLabel>
-                    <DropdownMenuRadioGroup
-                      value={currentWorkspaceId}
-                      onValueChange={(value) => onWorkspaceSelected?.(value)}
-                    >
-                      {workspaces.map((ws) => {
-                        const workspaceSlug = ws.slug;
-                        const row = (
-                          <DropdownMenuRadioItem
-                            key={ws.id}
-                            value={ws.id}
-                            className="gap-2"
-                            onClickCapture={(event) => {
-                              if (!workspaceSlug || !isNewWindowClick(event)) return;
-                              if (openDesktopWindow(undefined, workspaceSlug)) {
-                                event.preventDefault();
-                                event.stopPropagation();
-                              }
-                            }}
-                          >
-                            <WorkspaceAvatar
-                              workspace={{ name: ws.name, logo: ws.logo }}
-                              className="h-5 w-5 shrink-0 text-[10px]"
-                            />
-                            <span className="min-w-0 truncate">{ws.name}</span>
-                            {ws.planTier ? (
-                              <Badge
-                                variant="secondary"
-                                className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
-                              >
-                                {ws.planTier === 'enterprise'
-                                  ? mergedLabels.planEnterprise
-                                  : mergedLabels.planPlus}
-                              </Badge>
-                            ) : null}
-                          </DropdownMenuRadioItem>
-                        );
-
-                        // Only wrap in a context menu where the window action
-                        // exists: a DISABLED ContextMenuTrigger stamps
-                        // `data-disabled` onto the row it wraps, and menu items
-                        // style that as `pointer-events-none`, which would make
-                        // every workspace unclickable in the browser.
-                        if (!isElectronRenderer() || !workspaceSlug) return row;
-
-                        return (
-                          <ContextMenu key={ws.id}>
-                            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                            <ContextMenuContent>
-                              <ContextMenuItem
-                                onSelect={() => {
-                                  openDesktopWindow(undefined, workspaceSlug);
-                                }}
-                              >
-                                <AppWindow />
-                                {t('workspace.openInNewWindow')}
-                              </ContextMenuItem>
-                            </ContextMenuContent>
-                          </ContextMenu>
-                        );
-                      })}
-                    </DropdownMenuRadioGroup>
-                    {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
-                      <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                        {t('workspace.openInNewWindowHint', {
-                          key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
-                        })}
-                      </p>
-                    ) : null}
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
-
-                <DropdownMenuItem onSelect={() => onCreateWorkspaceClicked?.()}>
-                  <Plus className="h-4 w-4" />
-                  {mergedLabels.createWorkspace}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onInviteClicked?.()}>
-                  <Users className="h-4 w-4" />
-                  {mergedLabels.inviteMembers}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onLinkRepoClicked?.()}>
-                  <Link2 className="h-4 w-4" />
-                  {mergedLabels.connectGithubRepo}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {isMobile ? (
+            renderWorkspaceControl('bottom')
+          ) : isElectron ? (
+            <span className="min-w-0 flex-1" />
           ) : (
-            <div className="min-w-0 flex-1">
-              <div className={workspaceIdentityClassName} data-workspace-identity>
-                {workspaceIdentity}
-              </div>
-            </div>
-          )}
-          {/* Collapse toggle anchored to the header's top-right corner.
-              `top-2` centers the h-7 button inside the standard h-11 header.
-              On macOS Electron the header is taller (`h-[72px] pt-7`) and its
-              top sits 11px below the window top (card `mt-2` + 1px border +
-              inner `p-[2px]`); `-top-0.5` then puts the button center at
-              11 - 2 + 14 = 23px, exactly on the traffic-light centerline
-              (`trafficLightPosition.y` 16 + 7px radius in
-              apps/electron/src/main/window.ts) — and level with the
-              collapsed-state expand button (`top-[9px]` in
-              web-chat-landing-screen.tsx), so the control stays put across
-              collapse/expand. */}
-          {!isMobile && onRequestCollapse ? (
-            <button
-              type="button"
-              aria-label="Collapse sidebar"
-              onClick={() => onRequestCollapse()}
-              className={cn(
-                'absolute right-1.5 flex h-7 w-7 items-center justify-center rounded-md',
-                isElectronMacOS ? '-top-0.5' : 'top-2',
-                'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                windowDrag && WINDOW_DRAG_EXEMPT_CLASS,
-                isElectron
-                  ? 'focus-visible:outline-hidden'
-                  : 'opacity-0 pointer-events-none group-hover/sidebar-header:opacity-100 group-hover/sidebar-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-hidden transition-opacity duration-100'
-              )}
+            <span
+              aria-label="Lody"
+              className="select-none px-2 text-[18px] font-semibold leading-none tracking-[-0.03em] text-sidebar-foreground"
+              style={{ fontFamily: 'var(--font-wordmark)' }}
             >
-              <PanelLeft className="h-4 w-4" />
-            </button>
+              Lody
+            </span>
+          )}
+          {!isMobile ? (
+            <TooltipProvider delayDuration={400}>
+              <div
+                className={cn(
+                  'ml-auto flex shrink-0 items-center',
+                  windowDrag && WINDOW_DRAG_EXEMPT_CLASS
+                )}
+              >
+                {onRequestCollapse ? (
+                  <SidebarHeaderIconButton
+                    label={t('commands.sidebar.toggle', 'Toggle Sidebar')}
+                    shortcut={collapseShortcut}
+                    onClick={() => onRequestCollapse()}
+                    className={
+                      isElectron
+                        ? 'focus-visible:outline-hidden'
+                        : 'opacity-0 pointer-events-none group-hover/sidebar-header:opacity-100 group-hover/sidebar-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity duration-100'
+                    }
+                  >
+                    <PanelLeft className="h-4 w-4" />
+                  </SidebarHeaderIconButton>
+                ) : null}
+                <SidebarHeaderIconButton
+                  compact
+                  disabled={!canGoBack}
+                  label={t('commands.nav.back', 'Back')}
+                  shortcut={backShortcut}
+                  onClick={() => {
+                    if (!canGoBack) return;
+                    if (!commands.execute('nav.back')) window.history.back();
+                  }}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </SidebarHeaderIconButton>
+                <SidebarHeaderIconButton
+                  compact
+                  disabled={!canGoForward}
+                  label={t('commands.nav.forward', 'Forward')}
+                  shortcut={forwardShortcut}
+                  onClick={() => {
+                    if (!canGoForward) return;
+                    if (!commands.execute('nav.forward')) window.history.forward();
+                  }}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </SidebarHeaderIconButton>
+              </div>
+            </TooltipProvider>
           ) : null}
         </div>
 
@@ -992,7 +1131,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'flex flex-col gap-px',
             isMobile
               ? 'mt-2 pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))]'
-              : '-mt-1 px-1.5'
+              : 'px-1.5'
           )}
         >
           <NavButton
@@ -1014,6 +1153,9 @@ export const LoroSidebar = memo(function LoroSidebar({
             'min-h-0 flex-1',
             isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-2'
           )}
+          // Overlay only while the list is scrolling. Radix defaults to `hover`,
+          // which paints the thumb as soon as the pointer enters the sidebar.
+          type="scroll"
           scrollbarClassName={!isMobile ? 'w-2 p-px' : undefined}
           scrollbarThumbClassName={
             !isMobile
@@ -1031,12 +1173,12 @@ export const LoroSidebar = memo(function LoroSidebar({
           viewportClassName={cn(
             isMobile
               ? 'pl-[calc(12px+env(safe-area-inset-left,0px))] pr-[calc(12px+env(safe-area-inset-right,0px))]'
-              : 'pl-1.5 pr-2.5 pb-3'
+              : 'px-1.5 pb-3'
           )}
         >
           <div className="relative">
             {!isMobile && desktopFilterNode ? (
-              <div className="pointer-events-none absolute right-[9px] top-1 z-10 flex h-7 items-center">
+              <div className="pointer-events-none absolute right-2 top-1 z-10 flex h-5 items-center">
                 <div className="pointer-events-auto flex">{desktopFilterNode}</div>
               </div>
             ) : null}
@@ -1137,7 +1279,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               <div className="space-y-3 pt-1">
                 {repoSections.map((section, sectionIndex) => (
                   <div key={section.id} className="space-y-2">
-                    <div className="flex items-center gap-2 px-1 text-[12px] font-medium text-sidebar-foreground-muted">
+                    <div className="flex items-center gap-2 px-1 text-[0.9em] font-medium text-sidebar-foreground-muted">
                       <Github className="h-3.5 w-3.5" />
                       <span className="truncate">{section.repoFullName}</span>
                       {sectionIndex === 0 && sectionHeaderFilterPlaceholder ? (
@@ -1151,7 +1293,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                           <li key={item.id}>
                             <div
                               className={cn(
-                                'flex items-center gap-2 rounded-lg px-2 py-2 text-[12px]',
+                                'flex items-center gap-2 rounded-lg px-2 py-2 text-[0.9em]',
                                 item.isSelected
                                   ? 'bg-sidebar-selection text-sidebar-selection-foreground'
                                   : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
@@ -1160,13 +1302,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                               <span className="h-2 w-2 rounded-full bg-sidebar-border" />
                               <span className="min-w-0 flex-1 truncate">{item.title}</span>
                               {item.ageLabel ? (
-                                <span className="shrink-0 text-[11px] text-sidebar-foreground-muted">
+                                <span className="shrink-0 text-[0.75em] text-sidebar-foreground-muted">
                                   {item.ageLabel}
-                                </span>
-                              ) : null}
-                              {item.lineChange ? (
-                                <span className="shrink-0">
-                                  <LineChangeBadge lineChange={item.lineChange} />
                                 </span>
                               ) : null}
                             </div>
@@ -1204,15 +1341,16 @@ export const LoroSidebar = memo(function LoroSidebar({
         ) : null}
 
         <div className={getLoroSidebarFooterClassName(isMobile)}>
-          <div className="flex items-center gap-1">
+          {!isMobile ? renderWorkspaceControl('top') : null}
+          <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0 gap-2')}>
             <IconButton label="Settings" onClick={onSettingsClicked}>
-              <Settings className="h-4 w-4" />
+              <Settings strokeWidth={1.5} />
             </IconButton>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton label="Help">
-                  <CircleHelp className="h-4 w-4" />
+                  <CircleHelp strokeWidth={1.5} />
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="min-w-[140px]">
@@ -1236,7 +1374,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             </DropdownMenu>
 
             <IconButton label="Archive" active={activeNav === 'archive'} onClick={onArchiveClicked}>
-              <Archive className="h-4 w-4" />
+              <Archive strokeWidth={1.5} />
             </IconButton>
           </div>
 

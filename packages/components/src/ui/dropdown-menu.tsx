@@ -269,9 +269,9 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 /**
  * A submenu is offset from its TRIGGER ROW, not from the parent menu's edge, so
  * the offset has to clear everything between the two: the parent surface's `p-1`
- * (4px) and the 1px hairline ring each surface paints OUTSIDE its border box
- * (`menuSurfaceStyle`). Visual gap between rings = sideOffset - 4 - 1 - 1.
- * `6` welds the two surfaces into one slab; `7` leaves a 1px gap.
+ * (4px) and the 0.5px hairline ring each surface paints OUTSIDE its border box
+ * (`menuSurfaceStyle`). Visual gap between rings = sideOffset - 4 - 0.5 - 0.5.
+ * `5` welds the two surfaces into one slab; `7` leaves a 2px gap.
  */
 const SUB_CONTENT_SIDE_OFFSET = 7;
 
@@ -590,7 +590,7 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
           }}
           placeholder={placeholder}
           aria-label={ariaLabel ?? placeholder}
-          className="min-w-0 flex-1 border-none bg-transparent text-[0.8rem] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+          className="min-w-0 flex-1 border-none bg-transparent text-[0.9em] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
         />
       </div>
     );

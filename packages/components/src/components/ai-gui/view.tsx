@@ -14,6 +14,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1025,6 +1026,11 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
+      const toolEntries = block.entries.filter(
+        (entry) => isAssistantToolCallActivityEntry(entry) && entry.content.kind !== 'think'
+      );
+      if (toolEntries.length === 0) return;
+
       target.push({
         type: 'assistant',
         key: `assistant:${message.id}:${block.key}:header`,
@@ -1035,7 +1041,7 @@ export const buildChatVirtualRows = ({
         isLastRowForMessage: false,
       });
       if (expanded) {
-        for (const entry of block.entries) {
+        for (const entry of toolEntries) {
           const entrySuffix =
             entry.content.type === 'tool_call' ? entry.content.toolCallId : 'thought';
           target.push({
@@ -1048,8 +1054,8 @@ export const buildChatVirtualRows = ({
               kind: 'activity_detail',
               entry,
               groupKey: block.key,
-              showThoughtLabel: block.entries.length > 1,
-              isThinking: isThinking && entry === lastEntry,
+              showThoughtLabel: false,
+              isThinking: false,
             },
             isWorkedDetail,
             isLastRowForMessage: false,
@@ -1928,7 +1934,7 @@ export const SessionChatStreamView = forwardRef<
                   <Button
                     variant="secondary"
                     size="icon"
-                    className="pointer-events-auto rounded-full border border-border/70 shadow-lg"
+                    className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
@@ -2940,7 +2946,9 @@ const UserMessageRowView = ({
       <div
         className={cn(
           'group/usermsg flex min-w-0 flex-1 flex-col items-end text-left',
-          isMobile ? 'max-w-[min(100%,28rem)] gap-1' : 'max-w-[80%] gap-1.5 sm:max-w-[70%]'
+          isMobile
+            ? 'max-w-[min(100%,28rem)] gap-1'
+            : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
         )}
       >
         <div
@@ -3005,7 +3013,7 @@ const UserMessageRowView = ({
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
-                <Spinner className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 text-muted-foreground" />
+                <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
               <div
                 className={cn(
@@ -3413,26 +3421,113 @@ const ACTIVITY_STEP_BODY_CLASS =
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
   '[&_p]:!mb-1 [&_p:last-child]:!mb-0 [&_li:not(:first-child)]:!mt-0.5';
 
-const ActivityGroupHeader = ({
-  summary,
+/** Last intended rotate after a click. Survives Virtua remounting the row. */
+const pendingDisclosureRotate = new Map<string, boolean>();
+
+function ProcessDisclosureButton({
+  id,
+  label,
   expanded,
-  isThinking,
   onExpandedChange,
 }: {
+  id: string;
+  label: string;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+}) {
+  const isMobile = useIsMobile();
+  const chevronRef = useRef<HTMLSpanElement>(null);
+
+  const applyRotate = (next: boolean, animate: boolean) => {
+    const el = chevronRef.current;
+    if (!el) return;
+    el.style.transition = animate ? 'transform 200ms ease-out' : 'none';
+    el.style.transform = next ? 'rotate(90deg)' : 'rotate(0deg)';
+  };
+
+  useLayoutEffect(() => {
+    const pending = pendingDisclosureRotate.get(id);
+    const target = expanded ? 'rotate(90deg)' : 'rotate(0deg)';
+    if (pending === expanded) {
+      pendingDisclosureRotate.delete(id);
+      if (chevronRef.current?.style.transform === target) return undefined;
+      applyRotate(!expanded, false);
+      const frame = requestAnimationFrame(() => applyRotate(expanded, true));
+      return () => cancelAnimationFrame(frame);
+    }
+    applyRotate(expanded, false);
+    return undefined;
+  }, [id, expanded]);
+
+  const chevron = (
+    <span
+      className={cn(
+        'inline-flex flex-none shrink-0 origin-center text-muted-foreground',
+        !isMobile && 'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
+      )}
+    >
+      <span ref={chevronRef} className="inline-flex origin-center">
+        <ChevronRight className={isMobile ? ACTIVITY_PROCESS_ICON_CLASS : 'h-[1em] w-[1em]'} />
+      </span>
+    </span>
+  );
+  const title = (
+    <span
+      className={cn(
+        'min-w-0',
+        isMobile
+          ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
+          : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
+      )}
+    >
+      {label}
+    </span>
+  );
+  return (
+    <button
+      type="button"
+      className={cn(
+        'group flex w-full items-center py-0.5 text-left',
+        isMobile
+          ? cn('gap-1.5 rounded-md pr-1 hover:bg-hover/40', ACTIVITY_PROCESS_TEXT_CLASS)
+          : 'justify-start gap-0.5 px-1 text-muted-foreground'
+      )}
+      onClick={() => {
+        const next = !expanded;
+        pendingDisclosureRotate.set(id, next);
+        applyRotate(next, true);
+        onExpandedChange(next);
+      }}
+      aria-expanded={expanded}
+    >
+      {isMobile ? (
+        <>
+          {chevron}
+          {title}
+        </>
+      ) : (
+        <>
+          {title}
+          {chevron}
+        </>
+      )}
+    </button>
+  );
+}
+
+const ActivityGroupHeader = ({
+  id,
+  summary,
+  expanded,
+  onExpandedChange,
+}: {
+  id: string;
   summary: AssistantActivitySummary;
   expanded: boolean;
-  isThinking: boolean;
   onExpandedChange: (expanded: boolean) => void;
 }) => {
   const { t } = useTranslation();
   const parts: string[] = [];
-  if (summary.hasThought) {
-    parts.push(
-      isThinking
-        ? t('sessions.toolActivity.thinking', 'Thinking…')
-        : t('sessions.toolActivity.thought', 'Thought')
-    );
-  }
   if (summary.commandCount > 0) {
     parts.push(t('sessions.toolActivity.commands', { count: summary.commandCount }));
   }
@@ -3451,35 +3546,25 @@ const ActivityGroupHeader = ({
   if (summary.otherCount > 0) {
     parts.push(t('sessions.toolActivity.tools', { count: summary.otherCount }));
   }
+  const label = parts.join(' · ');
+  if (!label) return null;
   return (
-    <button
-      type="button"
-      /* pl-0 so the chevron’s left edge lines up with the body text
-         under this group (shared process-rail content box). */
-      className={cn(
-        'group flex w-full items-center gap-1.5 rounded-md py-1 pl-0 pr-1 text-left transition-colors hover:bg-hover/40',
-        ACTIVITY_PROCESS_TEXT_CLASS
-      )}
-      onClick={() => onExpandedChange(!expanded)}
-      aria-expanded={expanded}
-    >
-      <ChevronRight
-        className={cn(
-          ACTIVITY_PROCESS_ICON_CLASS,
-          'flex-none transition-transform duration-200',
-          expanded && 'rotate-90'
-        )}
-      />
-      <span className={cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS)}>{parts.join(' · ')}</span>
-    </button>
+    <ProcessDisclosureButton
+      id={id}
+      label={label}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+    />
   );
 };
 
 const WorkedGroupHeader = ({
+  id,
   durationMs,
   expanded,
   onExpandedChange,
 }: {
+  id: string;
   durationMs: number | null;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
@@ -3509,29 +3594,12 @@ const WorkedGroupHeader = ({
     : t('sessions.finishedWorking', 'Finished working');
 
   return (
-    <button
-      type="button"
-      className={cn(
-        'group flex w-full items-center gap-1 rounded-md py-0.5 text-left transition-colors',
-        /* Quieter than the answer body so process chrome does not compete. */
-        'text-muted-foreground hover:bg-hover/40 hover:text-foreground',
-        /* No leading pad: this chevron shares the turn's left rail with
-           `ActivityGroupHeader` and the answer prose. */
-        'sm:gap-1.5 sm:pr-1'
-      )}
-      onClick={() => onExpandedChange(!expanded)}
-      aria-expanded={expanded}
-    >
-      <ChevronRight
-        className={cn(
-          'h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground transition-transform duration-200',
-          expanded && 'rotate-90'
-        )}
-      />
-      <span className="min-w-0 flex-1 text-[12.5px] font-medium leading-tight tracking-tight">
-        {label}
-      </span>
-    </button>
+    <ProcessDisclosureButton
+      id={id}
+      label={label}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+    />
   );
 };
 
@@ -3969,14 +4037,16 @@ export const AssistantTurnFooter = ({
           ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
              interior padding would push the glyph 7px inside the answer text
-             above. Pull the cluster back by that padding so the outermost glyph
-             sits on the text's edge (and the inner one keeps the row gap to the
-             timestamp). Keep it on the cluster, not the row: when no buttons
-             render, the timestamp must stay on the plain gutter. Mobile pulls
-             only the trailing edge — its leading glyph aligns to the duration
-             label, not to the answer text. */}
+             above. Pull the cluster back so the outermost glyph sits on the
+             text's edge (and the inner one keeps the row gap to the timestamp).
+             Desktop uses 5px on the leading edge (2px less than the raw padding)
+             so the copy glyph aligns with the body; trailing stay 7px. Keep it
+             on the cluster, not the row: when no buttons render, the timestamp
+             must stay on the plain gutter. Mobile pulls only the trailing edge
+             — its leading glyph aligns to the duration label, not to the answer
+             text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
-            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
+            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-ml-[5px] -mr-[7px]')}>
               {showStreamingContextCopy ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
@@ -4251,6 +4321,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
       case 'worked_group_header':
         return (
           <WorkedGroupHeader
+            id={`${message.id}:${content.segmentKey}:worked`}
             durationMs={content.durationMs}
             expanded={content.expanded}
             onExpandedChange={(expanded) =>
@@ -4273,9 +4344,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
       case 'activity_group_header':
         return (
           <ActivityGroupHeader
+            id={`${message.id}:${content.block.key}`}
             summary={content.block.summary}
             expanded={content.expanded}
-            isThinking={content.isThinking}
             onExpandedChange={(expanded) =>
               onGroupExpandedChange(message.id, content.block.key, expanded)
             }
@@ -5502,7 +5573,7 @@ const UserPlainTextBlock = ({
 
   return (
     <div className="flex max-w-full justify-end sm:pl-2">
-      <div className="min-w-0 max-w-full rounded-[1.15rem] border border-foreground/[0.08] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
+      <div className="min-w-0 max-w-full rounded-[1.15rem] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
         <div
           className={cn(
             // overflow-wrap:anywhere (not break-words) is load-bearing: only `anywhere`
