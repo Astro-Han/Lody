@@ -632,21 +632,16 @@ const SessionGroupSection = memo(function SessionGroupSection({
     group.kind === 'repo'
       ? 'text-sidebar-foreground dark:text-sidebar-foreground/75'
       : 'text-sidebar-foreground-muted';
-  // Typography splits with color: repo headers read as content (xs semibold),
-  // the "Chats" header reads as section chrome (0.9em medium) so
-  // section labels visually recede from titles at a glance.
+  // Typography splits with color: repo headers read as content (regular weight,
+  // full foreground; the leading repo icon marks them as a group), the "Chats"
+  // header reads as section chrome (medium, muted) so section labels recede.
   const headerTypographyClass =
-    group.kind === 'repo' ? 'text-[0.9em] font-semibold' : 'text-[0.9em] font-medium';
+    group.kind === 'repo' ? 'text-[0.9em] font-normal' : 'text-[0.9em] font-medium';
   const headerToggleHoverClass =
     group.kind === 'repo' ? 'hover:text-sidebar-hover-foreground' : 'hover:text-sidebar-foreground';
 
   return (
-    <div
-      className={cn(
-        'flex flex-col gap-0.5',
-        group.collapsed ? 'mb-1 last:mb-0' : 'mb-2.5 last:mb-0'
-      )}
-    >
+    <div className={cn('flex flex-col gap-0.5', getSidebarGroupSpacingClass(group.collapsed))}>
       <div className="group flex h-7 items-center">
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
@@ -1276,7 +1271,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
               data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
-                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
+                // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
+                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
@@ -1356,7 +1352,13 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
     <div
       ref={setNodeRef}
       style={style}
-      className={cn('w-full', isDragging && 'opacity-60')}
+      // The group spacing lives on this sortable wrapper: inside it the section
+      // is always `:last-child`, so its own `last:mb-0` would erase the gap.
+      className={cn(
+        'w-full',
+        getSidebarGroupSpacingClass(group.collapsed),
+        isDragging && 'opacity-60'
+      )}
       data-repo-full-name={group.repoFullName}
     >
       <SessionGroupSection
@@ -1368,6 +1370,14 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
     </div>
   );
 }, sessionGroupPropsEqual);
+
+/**
+ * Space after a sidebar group (a repo, Chats, a machine's projects): 12px when
+ * expanded, at least twice the 1–2px rhythm between rows inside a group, so
+ * groups separate by space alone. Collapsed headers stack more tightly.
+ */
+export const getSidebarGroupSpacingClass = (collapsed: boolean | undefined) =>
+  collapsed ? 'mb-1 last:mb-0' : 'mb-3 last:mb-0';
 
 export const SessionList = memo(function SessionList({
   sessions,

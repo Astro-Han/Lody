@@ -118,6 +118,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
+  getSidebarGroupSpacingClass,
   MAX_VISIBLE_SESSIONS,
   SessionList,
   shallowEqualExceptKeys,
@@ -679,9 +680,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground'
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-foreground'
       )}
       onClick={(event) => {
         if (openSessionOnModifiedClick(event, session.id)) return;
@@ -1148,6 +1147,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       Boolean(revealPath) ||
       Boolean(onArchiveProjectChats));
   const showNewChatButton = Boolean(onNewChatInProject) && projectCanNavigate && !isMobile;
+  const ProjectFolderIcon = collapsed ? Folder : FolderOpen;
 
   return (
     <div className="space-y-0.5">
@@ -1177,7 +1177,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
                     showSelectedState &&
                       'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-semibold transition-colors',
+                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
                     projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
                     removalState && 'text-muted-foreground',
                     showSelectedState
@@ -1206,7 +1206,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       onToggleCollapsed(machineId, project.id);
                     }}
                   >
-                    <Folder
+                    {/* Open folder while expanded, closed while collapsed. */}
+                    <ProjectFolderIcon
                       className={cn(
                         'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
                         // Mobile: chevron is always visible so the folder icon must hide
@@ -1354,7 +1355,10 @@ export const LocalProjectItem = memo(function LocalProjectItem({
         </ContextMenu>
       </div>
 
-      {!collapsed ? (
+      {/* An expanded project with nothing to list renders no container: an empty
+          child of the space-y parent would still add its gap, so expanding an
+          empty folder would nudge everything below it. */}
+      {!collapsed && sessionNodes.length > 0 ? (
         <div className="flex flex-col gap-px">
           {sessionNodes.map((node) => {
             const session = node.item;
@@ -1408,7 +1412,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               data-scope-item="row"
               data-sidebar-show-more={groupKey}
               className={cn(
-                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
+                // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
+                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
@@ -2442,7 +2447,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           return (
             <div
               key={section.sectionKey}
-              className={cn('space-y-0.5', sectionCollapsed ? 'mb-1 last:mb-0' : 'mb-3 last:mb-0')}
+              className={cn('space-y-0.5', getSidebarGroupSpacingClass(sectionCollapsed))}
             >
               <SidebarSectionHeader
                 icon={
@@ -2459,7 +2464,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
               />
 
               {sectionCollapsed ? null : (
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {section.projects.map((project) => {
                     const machineId = section.machineId;
                     if (!machineId) return null;
@@ -2621,8 +2626,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         name: org.name,
         logo: resolveWorkspaceIdentityLogo(org.logo, multiWorkspaceAvailable),
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
+        memberCount:
+          org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
       }));
-  }, [multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
+  }, [activeOrganization, multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
 
   // Sidebar task rows render as real anchors on web so middle/Cmd-click open the
   // session in a new browser tab. Electron deliberately returns undefined here:
@@ -2784,6 +2791,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       connectGithubRepo: t('sidebar.connectGithubRepo', 'Connect GitHub repo'),
       planPlus: t('billing.plan.plus', 'Plus'),
       planEnterprise: t('billing.plan.enterprise', 'Enterprise'),
+      planFree: t('billing.plan.free', 'Free'),
       pinned: t('sidebar.pinned', 'Pinned'),
       connectionLoading: t('chat.mobileHome.connectionBanner.loading', 'Connecting…'),
       connectionReconnecting: t('chat.mobileHome.connectionBanner.reconnecting', 'Reconnecting…'),

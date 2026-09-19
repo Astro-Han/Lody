@@ -20,6 +20,12 @@ footer continues to own its separate duration label, while desktop footers appea
 actions or finished-turn metadata. This corrects the visual hierarchy without changing elapsed-time
 semantics or the reserved mobile action-bar width.
 
+The live status can sit in three places: its own row after the conversation, inside the live
+turn above its footer actions, or as the shimmering label of the collapsed activity group that
+ends the live turn. Each place renders the same `LiveActivityLabel` leaf with that turn's message,
+so the duration appears wherever the status does (for a group, "Ran 2 commands (Worked for 30s)")
+and only that text re-renders on each tick.
+
 This corrects the earlier [desktop live-duration decision](../feature/2026-09-17-desktop-live-turn-duration.md),
 which described desktop copy as `Worked for ...`.
 
@@ -28,4 +34,5 @@ which described desktop copy as `Worked for ...`.
 `packages/components/tests/assistant-turn-action-inset.test.ts` renders the real stream with fake
 timers and verifies that its live activity label advances from `Exploring (Worked for 5s)` to
 `Exploring (Worked for 7s)`, without a desktop footer. The same suite retains the mobile assertions
-for `Worked for 5s`.
+for `Worked for 5s`. `packages/components/tests/agent-activity-row.test.tsx` pins the duration
+in the status row, in the in-turn status, and in the shimmering group label.

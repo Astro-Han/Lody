@@ -82,9 +82,9 @@ describe('mobile ConversationRow PR status', () => {
       true
     );
     // PR owns the right edge, with the line diff immediately before it.
-    expect(
-      Array.from(row.querySelectorAll('.text-github-deletion, [data-pr-ci-verdict]'))
-    ).toEqual([row.querySelector('.text-github-deletion'), prIcon]);
+    expect(Array.from(row.querySelectorAll('.text-github-deletion, [data-pr-ci-verdict]'))).toEqual(
+      [row.querySelector('.text-github-deletion'), prIcon]
+    );
   });
 
   it('renders a plain PR glyph when the poller has no CI record yet', () => {

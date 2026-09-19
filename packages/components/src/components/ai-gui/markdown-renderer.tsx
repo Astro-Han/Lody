@@ -723,7 +723,7 @@ const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
         codeNode.lang = 'text';
       } else if (
         !FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase()) &&
-        !FENCED_CODE_PASSTHROUGH_LANGUAGE_SET.has(lang)
+        !FENCED_CODE_PASSTHROUGH_LANGUAGE_SET.has(lang.toLowerCase())
       ) {
         codeNode.meta = [`highlight=${lang}`, codeNode.meta].filter(Boolean).join(' ');
         codeNode.lang = 'text';
@@ -1129,7 +1129,7 @@ const createMarkdownComponents = ({
       <code
         className={cn(
           className,
-          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]',
+          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]'
         )}
         {...rest}
       >

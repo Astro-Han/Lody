@@ -202,6 +202,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
 import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
+import { CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -3465,7 +3466,12 @@ function WorkspaceChatLanding({
 
   const branchWorktreePill =
     branchSelectorNode || topWorktreeNode ? (
-      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-[hsl(var(--composer))] dark:bg-foreground/[0.08]">
+      <div
+        className={cn(
+          'flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md',
+          CONTEXT_PILL_SURFACE_CLASS
+        )}
+      >
         {branchSelectorNode}
         {branchSelectorNode && topWorktreeNode ? (
           <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
@@ -6039,7 +6045,7 @@ function WorkspaceChatLanding({
       </div>
       <button
         type="button"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
         onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
         aria-label={t('common.dismiss', 'Dismiss')}
       >

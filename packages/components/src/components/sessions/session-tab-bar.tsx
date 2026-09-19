@@ -102,7 +102,7 @@ interface SessionTabBarProps {
    tokens as the right side-panel tab strip. `border-transparent` on the base
    keeps every state on the same box model. */
 const TAB_ITEM_CLASS =
-  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[0.9em] transition-colors cursor-pointer';
+  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[0.9em] transition-colors cursor-default';
 const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
 const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
 const TAB_INLINE_ACTION_CLASS =
@@ -202,7 +202,9 @@ function TabContent({
      would be a flash between the click and the read receipt landing. */
   const isUnread = !isActive && sessionHasUnreadMessages(session);
   const label = getTabLabel(session, isParent, defaultTitle, t);
-  const showClose = onTabClose && !isEditing;
+  // A lone tab has no close button: there is nothing to switch to, and closing
+  // it would only swap the conversation for an empty draft.
+  const showClose = onTabClose && !isEditing && !solo;
   const tabId = `session-tab-${session.id}`;
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(session.agentConfigId));
   const iconEnv = agentConfig?.env ?? getSessionLaunchConfigLegacyFields(session)?.env;
@@ -339,7 +341,7 @@ function DraftTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const label = getDraftTabLabel(draft, t('sessions.tabs.newTab', 'New Tab'));
   const tabId = `draft-tab-${draft.id}`;
@@ -418,7 +420,7 @@ function ViewerTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const tabId = `viewer-tab-${tab.id}`;
   const saveStateLabel = tab.saving
@@ -768,7 +770,8 @@ export const SessionTabBar = memo(function SessionTabBar({
         activeItemId={activeTabId}
         role="tablist"
         aria-label={t('sessions.tabs.label', 'Session tabs')}
-        className="h-11"
+        // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
+        className="h-11 max-h-full"
         paddingLeft={variant === 'session' ? 4 : 8}
         paddingRight={8}
       >
@@ -881,7 +884,7 @@ export function ClosedTabsPopover({
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
           </p>
         </div>
-        <ScrollArea className="max-h-60">
+        <ScrollArea viewportClassName="max-h-60">
           <div className="py-1">
             {sorted.map((session) => {
               const label = session.title?.trim() || t('sessions.tabs.newTab', 'New Tab');

@@ -21,7 +21,11 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { cn } from '@/lib/utils';
-import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
+import {
+  WINDOW_DRAG_EXEMPT_CLASS,
+  WINDOW_DRAG_HEADER_CLASS,
+  useMacTrafficLightRowPadClass,
+} from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
@@ -89,6 +93,8 @@ export type LoroSidebarWorkspace = {
   logo?: string | null;
   /** Paid plan tier for the Plus/Enterprise badge; null/undefined = free. */
   planTier?: 'plus' | 'enterprise' | null;
+  /** Member count, when known (the active workspace). Shown in the switcher header. */
+  memberCount?: number | null;
 };
 
 export type LoroSidebarRepoItemDelta = {
@@ -132,6 +138,7 @@ export type LoroSidebarLabels = {
   connectGithubRepo: string;
   planPlus: string;
   planEnterprise: string;
+  planFree: string;
   pinned: string;
   connectionLoading: string;
   connectionReconnecting: string;
@@ -290,6 +297,7 @@ const defaultLabels: LoroSidebarLabels = {
   connectGithubRepo: 'Connect GitHub repo',
   planPlus: 'Plus',
   planEnterprise: 'Enterprise',
+  planFree: 'Free',
   pinned: 'Pinned',
   connectionLoading: 'Loading',
   connectionReconnecting: 'Reconnecting',
@@ -744,6 +752,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 }: LoroSidebarProps) {
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
   const { t } = useTranslation();
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
@@ -900,6 +909,16 @@ export const LoroSidebar = memo(function LoroSidebar({
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
   );
+  const currentWorkspace = workspaces.find((ws) => ws.id === currentWorkspaceId);
+  const getPlanLabel = (planTier: LoroSidebarWorkspace['planTier']) =>
+    planTier === 'enterprise'
+      ? mergedLabels.planEnterprise
+      : planTier === 'plus'
+        ? mergedLabels.planPlus
+        : mergedLabels.planFree;
+  const newWindowHint = t('workspace.openInNewWindowHint', {
+    key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
+  });
   const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
     workspaceSwitcherEnabled ? (
       <DropdownMenu modal={!isMobile}>
@@ -921,6 +940,33 @@ export const LoroSidebar = memo(function LoroSidebar({
             {userEmail}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          {currentWorkspace ? (
+            <>
+              <div className="flex min-w-0 items-center gap-2.5 px-2 py-2" data-current-workspace>
+                <WorkspaceAvatar
+                  workspace={{ name: currentWorkspace.name, logo: currentWorkspace.logo }}
+                  className="h-9 w-9 shrink-0 rounded-lg text-sm"
+                  fallbackClassName="rounded-lg"
+                />
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate text-[0.95em] font-medium leading-tight text-foreground">
+                    {currentWorkspace.name}
+                  </span>
+                  <span className="truncate text-xs leading-tight text-muted-foreground">
+                    {typeof currentWorkspace.memberCount === 'number'
+                      ? t('workspace.switcher.planAndMembers', {
+                          plan: getPlanLabel(currentWorkspace.planTier),
+                          count: currentWorkspace.memberCount,
+                        })
+                      : t('workspace.switcher.plan', {
+                          plan: getPlanLabel(currentWorkspace.planTier),
+                        })}
+                  </span>
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
 
           {workspaces.length > 0 ? (
             <>
@@ -931,65 +977,75 @@ export const LoroSidebar = memo(function LoroSidebar({
                 value={currentWorkspaceId}
                 onValueChange={(value) => onWorkspaceSelected?.(value)}
               >
-                {workspaces.map((ws) => {
-                  const workspaceSlug = ws.slug;
-                  const row = (
-                    <DropdownMenuRadioItem
-                      key={ws.id}
-                      value={ws.id}
-                      className="gap-2"
-                      onClickCapture={(event) => {
-                        if (!workspaceSlug || !isNewWindowClick(event)) return;
-                        if (openDesktopWindow(undefined, workspaceSlug)) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }
-                      }}
-                    >
-                      <WorkspaceAvatar
-                        workspace={{ name: ws.name, logo: ws.logo }}
-                        className="h-5 w-5 shrink-0 text-[10px]"
-                      />
-                      <span className="min-w-0 truncate">{ws.name}</span>
-                      {ws.planTier ? (
-                        <Badge
-                          variant="secondary"
-                          className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
-                        >
-                          {ws.planTier === 'enterprise'
-                            ? mergedLabels.planEnterprise
-                            : mergedLabels.planPlus}
-                        </Badge>
-                      ) : null}
-                    </DropdownMenuRadioItem>
-                  );
+                {/* Local provider: hosts may render the sidebar without a root one. */}
+                <TooltipProvider delayDuration={400}>
+                  {workspaces.map((ws) => {
+                    const workspaceSlug = ws.slug;
+                    const row = (
+                      <DropdownMenuRadioItem
+                        key={ws.id}
+                        value={ws.id}
+                        indicator="check"
+                        className="gap-2"
+                        onClickCapture={(event) => {
+                          if (!workspaceSlug || !isNewWindowClick(event)) return;
+                          if (openDesktopWindow(undefined, workspaceSlug)) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }
+                        }}
+                      >
+                        <WorkspaceAvatar
+                          workspace={{ name: ws.name, logo: ws.logo }}
+                          className="h-5 w-5 shrink-0 text-[10px]"
+                        />
+                        <span className="min-w-0 truncate">{ws.name}</span>
+                        {ws.planTier ? (
+                          <Badge
+                            variant="secondary"
+                            className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+                          >
+                            {ws.planTier === 'enterprise'
+                              ? mergedLabels.planEnterprise
+                              : mergedLabels.planPlus}
+                          </Badge>
+                        ) : null}
+                      </DropdownMenuRadioItem>
+                    );
 
-                  if (!isElectronRenderer() || !workspaceSlug) return row;
+                    if (!isElectronRenderer() || !workspaceSlug) return row;
 
-                  return (
-                    <ContextMenu key={ws.id}>
-                      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                      <ContextMenuContent>
-                        <ContextMenuItem
-                          onSelect={() => {
-                            openDesktopWindow(undefined, workspaceSlug);
-                          }}
-                        >
-                          <AppWindow />
-                          {t('workspace.openInNewWindow')}
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  );
-                })}
-              </DropdownMenuRadioGroup>
-              {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
-                <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                  {t('workspace.openInNewWindowHint', {
-                    key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
+                    const contextTrigger = <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>;
+                    return (
+                      <ContextMenu key={ws.id}>
+                        {ws.id === currentWorkspaceId ? (
+                          contextTrigger
+                        ) : (
+                          // Other workspaces explain the modifier-click on hover,
+                          // beside the row. Tooltip and ContextMenu roots render no
+                          // DOM, so both triggers' props land on the row element.
+                          <Tooltip>
+                            <TooltipTrigger asChild>{contextTrigger}</TooltipTrigger>
+                            <TooltipContent side="right" sideOffset={8}>
+                              {newWindowHint}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                        <ContextMenuContent>
+                          <ContextMenuItem
+                            onSelect={() => {
+                              openDesktopWindow(undefined, workspaceSlug);
+                            }}
+                          >
+                            <AppWindow />
+                            {t('workspace.openInNewWindow')}
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    );
                   })}
-                </p>
-              ) : null}
+                </TooltipProvider>
+              </DropdownMenuRadioGroup>
               <DropdownMenuSeparator />
             </>
           ) : null}
@@ -1056,7 +1112,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : 'h-11 px-1.5',
+              : cn('h-11 px-1.5', macTrafficLightRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >

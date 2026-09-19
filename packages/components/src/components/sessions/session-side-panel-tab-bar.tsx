@@ -128,7 +128,7 @@ type SessionSidePanelTabBarProps = {
   className?: string;
 };
 
-const TAB_CLASS = `group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[0.9em] transition-colors @max-[420px]/side-tabs:max-w-[175px] ${WINDOW_DRAG_EXEMPT_CLASS}`;
+const TAB_CLASS = `group relative flex h-7 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 rounded-md text-[0.9em] transition-colors @max-[420px]/side-tabs:max-w-[175px] ${WINDOW_DRAG_EXEMPT_CLASS}`;
 const ACTIVE_TAB_CLASS = TAB_PILL_ACTIVE_CLASS;
 const INACTIVE_TAB_CLASS = TAB_PILL_INACTIVE_CLASS;
 
@@ -229,7 +229,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         horizontalScrollbarClassName="h-1 border-0 p-0"
         horizontalScrollbarThumbClassName="bg-[hsl(var(--scrollbar-thumb)/0.35)] hover:bg-[hsl(var(--scrollbar-thumb-hover)/0.5)]"
       >
-        <div role="tablist" className="flex h-11 w-max min-w-full items-center gap-1.5">
+        <div role="tablist" className="flex h-10 w-max min-w-full items-center gap-1.5">
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
             // A tab busy with its own lifecycle work (e.g. a side chat being

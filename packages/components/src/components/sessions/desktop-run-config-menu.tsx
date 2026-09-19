@@ -15,6 +15,10 @@ import {
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
+import {
+  CONTEXT_PILL_HOVER_CLASS,
+  CONTEXT_PILL_SURFACE_CLASS,
+} from '@/components/chat/context-pill-class';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { ComposerAgentRolePanel } from '@/components/sessions/composer-agent-role-panel';
 import {
@@ -192,8 +196,8 @@ export const COMPOSER_FACE_LABEL_CLASS = '@max-[280px]/composer-face:hidden';
 const TRIGGER_CLASS = cn(
   'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-[0.9em] leading-tight',
   '@max-[280px]/composer-face:w-7 @max-[280px]/composer-face:shrink-0 @max-[280px]/composer-face:justify-center @max-[280px]/composer-face:gap-0 @max-[280px]/composer-face:px-0',
-  'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-  'data-[state=open]:bg-muted data-[state=open]:text-foreground',
+  'text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
+  'data-[state=open]:bg-hover data-[state=open]:text-foreground',
   'disabled:cursor-default disabled:opacity-70'
 );
 
@@ -236,9 +240,10 @@ export function DesktopMachineMenu({
         <button
           type="button"
           className={cn(
-            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md bg-[#e7e7e7] px-2 dark:bg-foreground/[0.08]',
+            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md px-2',
+            CONTEXT_PILL_SURFACE_CLASS,
             'text-[0.9em] font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-            'hover:bg-[#dcdcdc] hover:text-foreground data-[state=open]:bg-[#dcdcdc] data-[state=open]:text-foreground dark:hover:bg-foreground/[0.12] dark:data-[state=open]:bg-foreground/[0.12]',
+            CONTEXT_PILL_HOVER_CLASS,
             'disabled:cursor-default disabled:opacity-70'
           )}
           disabled={isDisabled}
@@ -248,7 +253,10 @@ export function DesktopMachineMenu({
           <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="max-w-32 truncate">{label}</span>
           {selectedIsLocal ? (
-            <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+            <Badge
+              variant="secondary"
+              className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+            >
               {t('chat.machineSelector.local', 'Local')}
             </Badge>
           ) : null}
@@ -282,7 +290,10 @@ export function DesktopMachineMenu({
               {option.label}
             </span>
             {option.value === visibleLocalMachineId ? (
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+              <Badge
+                variant="secondary"
+                className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+              >
                 {t('chat.machineSelector.local', 'Local')}
               </Badge>
             ) : null}

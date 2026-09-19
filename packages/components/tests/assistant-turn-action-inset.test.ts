@@ -283,6 +283,7 @@ describe('desktop live-turn duration', () => {
             createElement(AgentActivityRow, {
               label: 'Exploring',
               tone: 'warning',
+              shimmer: false,
               message,
             }),
             createElement(AssistantTurnFooter, {
@@ -297,7 +298,8 @@ describe('desktop live-turn duration', () => {
       );
     });
 
-    const activityLabel = () => container.querySelector('[data-highlight-label]')?.textContent;
+    const activityLabel = () =>
+      container.querySelector('[data-agent-activity-status]')?.textContent;
     expect(activityLabel()).toBe('Exploring (Worked for 5s)');
     expect(container.querySelector('[data-assistant-turn-duration]')).toBeNull();
     expect(container.querySelector('[data-assistant-turn-actions]')).toBeNull();
