@@ -2,7 +2,7 @@ import {
   registerLocalFileResourceScheme,
   installLocalFileResourceProtocol
 } from './services/local-file-resource-protocol'
-import { app, BrowserWindow, safeStorage } from 'electron'
+import { app, BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import dns from 'node:dns'
 import { writeHeapSnapshot } from 'node:v8'
@@ -53,13 +53,14 @@ import {
   flushElectronMainErrorReporting,
   installElectronMainErrorReporting
 } from './posthog-error-reporting'
-import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
+import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
 import { PublicBrowserService } from './services/public-browser-service'
 import { desktopInstallationProfile, isLocalPlatform } from './platform'
 import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
+import { handleWindowWarmReady } from './window-warm-service'
 import { extractDeepLinkFromArgv } from './deep-link-url'
 import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
 import {
@@ -339,6 +340,10 @@ if (hasSingleInstanceLock) {
     recordE2EBootDiagnostic('opening-main-window')
     openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
     recordE2EBootDiagnostic('main-window-opened')
+    // Warmup is off by default and only enabled from Developer mode. When it is
+    // enabled, session-windows primes the spare after an auxiliary request so
+    // ordinary single-window sessions never pay an idle renderer cost.
+    ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
     console.info('[Electron] Initial desktop surface selected', {
       initialPath,
       hideWindowOnAutoLaunch
