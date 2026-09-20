@@ -27,6 +27,9 @@ the line. Decision:
 
 ## Entry points and layout
 
+- [Zen layout](../../../../specs/zen-layout.md): `AppCommands` dispatches the shared
+  layout action; the mounted desktop Session publishes its right-panel controls.
+
 - Sidebar Search, immediately below New Chat, opens the shared command palette
   through `lib/commands/palette-state.ts`; see the [Spec](../../../../specs/sidebar-search.md).
 - Chat landing: `chat/chat-landing.tsx`.
