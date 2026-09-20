@@ -27,7 +27,8 @@ Index and rationale: [README.md](README.md).
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
   suppresses that user's notice for the workspace across future revisions.
-- The composer box border is 1px (`border`), not a 0.5px hairline. Light fill is
+- The session composer box border is a 0.5px hairline (`border-[0.5px]`), matching
+  the session info bar so the two read as one material. Light fill is
   `--composer`; the session info bar uses the same fill. Both share
   `COMPOSER_ELEVATION_CLASS`. The info bar uses `INFO_BAR_ELEVATION_CLASS`.
   Dark fill stays `bg-input/90`.

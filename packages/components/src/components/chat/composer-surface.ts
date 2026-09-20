@@ -14,4 +14,4 @@ export const INFO_BAR_ELEVATION_CLASS =
   'shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] dark:shadow-none';
 
 export const COMPOSER_SESSION_SURFACE_CLASS =
-  `@container/composer-box flex flex-col gap-1 rounded-xl border px-2 py-1.5 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] ${COMPOSER_ELEVATION_CLASS} dark:border-input-border/70 dark:bg-input/90`;
+  `@container/composer-box flex flex-col gap-1 rounded-xl border-[0.5px] px-2 py-1.5 transition-colors duration-150 border-foreground/[0.10] bg-[hsl(var(--composer))] ${COMPOSER_ELEVATION_CLASS} dark:border-input-border/70 dark:bg-input/90`;

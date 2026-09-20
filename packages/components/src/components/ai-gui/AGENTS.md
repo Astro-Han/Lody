@@ -57,7 +57,9 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 - The gutter belongs to `ConversationColumn`, not Virtua. EVERY row shares one left rail with no shell pad, INCLUDING
   the contents of an expanded region: expanding reveals rows, it never shifts
   them right; the chevron carries the hierarchy. Hover pills bleed instead
-  (footer `-mx-[7px]`, steps `-mx-1`). See `AssistantTurnAlignment.stories`.
+  (footer `-mx-[7px]`; steps bleed through their own `px-1`, never a negative
+  margin — prose and the owning group header carry that same 4px inset, so
+  `-mx-1` double-counted it). See `AssistantTurnAlignment.stories`.
 
 ## Conversation Outline
 
@@ -105,8 +107,16 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   `mermaid-diagram-viewer.tsx` stays the only full-screen surface, reached from
   the block's action bar. Invariants:
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
-- `chat_failed` raw errors use a modal; extraction/copy live in
-  `chat-failed-error-report.ts`.
+- `chat_failed` and `agent_warning` share ONE banner (`AgentNoticeBanner`): a
+  tinted header line carrying the tone colour, a hairline rule, then the raw
+  error in place — always open, never behind a modal or a disclosure. The
+  surface mixes the tone toward the border rather than fading it, so the card
+  stays legible without competing with the answer it comments on. Extraction
+  stays in `chat-failed-error-report.ts`; `chat-failed-detail-dialog.tsx` is no
+  longer reached from the conversation. A mergeable notice (`agent_warning`,
+  `chat_failed`) folds onto the preceding hydrated assistant row at RENDER time
+  only (`build-chat-stream-items.ts`); `buildConversationMarkdown` reads the
+  ConversationView, so copy/share/replay stay unpolluted.
 - Capacity retry targets only the latest notice: the first click consents, and
   bounded countdowns send a new continuation turn rather than replaying the
   failed input. A visible countdown keeps consent reversible without a second
