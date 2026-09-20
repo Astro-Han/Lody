@@ -527,3 +527,118 @@ function NativeTextSelectionStory() {
 }
 
 export const NativeTextSelection: Story = { render: () => <NativeTextSelectionStory /> };
+
+const at2 = (n: number) => new Date(Date.UTC(2026, 8, 20, 14, 0, 0) + n * 60_000).toISOString();
+
+const noticeUser = (n: number, text: string): SessionHistory =>
+  ({
+    id: `n-user-${n}`,
+    role: 'user',
+    timestamp: at2(n * 2),
+    read: true,
+    finished: true,
+    status: 'handled',
+    fileDiff: [],
+    items: [{ type: 'text', text }],
+    inputConfig: {
+      prompt: text,
+      cliType: 'builtin',
+      agentType: 'claude',
+      modeId: 'default',
+      modelId: 'sonnet',
+    },
+  }) as unknown as SessionHistory;
+
+const noticeAssistant = (n: number, items: unknown[]): SessionHistory =>
+  ({
+    id: `n-assistant-${n}`,
+    role: 'assistant',
+    timestamp: at2(n * 2 + 1),
+    userTurnId: `n-user-${n}`,
+    endedAt: Date.UTC(2026, 8, 20, 14, 0, 0) + (n * 2 + 1) * 60_000 + 18_000,
+    finished: true,
+    fileDiff: [],
+    items,
+  }) as unknown as SessionHistory;
+
+/** `meta` is schema-checked on write, so these carry real codes, not prose. */
+const noticeSystem = (id: string, n: number, name: string, noticeMeta: unknown): SessionHistory =>
+  ({
+    id,
+    role: 'system',
+    timestamp: at2(n * 2 + 1),
+    read: true,
+    items: [{ type: 'system_notice', name, meta: noticeMeta }],
+  }) as unknown as SessionHistory;
+
+function buildNoticeHistory(): SessionHistory[] {
+  return [
+    noticeUser(0, 'Have a look at the avatar cache and tell me why it keeps refetching.'),
+    noticeAssistant(0, [
+      { type: 'thought', text: 'Checking how the blob cache is keyed and when it is revoked.' },
+      {
+        type: 'tool_call',
+        toolCallId: 'n-tool-0-1',
+        status: 'completed',
+        title: 'Read packages/components/src/lib/avatar-cache.ts',
+        kind: 'read',
+        rawInput: { path: 'packages/components/src/lib/avatar-cache.ts' },
+      },
+      {
+        type: 'text',
+        text: 'The cache itself is fine — it keeps a durable copy in CacheStorage and revalidates in the background.\n\nWhat breaks is ownership: the blob URL is handed out as a plain string and copied into component state, so a revalidation swap revokes a URL another component is still rendering.',
+      },
+    ]),
+    noticeSystem('n-warning-0', 1, 'agent_warning', {
+      message:
+        'The configured model is unavailable for this account, so the request fell back to the default model. Billing and rate limits follow the fallback, not the model you selected.',
+      source: 'acp',
+    }),
+    noticeUser(1, '那就把所有权收敛到缓存里，别让组件各存一份。'),
+    noticeAssistant(1, [
+      { type: 'thought', text: 'Switching readers to a subscription so the cache owns the URL.' },
+      {
+        type: 'tool_call',
+        toolCallId: 'n-tool-1-1',
+        status: 'completed',
+        title: 'Edit packages/components/src/lib/avatar-cache.ts',
+        kind: 'edit',
+        rawInput: { path: 'packages/components/src/lib/avatar-cache.ts' },
+      },
+      {
+        type: 'text',
+        text: 'Readers now subscribe per cache key, and a superseded URL is only revoked once the last reader is gone — so no component can be left pointing at a dead `blob:`.',
+      },
+    ]),
+    noticeUser(2, 'Now run the full suite.'),
+    noticeAssistant(2, [
+      {
+        type: 'tool_call',
+        toolCallId: 'n-tool-2-1',
+        status: 'completed',
+        title: 'pnpm --filter @lody/components test',
+        kind: 'execute',
+        rawInput: { command: 'pnpm --filter @lody/components test' },
+      },
+    ]),
+    noticeSystem('n-failed-0', 3, 'chat_failed', {
+      reason: 'agent_disconnected',
+      message: 'The agent process exited before the turn completed.',
+    }),
+  ];
+}
+
+/**
+ * A whole conversation with both notice tones in place: user turns, agent prose
+ * and tool work, a mid-conversation `agent_warning` the turn survived, and a
+ * terminal `chat_failed`. Here to judge the notices against the rows they sit
+ * between — in isolation it is easy to make one louder than the conversation.
+ */
+export const ConversationWithNotices: Story = {
+  render: () => (
+    <WindowedStream
+      history={buildNoticeHistory()}
+      streamSessionId={'session-conversation-notices' as SessionId}
+    />
+  ),
+};
