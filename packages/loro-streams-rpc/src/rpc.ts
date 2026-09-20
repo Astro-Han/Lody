@@ -2650,11 +2650,11 @@ export class LoroStreamsMachineRpcClient {
 
   async requestMachinePiExtensions(options: {
     configId?: AgentConfigId;
-    timeoutMs?: number;
+    timeoutMs: number;
   }): Promise<MachinePiExtensionsResponse | null> {
     return (await this.sendRequest({
       method: 'machine/pi-extensions',
-      timeoutMs: options.timeoutMs ?? 150_000,
+      timeoutMs: options.timeoutMs,
       params: {
         configId: options.configId,
       },
