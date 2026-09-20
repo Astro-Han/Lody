@@ -130,6 +130,7 @@ function createForkHarness(
     setForkOperation: vi.fn((operation) => {
       forkOperation = operation;
     }),
+    syncModelSummary: vi.fn(async () => {}),
   });
   const persistPendingChanges = vi.fn(async (reason: string) => {
     if (reason === failPersistReason) {
