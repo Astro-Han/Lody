@@ -285,7 +285,7 @@ describe('AgentConfigDialog', () => {
       (field.querySelector('[role="checkbox"]') as HTMLButtonElement).click();
     });
     await act(async () => {
-      button('Scan extensions').click();
+      button('Rescan').click();
     });
     expect(field.querySelector('[role="checkbox"]')?.getAttribute('aria-checked')).toBe('true');
     await act(async () => {
