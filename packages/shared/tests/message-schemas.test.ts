@@ -262,6 +262,14 @@ describe('message-schemas image upload response', () => {
 });
 
 describe('message-schemas machine ACP capabilities refresh', () => {
+  it('validates bounded explicit Pi extension selections', () => {
+    expect(BuiltinRuntimeOverridesSchema.parse({ piExtensions: [' /fixture/plugin.ts '] })).toEqual(
+      { piExtensions: ['/fixture/plugin.ts'] }
+    );
+    for (const piExtensions of [[''], [false], 'plugin', Array(33).fill('/fixture/plugin.ts')]) {
+      expect(BuiltinRuntimeOverridesSchema.safeParse({ piExtensions }).success).toBe(false);
+    }
+  });
   it('accepts builtin Kimi runtime fields', () => {
     expect(CliTypeSchema.safeParse('kimi').success).toBe(true);
     expect(CliTypeSchema.safeParse('grok').success).toBe(true);

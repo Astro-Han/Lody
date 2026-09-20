@@ -137,6 +137,7 @@ export type BuiltinRuntimeOverrides = {
   claudeCodeExecutable?: string;
   kimiPath?: string;
   grokPath?: string;
+  piExtensions?: string[];
 };
 
 export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRuntimeOverrides => {
@@ -148,13 +149,20 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     claudeCodeExecutable?: unknown;
     kimiPath?: unknown;
     grokPath?: unknown;
+    piExtensions?: unknown;
   };
   return (
     (record.codexPath === undefined || typeof record.codexPath === 'string') &&
     (record.claudeCodeExecutable === undefined ||
       typeof record.claudeCodeExecutable === 'string') &&
     (record.kimiPath === undefined || typeof record.kimiPath === 'string') &&
-    (record.grokPath === undefined || typeof record.grokPath === 'string')
+    (record.grokPath === undefined || typeof record.grokPath === 'string') &&
+    (record.piExtensions === undefined ||
+      (Array.isArray(record.piExtensions) &&
+        record.piExtensions.length <= 32 &&
+        record.piExtensions.every(
+          (entry) => typeof entry === 'string' && entry.trim().length > 0 && entry.length <= 4096
+        )))
   );
 };
 
@@ -162,8 +170,8 @@ export const hasBuiltinRuntimeOverrideValues = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
 ): boolean =>
   !!runtimeOverrides &&
-  Object.values(runtimeOverrides).some(
-    (value) => typeof value === 'string' && value.trim().length > 0
+  Object.values(runtimeOverrides).some((value) =>
+    Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0
   );
 
 export const getBuiltinRuntimeOverrideSourceVersionSuffix = (
@@ -437,9 +445,12 @@ export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
     return undefined;
   }
   const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
-  return !sourceVersionSuffix || readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
-    ? readableEntry
-    : undefined;
+  const matches = sourceVersionSuffix
+    ? readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
+    : readableEntry.cliType !== 'builtin' ||
+      readableEntry.agentType !== 'pi' ||
+      !readableEntry.sourceVersion?.includes('+override:');
+  return matches ? readableEntry : undefined;
 };
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
@@ -449,8 +460,9 @@ export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   if (!isAcpCapabilityCacheEntryCurrent(entry)) {
     return false;
   }
-  const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
-  return !sourceVersionSuffix || entry.sourceVersion?.endsWith(sourceVersionSuffix) === true;
+  return (
+    getReadableAcpCapabilityCacheEntryForRuntimeOverrides(entry, runtimeOverrides) !== undefined
+  );
 };
 
 export const getAcpCapabilityCacheEntryAuthority = (

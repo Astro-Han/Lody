@@ -77,6 +77,7 @@ export const BuiltinRuntimeOverridesSchema = z
     claudeCodeExecutable: z.string().optional(),
     kimiPath: z.string().optional(),
     grokPath: z.string().optional(),
+    piExtensions: z.array(z.string().trim().min(1).max(4096)).max(32).optional(),
   })
   .strict();
 

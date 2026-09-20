@@ -82,6 +82,10 @@ try {
     scratch
   );
   const pkg = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
+  const piExtensionsProtocolVersion = pkg.lody?.piExtensionsProtocolVersion;
+  if (piExtensionsProtocolVersion !== undefined && piExtensionsProtocolVersion !== 1) {
+    throw new Error('Unsupported Pi extension protocol version.');
+  }
   const minNodeVersion = /^>=(\d+\.\d+\.\d+)$/.exec(pkg.engines.node)?.[1];
   if (!minNodeVersion) throw new Error('Pi must declare an exact minimum Node version.');
   const version = `${pkg.version}-lody.${sourceCommit.slice(0, 12)}`;
@@ -125,6 +129,7 @@ try {
     publishable: true,
     kind: 'node-package',
     minNodeVersion,
+    ...(piExtensionsProtocolVersion === undefined ? {} : { piExtensionsProtocolVersion }),
     artifact: {
       fileName,
       sha256,
