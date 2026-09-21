@@ -657,13 +657,17 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
 
 SidebarUpdatedSessionList.displayName = 'SidebarUpdatedSessionList';
 
+function UpdatedGitHubOwnerMark({ repoFullName }: { repoFullName: string | null }) {
+  return <GitHubOwnerIcon repoFullName={repoFullName} className="h-4 w-4 opacity-60" />;
+}
+
 function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   const label = resolveUpdatedItemProjectLabel(item);
   if (!label) return null;
   const repoFullName = item.repoFullName ?? (item.kind === 'github' ? label : null);
   const isGithub = item.kind === 'github';
   const mark = isGithub ? (
-    <GitHubOwnerIcon repoFullName={repoFullName} className="h-3.5 w-3.5" />
+    <UpdatedGitHubOwnerMark repoFullName={repoFullName} />
   ) : item.kind === 'local' ? (
     <Folder className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
   ) : (
@@ -677,7 +681,7 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
       <span
         className={cn(
           'flex shrink-0 items-center justify-center',
-          isGithub ? 'h-3.5 w-3.5 overflow-hidden rounded-sm' : 'h-3 w-3 opacity-80'
+          isGithub ? 'h-4 w-4 overflow-hidden rounded-[3px]' : 'h-3 w-3 opacity-80'
         )}
       >
         {mark}
