@@ -22,6 +22,7 @@
   "piExtensions.placeholder": "Absolute path or ~/path on the target machine",
   "piExtensions.add": "Add path",
   "piExtensions.limit": "Select at most 32 extensions.",
+  "piExtensions.invalidPath": "Use an absolute path or ~/path up to 4096 characters.",
   "chat.piMigration.title": "Upgrade Pi providers",
   "chat.piMigration.description": "Switch your existing Pi providers to the built-in version managed by Lody. Names, credentials and settings are kept. Start a new chat after upgrading; old Pi sessions cannot be resumed by the new adapter.",
   "chat.piMigration.upgradeMachine": "Update Lody on the providers’ machines before migrating.",

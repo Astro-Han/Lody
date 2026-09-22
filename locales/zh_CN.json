@@ -22,6 +22,7 @@
   "piExtensions.placeholder": "目标机器上的绝对路径或 ~/路径",
   "piExtensions.add": "添加路径",
   "piExtensions.limit": "最多选择 32 个扩展。",
+  "piExtensions.invalidPath": "请输入绝对路径或 ~/路径，最长 4096 个字符。",
   "chat.piMigration.title": "升级 Pi Provider",
   "chat.piMigration.description": "将已有 Pi Provider 切换为 Lody 管理的内置版本，保留名称、凭据和设置。升级后请新建对话；新适配器无法直接续聊旧 Pi 会话。",
   "chat.piMigration.upgradeMachine": "请先更新这些 Provider 所属机器上的 Lody，再进行迁移。",

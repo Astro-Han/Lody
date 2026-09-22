@@ -1476,6 +1476,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     })();
     return () => {
       cancelled = true;
+      setProbing(false);
     };
   }, [
     open,
@@ -2594,12 +2595,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   : undefined
               }
               onChange={(paths) => {
-                setManuallyTested(false);
-                setProbeError(null);
-                setProbeTick(0);
-                setVerifiedBuiltinContext(null);
-                setPendingCreateBuiltinContext(null);
-                setBuiltinVerificationRevision((n) => n + 1);
+                invalidateBuiltinVerification();
                 setFormData((prev) => {
                   const runtimeOverrides = { ...prev.runtimeOverrides };
                   if (paths.length) runtimeOverrides.piExtensions = paths;

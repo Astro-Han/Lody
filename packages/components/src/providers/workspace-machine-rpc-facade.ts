@@ -8,7 +8,6 @@ import {
   machineSupportsLocalFileResourcesProtocol,
   machineSupportsPiExtensions,
   machineSupportsSubagentCancellation,
-  MachinePiExtensionsResponseSchema,
   type MachineProtocolCapabilities,
   type AgentConfigId,
   type CodeCollabV2Error,
@@ -78,10 +77,6 @@ const CODE_COLLAB_DIFF_RPC_CONCURRENCY_LIMIT = 4;
 type LocalMachineRpcSender = (
   message: LocalMachineRpcRequest
 ) => Promise<SendLocalMachineRpcResult>;
-
-type PiExtensionsRequestOptions = {
-  configId?: AgentConfigId;
-};
 
 type CodeCollabRequestOptions = {
   timeoutMs?: number;
@@ -1159,7 +1154,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   const requestMachinePiExtensions = async (
     machineId: MachineId,
-    options?: PiExtensionsRequestOptions
+    options?: { configId?: AgentConfigId }
   ): Promise<MachinePiExtensionsResponse> => {
     const fail = (error: string): MachinePiExtensionsResponse => ({ success: false, error });
     try {
@@ -1190,10 +1185,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         if (!response.ok) {
           return fail(response.error);
         }
-        const parsed = MachinePiExtensionsResponseSchema.safeParse(response.result);
-        return parsed.success
-          ? parsed.data
-          : fail('Pi extension scan returned an invalid response.');
+        return response.result as MachinePiExtensionsResponse;
       }
       const result = await (
         await getMachineRpcClient(machineId)
@@ -1201,8 +1193,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       if (result === null) {
         return fail('Pi extension scan request timed out.');
       }
-      const parsed = MachinePiExtensionsResponseSchema.safeParse(result);
-      return parsed.success ? parsed.data : fail('Pi extension scan returned an invalid response.');
+      return result;
     } catch (error) {
       return fail(error instanceof Error ? error.message : String(error));
     }

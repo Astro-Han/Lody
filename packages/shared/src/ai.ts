@@ -140,6 +140,9 @@ export type BuiltinRuntimeOverrides = {
   piExtensions?: string[];
 };
 
+export const PI_EXTENSIONS_MAX_SELECTIONS = 32;
+export const PI_EXTENSION_PATH_MAX_LENGTH = 4096;
+
 export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRuntimeOverrides => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
@@ -159,9 +162,12 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     (record.grokPath === undefined || typeof record.grokPath === 'string') &&
     (record.piExtensions === undefined ||
       (Array.isArray(record.piExtensions) &&
-        record.piExtensions.length <= 32 &&
+        record.piExtensions.length <= PI_EXTENSIONS_MAX_SELECTIONS &&
         record.piExtensions.every(
-          (entry) => typeof entry === 'string' && entry.trim().length > 0 && entry.length <= 4096
+          (entry) =>
+            typeof entry === 'string' &&
+            entry.trim().length > 0 &&
+            entry.length <= PI_EXTENSION_PATH_MAX_LENGTH
         )))
   );
 };

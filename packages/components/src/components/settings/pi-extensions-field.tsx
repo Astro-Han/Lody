@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScanSearch } from 'lucide-react';
-import type { MachinePiExtensionsResponse, PiExtensionDiscovery } from '@lody/shared';
+import {
+  PI_EXTENSION_PATH_MAX_LENGTH,
+  PI_EXTENSIONS_MAX_SELECTIONS,
+  type MachinePiExtensionsResponse,
+  type PiExtensionDiscovery,
+} from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
 import { Checkbox } from '@/ui/checkbox';
@@ -9,7 +14,7 @@ import { Input } from '@/ui/input';
 import { Spinner } from '@/ui/spinner';
 import { CollapsibleSection, FormMessage } from './form-primitives';
 
-const MAX_EXTENSIONS = 32;
+const ABSOLUTE_PATH_PATTERN = /^(?:\/|~(?:[/\\]|$)|[a-zA-Z]:[\\/]|\\\\)/;
 
 export function PiExtensionsField({
   value,
@@ -27,27 +32,18 @@ export function PiExtensionsField({
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState('');
   const [path, setPath] = useState('');
-  const generation = useRef(0);
-  useEffect(
-    () => () => {
-      generation.current++;
-    },
-    []
-  );
   const scan = async () => {
     if (!onScan || !supported) return;
-    const current = ++generation.current;
     setScanning(true);
     setError('');
     try {
       const result = await onScan();
-      if (current !== generation.current) return;
       if (result.success) setDiscovery(result.discovery);
       else setError(result.error);
     } catch {
-      if (current === generation.current) setError(t('piExtensions.scanFailed'));
+      setError(t('piExtensions.scanFailed'));
     } finally {
-      if (current === generation.current) setScanning(false);
+      setScanning(false);
     }
   };
   const rows: { path: string; name: string; stale: boolean }[] = (
@@ -61,14 +57,23 @@ export function PiExtensionsField({
         name: selected.split(/[\\/]/).pop() ?? selected,
         stale: discovery !== undefined,
       });
-  const add = (candidate: string) => {
-    if (!supported || value.includes(candidate)) return;
-    if (value.length >= MAX_EXTENSIONS) {
+  const add = (candidate: string): boolean => {
+    if (!supported || value.includes(candidate)) return false;
+    if (
+      candidate.length === 0 ||
+      candidate.length > PI_EXTENSION_PATH_MAX_LENGTH ||
+      !ABSOLUTE_PATH_PATTERN.test(candidate)
+    ) {
+      setError(t('piExtensions.invalidPath'));
+      return false;
+    }
+    if (value.length >= PI_EXTENSIONS_MAX_SELECTIONS) {
       setError(t('piExtensions.limit'));
-      return;
+      return false;
     }
     onChange([...value, candidate]);
     setError('');
+    return true;
   };
   return (
     <CollapsibleSection
@@ -120,8 +125,8 @@ export function PiExtensionsField({
             {discovery.warnings.length > 0 ? (
               <FormMessage tone="warning">
                 <ul className="list-disc space-y-0.5 pl-4">
-                  {discovery.warnings.map((warning) => (
-                    <li key={warning} className="break-words">
+                  {discovery.warnings.map((warning, index) => (
+                    <li key={index} className="break-words">
                       {warning}
                     </li>
                   ))}
@@ -152,11 +157,14 @@ export function PiExtensionsField({
                     className="mt-0.5"
                     checked={checked}
                     disabled={rowDisabled}
-                    onCheckedChange={(next) =>
-                      next === true
-                        ? add(row.path)
-                        : onChange(value.filter((item) => item !== row.path))
-                    }
+                    onCheckedChange={(next) => {
+                      if (next === true) {
+                        add(row.path);
+                      } else {
+                        onChange(value.filter((item) => item !== row.path));
+                        setError('');
+                      }
+                    }}
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline gap-2">
@@ -191,10 +199,9 @@ export function PiExtensionsField({
             <Button
               type="button"
               variant="secondary"
-              disabled={!path.trim() || value.length >= MAX_EXTENSIONS}
+              disabled={!path.trim() || value.length >= PI_EXTENSIONS_MAX_SELECTIONS}
               onClick={() => {
-                add(path.trim());
-                setPath('');
+                if (add(path.trim())) setPath('');
               }}
             >
               {t('piExtensions.add')}

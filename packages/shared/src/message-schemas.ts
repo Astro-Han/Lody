@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
+  PI_EXTENSION_PATH_MAX_LENGTH,
+  PI_EXTENSIONS_MAX_SELECTIONS,
   SESSION_FILE_MAX_COUNT,
   SESSION_FILE_MAX_SIZE_BYTES,
   SESSION_IMAGE_ALLOWED_MIME_TYPES,
@@ -77,7 +79,10 @@ export const BuiltinRuntimeOverridesSchema = z
     claudeCodeExecutable: z.string().optional(),
     kimiPath: z.string().optional(),
     grokPath: z.string().optional(),
-    piExtensions: z.array(z.string().trim().min(1).max(4096)).max(32).optional(),
+    piExtensions: z
+      .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
+      .max(PI_EXTENSIONS_MAX_SELECTIONS)
+      .optional(),
   })
   .strict();
 
