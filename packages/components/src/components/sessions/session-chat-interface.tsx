@@ -1,3 +1,4 @@
+import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
@@ -2003,6 +2004,7 @@ export const SessionChatInterface = memo(
       };
     }, [session.id]);
     const { t, i18n } = useTranslation();
+    const preparingWindow = useAtomValue(windowPreparationAtom);
     const isMobile = useIsMobile();
     const isNativeApp = isNativeAppShell();
     const hidesBillingUi = isMobile || isNativeApp;
@@ -3491,7 +3493,7 @@ export const SessionChatInterface = memo(
       if (
         !shouldMarkSessionRead({
           rendersConversation: !hideMessageArea,
-          isVisible,
+          isVisible: isVisible && !preparingWindow,
           lastMessageAt,
           lastReadAt: lastReadAtForReceiptRef.current,
         })
@@ -3505,7 +3507,7 @@ export const SessionChatInterface = memo(
       // a new message arrives. Deliberately do not depend on lastReadAt: moving
       // that receipt backwards is the user's explicit "Mark as unread" action,
       // which must remain visible until they leave and reopen the conversation.
-    }, [hideMessageArea, isVisible, markSessionRead, session.id, session.lastMessageAt]);
+    }, [hideMessageArea, isVisible, preparingWindow, markSessionRead, session.id, session.lastMessageAt]);
 
     const isDispatching = inputActionState === 'dispatching';
     const isAgentBusy = isSessionPromptBusy({
@@ -5914,9 +5916,15 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        {isVisible && sessionDocReady && sessionDocSynced && (
-          <span hidden data-window-session-ready={session.id} />
-        )}
+        {isVisible &&
+          sessionDocReady &&
+          (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (
+            <span
+              hidden
+              data-window-session-ready={session.id}
+              data-window-requires-stream={sessionHistoryLength > 0 ? 'true' : undefined}
+            />
+          )}
         <SessionConversationPage
           className={className}
           dropActive={imageDropZone.isActive || sessionMentionOverlay}
@@ -6220,7 +6228,7 @@ export const SessionChatInterface = memo(
                     {shouldReplaceComposerWithPermission ? null : (
                       <SessionChatInputArea
                         isVisible={isVisible && !shareSelection.active}
-                        claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
+                        claimNavigationFocus={isVisible && !preparingWindow ? claimNavigationFocus : undefined}
                         ref={inputAreaRef}
                         session={session}
                         sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}

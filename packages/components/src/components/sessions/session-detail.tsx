@@ -1,3 +1,4 @@
+import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -741,6 +742,7 @@ const SessionDetail = ({
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const preparingWindow = useAtomValue(windowPreparationAtom);
   const claimNavigationFocus = useComposerNavigationFocus(sessionId);
   const postHog = usePostHog();
   const isMobile = useIsMobile();
@@ -1599,7 +1601,7 @@ const SessionDetail = ({
   }, [sessionId]);
 
   useEffect(() => {
-    if (!activeSession || !currentWorkspaceId || !user?.id) return;
+    if (preparingWindow || !activeSession || !currentWorkspaceId || !user?.id) return;
     const externalHistory = activeSession.externalHistory;
     if (!shouldRefreshExternalHistoryOnOpen(externalHistory)) {
       return;
@@ -1667,6 +1669,7 @@ const SessionDetail = ({
     activeSession,
     currentWorkspaceId,
     externalHistoryRefreshBySessionId,
+    preparingWindow,
     localMachineId,
     runtime,
     sessionMachineSupportsLocalProjectHistoryRpc,
