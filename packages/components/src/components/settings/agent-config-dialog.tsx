@@ -13,7 +13,10 @@ import {
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
+  hasBuiltinRuntimeOverrideValues,
   machineSupportsProviderSetupProtocol,
+  machineSupportsPiExtensions,
+  type MachinePiExtensionsResponse,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
@@ -78,6 +81,8 @@ import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { BubInstallGuide } from './bub-install-guide';
+import { CollapsibleSection } from './form-primitives';
+import { PiExtensionsField } from './pi-extensions-field';
 import { ProviderSetupRow } from './provider-setup-row';
 import {
   getAgentMetaByIdAtomFamily,
@@ -665,6 +670,10 @@ export type AgentConfigDialogProps = {
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
   onRefreshCapabilities: (args: RefreshArgs) => Promise<MachineAcpCapabilitiesRefreshResponse>;
+  onScanPiExtensions?: (args: {
+    machineId: MachineId;
+    configId?: AgentConfigId;
+  }) => Promise<MachinePiExtensionsResponse>;
   /** Check a registry binary or managed builtin runtime on the target machine. */
   onCheckBinaryStatus?: (
     args: BinaryActionArgs
@@ -938,6 +947,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     machine,
     onSubmit,
     onRefreshCapabilities,
+    onScanPiExtensions,
     onCheckBinaryStatus,
     onInstallBinary,
     onManagedRuntimeSelected,
@@ -1204,10 +1214,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
   const supportsProviderSetup = machineSupportsProviderSetupProtocol(machine);
+  // providerSetup rows only launch the default managed runtime; any override
+  // (a custom path or selected Pi extensions) must take the live-probe path.
   const backgroundBuiltinSetup =
     supportsProviderSetup &&
     requiresBuiltinCreationVerification &&
-    (usesDefaultManagedRuntime || isQueuedBuiltin);
+    (usesDefaultManagedRuntime || isQueuedBuiltin) &&
+    !hasBuiltinRuntimeOverrideValues(formData.runtimeOverrides);
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
@@ -1463,6 +1476,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     })();
     return () => {
       cancelled = true;
+      setProbing(false);
     };
   }, [
     open,
@@ -2461,7 +2475,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           {!isPreset &&
             !acpProvidesSessionTitle &&
             (capabilitiesReady ? titleSelectors.length > 0 : true) && (
-              <Section
+              <CollapsibleSection
                 title={t('settings.agent.dialog.section.titleGen', 'Title generation')}
                 defaultOpen
                 disabled={!capabilitiesReady}
@@ -2491,10 +2505,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     });
                   }}
                 />
-              </Section>
+              </CollapsibleSection>
             )}
 
-          <Section
+          <CollapsibleSection
             title={t('settings.agent.dialog.section.prompt', 'Custom prompt')}
             action={
               formData.prompt.trim().length > 0 ? (
@@ -2511,9 +2525,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               )}
               rows={3}
             />
-          </Section>
+          </CollapsibleSection>
 
-          <Section
+          <CollapsibleSection
             title={
               activePreset || isDeepSeekBuiltin
                 ? t(
@@ -2564,7 +2578,38 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               showLabel={false}
               rows={5}
             />
-          </Section>
+          </CollapsibleSection>
+
+          {formData.cliType === 'builtin' && formData.agentType === 'pi' && (
+            <PiExtensionsField
+              key={`${machine.id}:${agentConfigId}:${mode.kind === 'edit' ? (mode.config.env?.PI_CODING_AGENT_DIR ?? '') : ''}`}
+              value={formData.runtimeOverrides?.piExtensions ?? []}
+              supported={machineSupportsPiExtensions(machine)}
+              onScan={
+                onScanPiExtensions
+                  ? () =>
+                      onScanPiExtensions({
+                        machineId: machine.id,
+                        configId: mode.kind === 'edit' ? mode.config.id : undefined,
+                      })
+                  : undefined
+              }
+              onChange={(paths) => {
+                invalidateBuiltinVerification();
+                setFormData((prev) => {
+                  const runtimeOverrides = { ...prev.runtimeOverrides };
+                  if (paths.length) runtimeOverrides.piExtensions = paths;
+                  else delete runtimeOverrides.piExtensions;
+                  return {
+                    ...prev,
+                    runtimeOverrides: Object.keys(runtimeOverrides).length
+                      ? runtimeOverrides
+                      : undefined,
+                  };
+                });
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -3263,55 +3308,6 @@ function Field({
       {children}
       {hint && <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>}
     </div>
-  );
-}
-
-function Section({
-  title,
-  count,
-  children,
-  disabled,
-  disabledHint,
-  defaultOpen,
-  action,
-}: {
-  title: string;
-  count?: number;
-  children: ReactNode;
-  disabled?: boolean;
-  disabledHint?: string;
-  defaultOpen?: boolean;
-  action?: ReactNode;
-}) {
-  return (
-    <Collapsible defaultOpen={defaultOpen}>
-      <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-            <span className="min-w-0 truncate">{title}</span>
-            {typeof count === 'number' && count > 0 ? (
-              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                {count}
-              </span>
-            ) : null}
-          </button>
-        </CollapsibleTrigger>
-        {action}
-      </div>
-      <CollapsibleContent className="mt-2">
-        <div className="pl-1">
-          {disabled ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
-          ) : (
-            children
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
 
