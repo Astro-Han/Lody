@@ -1,4 +1,6 @@
 {
+  "settings.beta.semanticShortcuts": "Pointer-aware close shortcut",
+  "settings.beta.semanticShortcutsHelper": "On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.",
   "sessions.cancelSend": "Cancel send",
   "sessions.sendConfigLocked": "Configuration is locked while sending",
   "sessions.selectionCopyUnavailable": "The selected text is still loading or could not be loaded. Wait and try copying again.",
