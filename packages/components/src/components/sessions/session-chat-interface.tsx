@@ -6219,6 +6219,7 @@ export const SessionChatInterface = memo(
                   <div className={shareSelection.active ? 'hidden' : 'contents'}>
                     {shouldReplaceComposerWithPermission ? null : (
                       <SessionChatInputArea
+                        isVisible={isVisible && !shareSelection.active}
                         claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
                         ref={inputAreaRef}
                         session={session}
