@@ -1706,15 +1706,11 @@ export type IssuePRMention = {
   number: number;
 };
 
-export type ACPSessionConfig = {
+export type ACPTurnConfig = {
   prompt: string;
   inputBlocks?: SessionInputBlock[];
   cliType: AgentConfigCliType;
   agentType: AgentType;
-  /** Launch spec for `cliType: 'custom'` agents; resolved from the agent config / session meta. */
-  customAcp?: CustomAcpLaunchSpec;
-  /** Advanced runtime binary override for builtin Claude/Codex agents. */
-  runtimeOverrides?: BuiltinRuntimeOverrides;
   modeId?: SessionMode['id'];
   modelId?: string;
   /** Config option values (configId → value) for setSessionConfigOption. */
@@ -1737,11 +1733,19 @@ export type ACPSessionConfig = {
   chainDepth?: number;
 };
 
+/** Provider launch fields belong only to the durable session config, never per-turn input. */
+export type ACPSessionConfig = ACPTurnConfig & {
+  /** Launch spec for `cliType: 'custom'` agents; resolved from the agent config / session meta. */
+  customAcp?: CustomAcpLaunchSpec;
+  /** Advanced runtime binary override for builtin Claude/Codex agents. */
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+};
+
 /**
  * Persisted per-user-turn dispatch config.
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
-export type SessionTurnInputConfig = Partial<ACPSessionConfig> & {
+export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
 };

@@ -362,14 +362,12 @@ export const SessionInputBlocksSchema = z
     }
   });
 
-export const ACPSessionConfigSchema = z
+export const ACPTurnConfigSchema = z
   .object({
     prompt: z.string(),
     inputBlocks: SessionInputBlocksSchema.optional(),
     cliType: AgentConfigCliTypeSchema,
     agentType: z.string().trim().min(1),
-    customAcp: CustomAcpLaunchSpecSchema.optional(),
-    runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
     modeId: z.string().optional(),
     modelId: z.string().optional(),
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
@@ -382,11 +380,17 @@ export const ACPSessionConfigSchema = z
   })
   .passthrough();
 
+/** Provider launch fields join only the durable session config, never per-turn input. */
+export const ACPSessionConfigSchema = ACPTurnConfigSchema.extend({
+  customAcp: CustomAcpLaunchSpecSchema.optional(),
+  runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
+});
+
 /** Local history provenance, not an additional ACP request option. */
 export const SessionHistoryDeliveryKindSchema = z.literal('steer');
 export type SessionHistoryDeliveryKind = z.infer<typeof SessionHistoryDeliveryKindSchema>;
 
-export const SessionHistoryInputConfigSchema = ACPSessionConfigSchema.partial()
+export const SessionHistoryInputConfigSchema = ACPTurnConfigSchema.partial()
   .extend({ _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional() })
   .strip();
 
@@ -443,16 +447,6 @@ export const normalizeSessionTurnInputConfig = (
   const agentType = trimOptionalString(record.agentType);
   if (agentType) {
     normalized.agentType = agentType;
-  }
-
-  const customAcp = maybeParseField(CustomAcpLaunchSpecSchema, record.customAcp);
-  if (customAcp) {
-    normalized.customAcp = customAcp;
-  }
-
-  const runtimeOverrides = maybeParseField(BuiltinRuntimeOverridesSchema, record.runtimeOverrides);
-  if (runtimeOverrides) {
-    normalized.runtimeOverrides = runtimeOverrides;
   }
 
   const modeId = trimOptionalString(record.modeId);

@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   MessageContentSchema,
   normalizeSessionTurnInputConfig,
+  SessionHistoryInputConfigSchema,
   LocalProjectControlRequestSchema,
   LocalProjectControlResponseSchema,
   LocalSessionControlResponseSchema,
@@ -936,6 +937,33 @@ describe('normalizeSessionTurnInputConfig', () => {
       },
       resume: 'acp-1',
       inputBlocks: [{ type: 'text', text: 'hello' }],
+    });
+  });
+
+  it('drops provider launch fields from turn input', () => {
+    const injected = {
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
+      customAcp: { command: '/tmp/injected-acp' },
+      runtimeOverrides: { piExtensions: ['/tmp/injected.ts'] },
+    };
+
+    expect(normalizeSessionTurnInputConfig(injected)).toEqual({
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
+    });
+
+    const stored = SessionHistoryInputConfigSchema.safeParse(injected);
+    expect(stored.success).toBe(true);
+    expect(stored.data).toEqual({
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
     });
   });
 });
