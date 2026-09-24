@@ -95,7 +95,11 @@ import {
   terminalDockOpenAtom,
 } from '@/components/terminal/terminal-controller';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { useMacTrafficLightRowPadClass, useWindowsCaptionPadClass } from '@/ui/window-drag-region';
+import {
+  useMacTrafficLightRowPadClass,
+  useWindowsCaptionPadClass,
+  useWindowsCaptionRowPadClass,
+} from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
   navigationSidebarHiddenAtom,
@@ -752,6 +756,10 @@ const SessionDetail = ({
   const { openSettings } = useOpenSettings();
   const isElectronFullscreen = useElectronFullscreen();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
+  const windowsCaptionBorderedRowPadClass = useWindowsCaptionRowPadClass({
+    bottomBorder: true,
+  });
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
   const macTrafficLightBorderedRowPadClass = useMacTrafficLightRowPadClass({
     bottomBorder: true,
@@ -6183,6 +6191,7 @@ const SessionDetail = ({
         'h-11',
         'group-data-[lody-action-active=true]/close-scope:shadow-[inset_0_-1px_0_var(--primary)]',
         macTrafficLightRowPadClass,
+        windowsCaptionRowPadClass,
         isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
         !isSidebarVisible && windowsCaptionPadClass
       )}
@@ -6370,6 +6379,7 @@ const SessionDetail = ({
           // still shares the traffic-light centerline with the main tab bar.
           'h-11',
           macTrafficLightBorderedRowPadClass,
+          windowsCaptionBorderedRowPadClass,
           windowsCaptionPadClass
         )}
       />
