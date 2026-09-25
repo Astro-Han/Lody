@@ -69,6 +69,16 @@ continued or mid-turn session can still conflict: Lody-only items (attachments,
 task cards, retry/compaction activity) are absent from Pi's file. That is the shared
 importer's prefix model, not a Pi adapter gap, and is left for a separate change.
 
+Imported Pi sessions showed no model or reasoning choices. Every provider's import
+wrote no `agentConfigId`, so the composer found no Provider capability cache and fell
+back to static catalogs, which Pi lacks; continuing also skipped the Provider's env,
+runtime overrides and extensions. Imports now list, load and bind through the
+machine's only same-type Provider, and listing backfills earlier imports. With none
+or several the session stays unbound: guessing between rows could move a native
+session onto another account or endpoint. Listing through the same Provider keeps a
+Provider-set data directory consistent between import and continuation. The model
+list still needs that Provider's capability cache.
+
 ## Verification limits
 
 The landing filters legacy providers by their own machine's `builtinPi` capability.

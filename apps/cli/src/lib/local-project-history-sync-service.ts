@@ -23,6 +23,7 @@ import type { SessionInfo } from '@agentclientprotocol/sdk';
 
 import {
   type ACPSessionId,
+  type AgentConfigMeta,
   type ExternalAcpHistorySyncMeta,
   getMachineRoomId,
   type LocalProjectHistoryCatalogItem,
@@ -54,6 +55,7 @@ import {
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { readMachineLocalProjects, upsertMachineLocalProject } from '@/lib/local-project-meta';
 import {
+  type HistoryProviderLaunch,
   listHistorySessionsForLocalProject,
   loadHistorySessionReplay,
   MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS,
@@ -442,6 +444,28 @@ export class LocalProjectHistorySyncService {
     this.providerKey = getLocalProjectHistoryProviderKey(provider);
   }
 
+  private soleAgentConfig?: Promise<AgentConfigMeta | undefined>;
+
+  private boundAgentConfig(): Promise<AgentConfigMeta | undefined> {
+    return (this.soleAgentConfig ??= this.manager.findSoleAgentConfig(
+      this.provider.cliType,
+      this.provider.agentType,
+      this.context.machineId
+    ));
+  }
+
+  private async launchProvider(): Promise<HistoryProviderLaunch> {
+    const config = await this.boundAgentConfig();
+    return config
+      ? {
+          ...this.provider,
+          customAcp: config.customAcp,
+          runtimeOverrides: config.runtimeOverrides,
+          env: config.env,
+        }
+      : this.provider;
+  }
+
   async syncLocalProject(args: {
     localProjectId: LocalProjectId;
     rootPath: string;
@@ -553,7 +577,7 @@ export class LocalProjectHistorySyncService {
           snapshot.existingByImportKey.get(importKey);
         if (!existing) {
           const replayNotifications = await loadHistorySessionReplay({
-            provider: this.provider,
+            provider: await this.launchProvider(),
             rootPath: args.rootPath,
             acpSessionId,
             logger: this.logger,
@@ -697,7 +721,7 @@ export class LocalProjectHistorySyncService {
 
     const acpSessionId = args.acpSessionId as unknown as ACPSessionId;
     const replayNotifications = await loadHistorySessionReplay({
-      provider: this.provider,
+      provider: await this.launchProvider(),
       rootPath: args.rootPath,
       acpSessionId,
       logger: this.logger,
@@ -790,7 +814,7 @@ export class LocalProjectHistorySyncService {
     requiredSessionIds?: readonly string[];
   }): Promise<HistoryCatalogSnapshot> {
     const catalog = await listHistorySessionsForLocalProject({
-      provider: this.provider,
+      provider: await this.launchProvider(),
       rootPath: args.rootPath,
       logger: this.logger,
       requiredSessionIds: args.requiredSessionIds,
@@ -803,6 +827,19 @@ export class LocalProjectHistorySyncService {
       this.provider,
       args.localProjectId
     );
+    const agentConfig = await this.boundAgentConfig();
+    if (agentConfig) {
+      for (const [key, existing] of existingByImportKey) {
+        if (existing.meta.agentConfigId) continue;
+        await this.manager.repo.upsertDocMeta(getSessionRoomId(existing.sessionId), {
+          agentConfigId: agentConfig.id,
+        } satisfies Partial<SessionMeta>);
+        existingByImportKey.set(key, {
+          ...existing,
+          meta: { ...existing.meta, agentConfigId: agentConfig.id },
+        });
+      }
+    }
 
     return { sessions: catalog.sessions, existingByImportKey };
   }
@@ -920,6 +957,7 @@ export class LocalProjectHistorySyncService {
     const roomId = getSessionRoomId(sessionId);
     const nowMs = getServerNow();
     const lastMessageAt = resolveSourceUpdatedAtMs(args.info, nowMs);
+    const agentConfig = await this.boundAgentConfig();
     const meta: SessionMeta = {
       id: sessionId,
       machineId: this.context.machineId,
@@ -930,6 +968,7 @@ export class LocalProjectHistorySyncService {
       origin: 'external-acp',
       cliType: this.provider.cliType,
       agentType: this.provider.agentType,
+      ...(agentConfig ? { agentConfigId: agentConfig.id } : {}),
       project: args.project,
       title: resolveSessionTitle(args.info, this.provider),
       // Imported titles are placeholders derived from provider data; allow the title
@@ -1001,7 +1040,7 @@ export class LocalProjectHistorySyncService {
     }
 
     const replayNotifications = await loadHistorySessionReplay({
-      provider: this.provider,
+      provider: await this.launchProvider(),
       rootPath: args.rootPath,
       acpSessionId: args.acpSessionId,
       logger: this.logger,

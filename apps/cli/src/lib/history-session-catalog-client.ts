@@ -13,6 +13,7 @@ import {
   mergeLoginShellEnv,
   resolveACPProcessLaunchAsync,
   withDefaultAcpPathEntries,
+  type ResolveACPSettingInput,
   type ResolvedACPProcessLaunch,
 } from '@/agent/setting';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
@@ -126,8 +127,12 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
   env: NodeJS.ProcessEnv;
 };
 
+/** Launch settings of the Provider row a history import binds to, when there is one. */
+export type HistoryProviderLaunch = LocalProjectHistoryProvider &
+  Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'env'>;
+
 export async function resolveHistoryACPProcessLaunch(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   env?: NodeJS.ProcessEnv;
 }): Promise<ResolvedHistoryACPProcessLaunch> {
   const launch = await resolveACPProcessLaunchAsync(args.provider);
@@ -138,11 +143,14 @@ export async function resolveHistoryACPProcessLaunch(args: {
 }
 
 async function createHistoryAcpConnection(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   workdir: string;
   logger: Logger;
 }): Promise<HistoryAcpConnection> {
-  const launch = await resolveHistoryACPProcessLaunch({ provider: args.provider });
+  const launch = await resolveHistoryACPProcessLaunch({
+    provider: args.provider,
+    env: { ...process.env, ...args.provider.env },
+  });
   // Same ENOENT trap as startLocalAcpAgent: a GUI/daemon launch inherits a
   // minimal PATH, so overlay the login-shell env (+ default fallback dirs) before
   // spawning the history-sync agent binary.
@@ -327,7 +335,7 @@ export function dedupeHistorySessionsById(sessions: SessionInfo[]): SessionInfo[
 }
 
 export async function listHistorySessionsForLocalProject(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   rootPath: string;
   logger: Logger;
   requiredSessionIds?: readonly string[];
@@ -376,7 +384,7 @@ export async function listHistorySessionsForLocalProject(args: {
 }
 
 export async function loadHistorySessionReplay(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   rootPath: string;
   acpSessionId: ACPSessionId;
   logger: Logger;

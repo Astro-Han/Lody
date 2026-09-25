@@ -1,5 +1,12 @@
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
+
+const catalogClient = vi.hoisted(() => ({ list: vi.fn() }));
+vi.mock('../src/lib/history-session-catalog-client', () => ({
+  listHistorySessionsForLocalProject: catalogClient.list,
+  loadHistorySessionReplay: vi.fn(),
+  MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS: 100,
+}));
 import {
   getExternalAcpHistoryImportKey,
   getSessionRoomId,
@@ -18,6 +25,8 @@ import {
 } from '@lody/shared/session-data';
 import type {
   ACPSessionId,
+  AgentConfigId,
+  AgentConfigMeta,
   ExternalAcpHistorySyncMeta,
   LocalProjectHistoryCatalogItem,
   LocalProjectId,
@@ -74,6 +83,19 @@ function sessionMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
       status: 'metadata_only',
     },
     ...overrides,
+  };
+}
+
+function agentConfig(): AgentConfigMeta {
+  return {
+    id: 'config-1' as AgentConfigId,
+    machineId,
+    name: 'Codex',
+    description: undefined,
+    cliType: provider.cliType,
+    agentType: provider.agentType,
+    runtimeOverrides: { codexPath: '/opt/codex' },
+    env: { CODEX_HOME: '/profiles/work' },
   };
 }
 
@@ -823,6 +845,8 @@ describe('history import persistence', () => {
       failMetaWrite?: boolean;
       remoteSyncConfirmed?: boolean;
       rejectImport?: boolean;
+      agentConfig?: AgentConfigMeta;
+      existing?: Array<{ sessionId: SessionId; meta: SessionMeta }>;
     } = {}
   ) {
     let storedHistory: SessionHistoryInput[] = [];
@@ -870,10 +894,22 @@ describe('history import persistence', () => {
         });
     const deleteDoc = vi.fn(async () => undefined);
     const cleanSessionDoc = vi.fn(async () => undefined);
+    const existing = options.existing ?? [];
     const manager = {
-      repo: { upsertDocMeta, deleteDoc },
+      repo: {
+        upsertDocMeta,
+        deleteDoc,
+        getMeta: () => ({
+          scan: async () =>
+            existing.map(({ sessionId }) => ({ key: ['m', getSessionRoomId(sessionId)] })),
+        }),
+        getDocMeta: async (roomId: string) => ({
+          meta: existing.find(({ sessionId }) => getSessionRoomId(sessionId) === roomId)?.meta,
+        }),
+      },
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       cleanSessionDoc,
+      findSoleAgentConfig: vi.fn(async () => options.agentConfig),
     };
     const logger = {
       debug: vi.fn(),
@@ -901,12 +937,21 @@ describe('history import persistence', () => {
         }): Promise<{ sessionId: SessionId; meta: SessionMeta }>;
       }
     ).importNewSession.bind(service);
+    const listCatalogSnapshot = (
+      service as unknown as {
+        listCatalogSnapshot(args: {
+          localProjectId: LocalProjectId;
+          rootPath: string;
+        }): Promise<{ existingByImportKey: Map<string, { meta: SessionMeta }> }>;
+      }
+    ).listCatalogSnapshot.bind(service);
 
     return {
       calls,
       cleanSessionDoc,
       deleteDoc,
       importNewSession,
+      listCatalogSnapshot,
       logger,
       sessionDoc,
       upsertDocMeta,
@@ -948,6 +993,51 @@ describe('history import persistence', () => {
       preserveStatus: true,
     });
     expect(harness.deleteDoc).not.toHaveBeenCalled();
+  });
+
+  it("binds a new import to the machine's only Provider of that type, and only then", async () => {
+    const bound = createHarness({ agentConfig: agentConfig() });
+    await bound.importNewSession(importArgs());
+    expect(bound.upsertDocMeta.mock.calls[0]?.[1]).toMatchObject({ agentConfigId: 'config-1' });
+
+    const unbound = createHarness();
+    await unbound.importNewSession(importArgs());
+    expect(unbound.upsertDocMeta.mock.calls[0]?.[1]).not.toHaveProperty('agentConfigId');
+  });
+
+  it('lists through the bound Provider and backfills earlier unbound imports', async () => {
+    catalogClient.list.mockResolvedValue({ sessions: [], queryPaths: [] });
+    const unbound = { sessionId: 'session-1' as SessionId, meta: sessionMeta() };
+    const other = {
+      sessionId: 'session-2' as SessionId,
+      meta: sessionMeta({
+        agentConfigId: 'config-2' as AgentConfigId,
+        externalHistory: {
+          ...sessionMeta().externalHistory!,
+          sourceAcpSessionId: 'acp-2' as ACPSessionId,
+        },
+      }),
+    };
+    const harness = createHarness({ agentConfig: agentConfig(), existing: [unbound, other] });
+
+    const { existingByImportKey } = await harness.listCatalogSnapshot({
+      localProjectId,
+      rootPath: '/project',
+    });
+
+    expect(catalogClient.list.mock.calls[0]?.[0].provider).toEqual({
+      ...provider,
+      customAcp: undefined,
+      runtimeOverrides: { codexPath: '/opt/codex' },
+      env: { CODEX_HOME: '/profiles/work' },
+    });
+    expect(harness.upsertDocMeta.mock.calls).toEqual([
+      [getSessionRoomId(unbound.sessionId), { agentConfigId: 'config-1' }],
+    ]);
+    expect([...existingByImportKey.values()].map(({ meta }) => meta.agentConfigId).sort()).toEqual([
+      'config-1',
+      'config-2',
+    ]);
   });
 
   it('rejects a memory-backed import explicitly instead of faking the binding', async () => {

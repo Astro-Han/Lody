@@ -101,6 +101,7 @@ async function createHarness() {
       return doc;
     },
     cleanSessionDoc: async () => {},
+    findSoleAgentConfig: async () => undefined,
   };
   const service = new LocalProjectHistorySyncService(
     manager as unknown as LoroDocumentManager,

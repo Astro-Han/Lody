@@ -72,7 +72,7 @@ including those started in Pi's own terminal UI. The adapter lists Pi's native
 session files for the project directory without starting Pi, and loading one
 replays its current branch: user text and images, assistant text and thinking,
 tool calls with their final status, and todo checklists where they occurred. The
-importer keeps text only and counts other content as dropped. Compaction summaries
+importer keeps user text only and counts user images as dropped. Compaction summaries
 and abandoned branches are not replayed. The imported session keeps the native
 file path as its identity, so continuing it resumes that file; a missing file
 fails the resume rather than starting an empty session.
@@ -80,6 +80,14 @@ fails the resume rather than starting an empty session.
 Continuing a builtin Pi chat uses session resume, never load, so an ordinary
 resume does not replay history. Import requires a published runtime containing
 the adapter revision that advertises session list and load.
+
+An import binds to the machine's only Provider of the same type. Listing and
+loading use that Provider's launch settings, and both new and earlier imported
+sessions record it, so continuing applies its environment, runtime overrides and
+Pi extensions, and the composer offers its model and reasoning choices. With no
+such Provider, or several, the session stays unbound and continues on that type's
+default launch. An existing binding is never replaced. This applies to every
+provider's history import, not only Pi.
 
 Known limit: syncing again after continuing an imported session in Lody, or
 while Pi is mid-turn, can report a sync conflict. Refresh requires the replay to
