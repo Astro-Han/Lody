@@ -69,15 +69,20 @@ continued or mid-turn session can still conflict: Lody-only items (attachments,
 task cards, retry/compaction activity) are absent from Pi's file. That is the shared
 importer's prefix model, not a Pi adapter gap, and is left for a separate change.
 
-Imported Pi sessions showed no model or reasoning choices. Every provider's import
-wrote no `agentConfigId`, so the composer found no Provider capability cache and fell
-back to static catalogs, which Pi lacks; continuing also skipped the Provider's env,
-runtime overrides and extensions. Imports now list, load and bind through the
-machine's only same-type Provider, and listing backfills earlier imports. With none
-or several the session stays unbound: guessing between rows could move a native
-session onto another account or endpoint. Listing through the same Provider keeps a
-Provider-set data directory consistent between import and continuation. The model
-list still needs that Provider's capability cache.
+[#972](https://github.com/LodyAI/Lody/issues/972) (imported Pi sessions show no model
+choices and lose their model) has one cause across providers: import creates a
+continuable session but skipped two facts a Lody-started session records while
+running, its Provider (`agentConfigId`) and native selection (`acpRuntimeConfig`),
+although listing and `session/load` already had both. Imports now list, load and bind
+through the machine's only same-type Provider, backfilling earlier imports. With none
+or several they stay unbound, because guessing could move a native session to another
+account or endpoint; listing through the bound Provider keeps a Provider-set data
+directory such as `CODEX_HOME` consistent with continuation. Every import write,
+refresh included, records the load-reported selection for the last imported user turn
+through `applyAcpRuntimeConfigPatch`, whose fence keeps a newer Lody turn's selection;
+refresh must write because appended turns invalidate the old one. Unchanged: Codex's
+read-only history reports no selection, and a composer without a selection still sends
+its guessed defaults.
 
 ## Verification limits
 

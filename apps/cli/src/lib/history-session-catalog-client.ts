@@ -25,7 +25,9 @@ import {
   type ACPSessionId,
   getLocalProjectHistoryProviderKey,
   type LocalProjectHistoryProvider,
+  type SessionAcpRuntimeConfigPatch,
 } from '@lody/shared';
+import { getAcpRuntimeConfigPatchFromOptions } from '@/lib/acp/runtime-config';
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 
 const ACP_OPERATION_TIMEOUT_MS = 120_000;
@@ -127,7 +129,6 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
   env: NodeJS.ProcessEnv;
 };
 
-/** Launch settings of the Provider row a history import binds to, when there is one. */
 export type HistoryProviderLaunch = LocalProjectHistoryProvider &
   Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'env'>;
 
@@ -263,7 +264,7 @@ export async function requestHistorySessionReplay(args: {
   cwd: string;
   connection: HistoryReplayConnection;
   initResponse: acp.InitializeResponse;
-}): Promise<void> {
+}): Promise<SessionAcpRuntimeConfigPatch | undefined> {
   if (args.provider.cliType === 'builtin' && args.provider.agentType === 'codex') {
     const method = getLodyReadSessionHistoryMethod(args.initResponse);
     if (!method) {
@@ -278,13 +279,13 @@ export async function requestHistorySessionReplay(args: {
       }),
       `${getProviderLabel(args.provider)} ACP session history read (${args.acpSessionId})`
     );
-    return;
+    return undefined;
   }
 
   if (!args.initResponse.agentCapabilities?.loadSession) {
     throw new Error(`${getProviderLabel(args.provider)} ACP agent does not advertise loadSession`);
   }
-  await withTimeout(
+  const response = await withTimeout(
     args.connection.loadSession({
       sessionId: args.acpSessionId as unknown as acp.SessionId,
       cwd: args.cwd,
@@ -292,6 +293,7 @@ export async function requestHistorySessionReplay(args: {
     }),
     `${getProviderLabel(args.provider)} ACP loadSession (${args.acpSessionId})`
   );
+  return getAcpRuntimeConfigPatchFromOptions(args.acpSessionId, response.configOptions ?? []);
 }
 
 export async function listPaginatedHistorySessions(
@@ -388,7 +390,10 @@ export async function loadHistorySessionReplay(args: {
   rootPath: string;
   acpSessionId: ACPSessionId;
   logger: Logger;
-}): Promise<AcpSessionNotification[]> {
+}): Promise<{
+  notifications: AcpSessionNotification[];
+  runtimeConfig?: SessionAcpRuntimeConfigPatch;
+}> {
   const cwd = path.resolve(args.rootPath);
   const { agentProcess, connection, collector, initResponse } = await createHistoryAcpConnection({
     provider: args.provider,
@@ -397,14 +402,14 @@ export async function loadHistorySessionReplay(args: {
   });
 
   try {
-    await requestHistorySessionReplay({
+    const runtimeConfig = await requestHistorySessionReplay({
       provider: args.provider,
       acpSessionId: args.acpSessionId,
       cwd,
       connection,
       initResponse,
     });
-    return collector.notifications;
+    return { notifications: collector.notifications, runtimeConfig };
   } catch (error) {
     const message = `Failed to load ${getProviderLabel(args.provider)} session ${
       args.acpSessionId

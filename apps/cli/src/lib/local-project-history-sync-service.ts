@@ -34,6 +34,7 @@ import {
   type LocalProjectHistoryProvider,
   type LocalProjectId,
   type MachineId,
+  type SessionAcpRuntimeConfigPatch,
   type SessionHistoryInput,
   type SessionMeta,
   type WorkspaceId,
@@ -110,6 +111,7 @@ export type MaterializedReplay = {
   droppedNotifications: number;
   /** Canonical-hash version `turnHashes`/`replayDigest` were computed with. */
   hashVersion: number;
+  runtimeConfig?: SessionAcpRuntimeConfigPatch;
 };
 
 type HistoryCatalogSnapshot = {
@@ -167,12 +169,20 @@ export function materializeReplay(args: {
   };
 }
 
+/** The document rejects the imported runtime selection once a Lody turn is newer. */
 async function applyBoundHistoryImport(
   sessionDoc: SessionDocument,
-  input: HistoryImportInput
+  input: HistoryImportInput & { replay: MaterializedReplay }
 ): Promise<number> {
   const result = await sessionDoc.sessionData.commands.applyHistoryImport(input);
-  if (result.status === 'accepted') return result.appended;
+  if (result.status === 'accepted') {
+    const { history, runtimeConfig } = input.replay;
+    const lastUserTurn = [...history].reverse().find((entry) => entry.role === 'user');
+    if (runtimeConfig && lastUserTurn) {
+      sessionDoc.applyAcpRuntimeConfigPatch(lastUserTurn.id, runtimeConfig);
+    }
+    return result.appended;
+  }
   if (result.status === 'rejected') {
     if (
       result.reason.code === 'prefix_mismatch' ||
@@ -466,6 +476,25 @@ export class LocalProjectHistorySyncService {
       : this.provider;
   }
 
+  private async loadReplay(
+    rootPath: string,
+    acpSessionId: ACPSessionId
+  ): Promise<MaterializedReplay> {
+    const { notifications, runtimeConfig } = await loadHistorySessionReplay({
+      provider: await this.launchProvider(),
+      rootPath,
+      acpSessionId,
+      logger: this.logger,
+    });
+    const replay = materializeReplay({
+      provider: this.provider,
+      acpSessionId,
+      replayNotifications: notifications,
+      userId: this.context.userId,
+    });
+    return { ...replay, runtimeConfig };
+  }
+
   async syncLocalProject(args: {
     localProjectId: LocalProjectId;
     rootPath: string;
@@ -576,18 +605,7 @@ export class LocalProjectHistorySyncService {
           (await this.findExistingHistorySession(args.localProjectId, selectedId)) ??
           snapshot.existingByImportKey.get(importKey);
         if (!existing) {
-          const replayNotifications = await loadHistorySessionReplay({
-            provider: await this.launchProvider(),
-            rootPath: args.rootPath,
-            acpSessionId,
-            logger: this.logger,
-          });
-          const materialized = materializeReplay({
-            provider: this.provider,
-            acpSessionId,
-            replayNotifications,
-            userId: this.context.userId,
-          });
+          const materialized = await this.loadReplay(args.rootPath, acpSessionId);
           const importedSession = await this.importNewSession({
             info,
             acpSessionId,
@@ -720,18 +738,7 @@ export class LocalProjectHistorySyncService {
     }
 
     const acpSessionId = args.acpSessionId as unknown as ACPSessionId;
-    const replayNotifications = await loadHistorySessionReplay({
-      provider: await this.launchProvider(),
-      rootPath: args.rootPath,
-      acpSessionId,
-      logger: this.logger,
-    });
-    const materialized = materializeReplay({
-      provider: this.provider,
-      acpSessionId,
-      replayNotifications,
-      userId: this.context.userId,
-    });
+    const materialized = await this.loadReplay(args.rootPath, acpSessionId);
 
     const latestRecord = await this.manager.repo.getDocMeta(roomId);
     if (!latestRecord?.meta || isLoroRepoDocDeleted(latestRecord)) {
@@ -1039,18 +1046,7 @@ export class LocalProjectHistorySyncService {
       return 'skipped';
     }
 
-    const replayNotifications = await loadHistorySessionReplay({
-      provider: await this.launchProvider(),
-      rootPath: args.rootPath,
-      acpSessionId: args.acpSessionId,
-      logger: this.logger,
-    });
-    const materialized = materializeReplay({
-      provider: this.provider,
-      acpSessionId: args.acpSessionId,
-      replayNotifications,
-      userId: this.context.userId,
-    });
+    const materialized = await this.loadReplay(args.rootPath, args.acpSessionId);
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.existing.sessionId);
     let appended = 0;
     try {

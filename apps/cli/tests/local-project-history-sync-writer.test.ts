@@ -6,6 +6,7 @@ import {
   getSessionRoomId,
   sessionDocSchema,
   parseSessionNotification,
+  resolveSessionAcpRuntimeConfig,
   type AcpSessionNotification,
   type LocalProjectId,
   type MachineId,
@@ -13,7 +14,12 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import { HASH_VERSION_V1, hashHistoryEntryForVersion, hashText } from '@lody/shared/session-data';
+import {
+  HASH_VERSION_V1,
+  hashHistoryEntryForVersion,
+  hashText,
+  readSessionHistory,
+} from '@lody/shared/session-data';
 import type { SessionHistoryInput } from '@lody/shared';
 
 import { LocalProjectHistorySyncService } from '../src/lib/local-project-history-sync-service';
@@ -111,7 +117,7 @@ async function createHarness() {
   );
 
   let revision = 0;
-  async function importTurns(turns: number) {
+  async function importTurns(turns: number, modelId?: string) {
     revision += 1;
     providerMocks.list.mockResolvedValue({
       sessions: [
@@ -122,7 +128,10 @@ async function createHarness() {
         },
       ],
     });
-    providerMocks.replay.mockResolvedValue(notifications(turns));
+    providerMocks.replay.mockResolvedValue({
+      notifications: notifications(turns),
+      runtimeConfig: modelId && { acpSessionId, modelId, configOptionValues: { model: modelId } },
+    });
     return service.importLocalProjectSessions({
       localProjectId,
       rootPath,
@@ -198,6 +207,22 @@ describe('history import through the real SessionDocument writer', () => {
       expect((await doc.getExternalHistoryCursor())?.importedTurnHashes).toHaveLength(4);
     }
   );
+
+  it("keeps the source session's model as the composer baseline across import and refresh", async () => {
+    const h = await createHarness();
+    await h.importTurns(1, 'model-a');
+    const { doc } = h.getOnlyDoc();
+    const baselineModel = () =>
+      resolveSessionAcpRuntimeConfig(
+        readSessionHistory(doc.sessionData.history),
+        [],
+        doc.mirror?.getState().acpRuntimeConfig
+      )?.modelId;
+    expect(baselineModel()).toBe('model-a');
+
+    expect((await h.importTurns(2, 'model-b')).summary.refreshed).toBe(1);
+    expect(baselineModel()).toBe('model-b');
+  });
 
   it('does not advance the cursor when the new history command fails validation', async () => {
     const h = await createHarness();
