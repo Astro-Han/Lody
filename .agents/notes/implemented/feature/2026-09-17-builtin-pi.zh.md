@@ -55,9 +55,10 @@ Node 上的 CLI 将配置迁移成无法启动的运行时。
 [#972](https://github.com/LodyAI/Lody/issues/972)（导入的 Pi 会话没有模型选项，且丢失原模型）在所有
 Provider 上是同一个根因：导入创建了可继续的会话，却跳过了 Lody 自己启动的会话在运行中记录的两项事实，
 即 Provider（`agentConfigId`）和原生设置（`acpRuntimeConfig`），而列举和 `session/load` 本来已拿到这两项。
-现在导入通过该机器上唯一的同类型 Provider 列举、加载并绑定，并为之前的导入补上绑定。没有或有多个时保持
-未绑定，因为猜测可能把原生会话换到另一个账号或端点；通过绑定的 Provider 列举，使 `CODEX_HOME` 这类
-Provider 自设的数据目录与继续对话一致。每次导入写入（含刷新）都通过 `applyAcpRuntimeConfigPatch` 把
+现在新导入通过该机器上唯一的同类型 Provider 列举、加载并绑定。没有或有多个时保持未绑定，因为猜测可能
+把原生会话换到另一个账号或端点。会话必须用继续对话时的启动方式加载，否则 `CODEX_HOME` 这类 Provider
+自设的数据目录会让刷新和继续对话指向不同的存储。因此刷新按会话自己的绑定加载，而不是当前唯一的 Provider；
+之前未绑定的导入只有被该 Provider 列出时才绑定。这两处缺口是对抗性评审在第一版中发现的。每次导入写入（含刷新）都通过 `applyAcpRuntimeConfigPatch` 把
 load 报告的设置记到最后一条导入用户消息上，它的 fence 保留更新的 Lody 消息的选择；刷新也必须写，因为
 追加轮次会使旧选择失效。未改变：Codex 的只读历史不报告设置；没有运行时选择的输入框仍会发送猜测的默认值。
 

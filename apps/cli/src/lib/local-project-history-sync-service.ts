@@ -454,18 +454,24 @@ export class LocalProjectHistorySyncService {
     this.providerKey = getLocalProjectHistoryProviderKey(provider);
   }
 
-  private soleAgentConfig?: Promise<AgentConfigMeta | undefined>;
+  private soleAgentConfigLookup?: Promise<AgentConfigMeta | undefined>;
 
-  private boundAgentConfig(): Promise<AgentConfigMeta | undefined> {
-    return (this.soleAgentConfig ??= this.manager.findSoleAgentConfig(
+  private soleAgentConfig(): Promise<AgentConfigMeta | undefined> {
+    return (this.soleAgentConfigLookup ??= this.manager.findSoleAgentConfig(
       this.provider.cliType,
       this.provider.agentType,
       this.context.machineId
     ));
   }
 
-  private async launchProvider(): Promise<HistoryProviderLaunch> {
-    const config = await this.boundAgentConfig();
+  /** Same rule as continuing the session: its bound Provider, else the default launch. */
+  private async sessionAgentConfig(meta: SessionMeta): Promise<AgentConfigMeta | null> {
+    return meta.agentConfigId
+      ? await this.manager.getAgentConfigById(meta.agentConfigId, this.context.machineId)
+      : null;
+  }
+
+  private launchProvider(config: AgentConfigMeta | null | undefined): HistoryProviderLaunch {
     return config
       ? {
           ...this.provider,
@@ -478,10 +484,11 @@ export class LocalProjectHistorySyncService {
 
   private async loadReplay(
     rootPath: string,
-    acpSessionId: ACPSessionId
+    acpSessionId: ACPSessionId,
+    config: AgentConfigMeta | null | undefined
   ): Promise<MaterializedReplay> {
     const { notifications, runtimeConfig } = await loadHistorySessionReplay({
-      provider: await this.launchProvider(),
+      provider: this.launchProvider(config),
       rootPath,
       acpSessionId,
       logger: this.logger,
@@ -605,7 +612,11 @@ export class LocalProjectHistorySyncService {
           (await this.findExistingHistorySession(args.localProjectId, selectedId)) ??
           snapshot.existingByImportKey.get(importKey);
         if (!existing) {
-          const materialized = await this.loadReplay(args.rootPath, acpSessionId);
+          const materialized = await this.loadReplay(
+            args.rootPath,
+            acpSessionId,
+            await this.soleAgentConfig()
+          );
           const importedSession = await this.importNewSession({
             info,
             acpSessionId,
@@ -738,7 +749,11 @@ export class LocalProjectHistorySyncService {
     }
 
     const acpSessionId = args.acpSessionId as unknown as ACPSessionId;
-    const materialized = await this.loadReplay(args.rootPath, acpSessionId);
+    const materialized = await this.loadReplay(
+      args.rootPath,
+      acpSessionId,
+      await this.sessionAgentConfig(meta)
+    );
 
     const latestRecord = await this.manager.repo.getDocMeta(roomId);
     if (!latestRecord?.meta || isLoroRepoDocDeleted(latestRecord)) {
@@ -820,8 +835,9 @@ export class LocalProjectHistorySyncService {
     rootPath: string;
     requiredSessionIds?: readonly string[];
   }): Promise<HistoryCatalogSnapshot> {
+    const agentConfig = await this.soleAgentConfig();
     const catalog = await listHistorySessionsForLocalProject({
-      provider: await this.launchProvider(),
+      provider: this.launchProvider(agentConfig),
       rootPath: args.rootPath,
       logger: this.logger,
       requiredSessionIds: args.requiredSessionIds,
@@ -834,10 +850,12 @@ export class LocalProjectHistorySyncService {
       this.provider,
       args.localProjectId
     );
-    const agentConfig = await this.boundAgentConfig();
     if (agentConfig) {
+      // Bind only sessions this Provider lists, so continuing through it can find them.
+      const listed = new Set<string>(catalog.sessions.map((session) => session.sessionId));
       for (const [key, existing] of existingByImportKey) {
-        if (existing.meta.agentConfigId) continue;
+        const sourceId = existing.meta.externalHistory?.sourceAcpSessionId;
+        if (existing.meta.agentConfigId || !sourceId || !listed.has(sourceId)) continue;
         await this.manager.repo.upsertDocMeta(getSessionRoomId(existing.sessionId), {
           agentConfigId: agentConfig.id,
         } satisfies Partial<SessionMeta>);
@@ -964,7 +982,7 @@ export class LocalProjectHistorySyncService {
     const roomId = getSessionRoomId(sessionId);
     const nowMs = getServerNow();
     const lastMessageAt = resolveSourceUpdatedAtMs(args.info, nowMs);
-    const agentConfig = await this.boundAgentConfig();
+    const agentConfig = await this.soleAgentConfig();
     const meta: SessionMeta = {
       id: sessionId,
       machineId: this.context.machineId,
@@ -1046,7 +1064,11 @@ export class LocalProjectHistorySyncService {
       return 'skipped';
     }
 
-    const materialized = await this.loadReplay(args.rootPath, args.acpSessionId);
+    const materialized = await this.loadReplay(
+      args.rootPath,
+      args.acpSessionId,
+      await this.sessionAgentConfig(args.existing.meta)
+    );
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.existing.sessionId);
     let appended = 0;
     try {

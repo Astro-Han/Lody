@@ -81,14 +81,17 @@ Continuing a builtin Pi chat uses session resume, never load, so an ordinary
 resume does not replay history. Import requires a published runtime containing
 the adapter revision that advertises session list and load.
 
-An imported session binds to the machine's only Provider of the same type, and
-listing and loading use that Provider's launch settings; earlier imports bind when
-their project next syncs. With none or several it stays unbound, and an existing
-binding is never replaced. Every import write records the model, mode and options
-that `session/load` reports as the runtime selection of the last imported user
-turn; a newer Lody turn keeps its own. A recorded model the bound Provider's catalog
-does not list still falls back to the catalog default. This applies to every
-provider's history import; Codex's read-only history method reports no selection.
+A new import binds to the machine's only Provider of the same type, and listing
+and importing use that Provider's launch settings; an earlier unbound import binds
+when that Provider lists it on a later sync. With none or several it stays unbound,
+and an existing binding is never replaced. Refreshing an imported session loads it
+the way continuing does: through its bound Provider, else the default launch.
+Every import write records the model, mode and options that `session/load`
+reports as the runtime selection of the last imported user turn; a newer Lody turn
+keeps its own. An earlier import records it only when its source next changes. A
+recorded model the bound Provider's catalog does not list still falls back to the
+catalog default. This applies to every provider's history import; Codex's
+read-only history method reports no selection.
 
 Known limit: syncing again after continuing an imported session in Lody, or
 while Pi is mid-turn, can report a sync conflict. Refresh requires the replay to

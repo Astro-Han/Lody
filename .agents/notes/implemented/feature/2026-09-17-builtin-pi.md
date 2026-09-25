@@ -73,11 +73,14 @@ importer's prefix model, not a Pi adapter gap, and is left for a separate change
 choices and lose their model) has one cause across providers: import creates a
 continuable session but skipped two facts a Lody-started session records while
 running, its Provider (`agentConfigId`) and native selection (`acpRuntimeConfig`),
-although listing and `session/load` already had both. Imports now list, load and bind
-through the machine's only same-type Provider, backfilling earlier imports. With none
-or several they stay unbound, because guessing could move a native session to another
-account or endpoint; listing through the bound Provider keeps a Provider-set data
-directory such as `CODEX_HOME` consistent with continuation. Every import write,
+although listing and `session/load` already had both. New imports list, load and bind
+through the machine's only same-type Provider. With none or several they stay unbound,
+because guessing could move a native session to another account or endpoint. A
+session must be loaded with the launch it continues with, or a Provider-set data
+directory such as `CODEX_HOME` points refresh and continuation at different stores.
+So refresh loads through the session's own binding, not the current sole Provider,
+and an earlier unbound import is bound only when that Provider lists it; adversarial
+review found both gaps in the first version. Every import write,
 refresh included, records the load-reported selection for the last imported user turn
 through `applyAcpRuntimeConfigPatch`, whose fence keeps a newer Lody turn's selection;
 refresh must write because appended turns invalidate the old one. Unchanged: Codex's

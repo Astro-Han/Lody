@@ -939,10 +939,9 @@ describe('history import persistence', () => {
     ).importNewSession.bind(service);
     const listCatalogSnapshot = (
       service as unknown as {
-        listCatalogSnapshot(args: {
-          localProjectId: LocalProjectId;
-          rootPath: string;
-        }): Promise<{ existingByImportKey: Map<string, { meta: SessionMeta }> }>;
+        listCatalogSnapshot(args: { localProjectId: LocalProjectId; rootPath: string }): Promise<{
+          existingByImportKey: Map<string, { sessionId: SessionId; meta: SessionMeta }>;
+        }>;
       }
     ).listCatalogSnapshot.bind(service);
 
@@ -1005,20 +1004,28 @@ describe('history import persistence', () => {
     expect(unbound.upsertDocMeta.mock.calls[0]?.[1]).not.toHaveProperty('agentConfigId');
   });
 
-  it('lists through the bound Provider and backfills earlier unbound imports', async () => {
-    catalogClient.list.mockResolvedValue({ sessions: [], queryPaths: [] });
-    const unbound = { sessionId: 'session-1' as SessionId, meta: sessionMeta() };
-    const other = {
-      sessionId: 'session-2' as SessionId,
+  it('lists through the bound Provider and backfills only earlier imports it lists', async () => {
+    const imported = (sessionId: string, source: string, meta: Partial<SessionMeta> = {}) => ({
+      sessionId: sessionId as SessionId,
       meta: sessionMeta({
-        agentConfigId: 'config-2' as AgentConfigId,
+        ...meta,
         externalHistory: {
           ...sessionMeta().externalHistory!,
-          sourceAcpSessionId: 'acp-2' as ACPSessionId,
+          sourceAcpSessionId: source as ACPSessionId,
         },
       }),
-    };
-    const harness = createHarness({ agentConfig: agentConfig(), existing: [unbound, other] });
+    });
+    const unbound = imported('session-1', 'acp-1');
+    const other = imported('session-2', 'acp-2', { agentConfigId: 'config-2' as AgentConfigId });
+    const unlisted = imported('session-3', 'acp-3');
+    catalogClient.list.mockResolvedValue({
+      sessions: [{ sessionId: 'acp-1' }, { sessionId: 'acp-2' }],
+      queryPaths: [],
+    });
+    const harness = createHarness({
+      agentConfig: agentConfig(),
+      existing: [unbound, other, unlisted],
+    });
 
     const { existingByImportKey } = await harness.listCatalogSnapshot({
       localProjectId,
@@ -1034,10 +1041,14 @@ describe('history import persistence', () => {
     expect(harness.upsertDocMeta.mock.calls).toEqual([
       [getSessionRoomId(unbound.sessionId), { agentConfigId: 'config-1' }],
     ]);
-    expect([...existingByImportKey.values()].map(({ meta }) => meta.agentConfigId).sort()).toEqual([
-      'config-1',
-      'config-2',
-    ]);
+    expect(
+      Object.fromEntries(
+        [...existingByImportKey.values()].map(({ sessionId, meta }) => [
+          sessionId,
+          meta.agentConfigId,
+        ])
+      )
+    ).toEqual({ 'session-1': 'config-1', 'session-2': 'config-2', 'session-3': undefined });
   });
 
   it('rejects a memory-backed import explicitly instead of faking the binding', async () => {
