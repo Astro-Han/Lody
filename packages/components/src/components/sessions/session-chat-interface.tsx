@@ -154,7 +154,8 @@ import {
 } from '@/lib/session-conversation-preparation';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { openExternalUrl } from '@/lib/native-browser';
 import { ReadyForReviewStillDraftError, useGitHubPrDetails } from '@/hooks/use-github-pr-details';
 import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
 import type { AgentSelection } from '@/components/shared/agent-selector';
@@ -2336,15 +2337,28 @@ export const SessionChatInterface = memo(
       () => getSessionGitHubState(session, workspaceSession),
       [session, workspaceSession]
     );
+    const hasHostedGitHub = usePlatformCapability('githubIntegration');
     const latestPrNumber = getPullRequestNumber(latestPr);
     const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
+    const prLinkHandler = latestPr
+      ? hasHostedGitHub && onOpenPrTab && latestPrRepoFullName && latestPrNumber
+        ? () =>
+            onOpenPrTab({
+              prNumber: latestPrNumber,
+              repoFullName: latestPrRepoFullName,
+              headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
+            })
+        : () => {
+            void openExternalUrl(latestPr.url);
+          }
+      : undefined;
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
       workspaceId,
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
       headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-      enabled: canShowGitHubActions && hasExistingPr,
+      enabled: hasHostedGitHub && canShowGitHubActions && hasExistingPr,
     });
     const {
       data: activePrData,
@@ -4734,6 +4748,7 @@ export const SessionChatInterface = memo(
       const liveCiFailed = infoBarPrCiRuns?.some((run) => run.status === 'failure') ?? false;
       return resolveSessionInfoBarGitHubActionIds({
         canShowGitHubActions,
+        canMutatePr: hasHostedGitHub,
         hasExistingPr,
         workspaceDirty,
         workspaceUnpushed,
@@ -4811,6 +4826,7 @@ export const SessionChatInterface = memo(
       });
     }, [
       canShowGitHubActions,
+      hasHostedGitHub,
       handleCommitAndPush,
       handleCreateDraftPr,
       handleCreatePr,
@@ -5449,20 +5465,7 @@ export const SessionChatInterface = memo(
 
     const prBadge =
       canShowGitHubActions && latestPr ? (
-        <PullRequestBadge
-          pr={latestPr}
-          size="md"
-          onOpenTab={
-            onOpenPrTab && latestPrNumber && latestPrRepoFullName
-              ? () =>
-                  onOpenPrTab({
-                    prNumber: latestPrNumber,
-                    repoFullName: latestPrRepoFullName,
-                    headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-                  })
-              : undefined
-          }
-        />
+        <PullRequestBadge pr={latestPr} size="md" onOpenTab={prLinkHandler} />
       ) : null;
 
     const localProjectId = useMemo(() => {
@@ -5773,15 +5776,6 @@ export const SessionChatInterface = memo(
 
     const headerGitHubActions = headerActionsSlot !== undefined ? headerActionsSlot : prBadge;
 
-    const prLinkHandler =
-      onOpenPrTab && latestPr && latestPrRepoFullName && latestPrNumber
-        ? () =>
-            onOpenPrTab({
-              prNumber: latestPrNumber,
-              repoFullName: latestPrRepoFullName,
-              headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-            })
-        : undefined;
     // Pending permission requests live in the active (latest) assistant turn.
     const permissionSessionHistory = sessionHistory as unknown as Parameters<
       typeof FloatingPermissionRequest
