@@ -65,6 +65,20 @@ require that pinned runtime rather than an older cached fallback. The currently
 pinned artifact predates this protocol; enabling the UI requires publishing the
 new artifact with Windows binaries built from the same source revision.
 
+## Native history import
+
+Local project history sync can import Pi sessions created on the same machine,
+including those started in Pi's own terminal UI. The adapter lists Pi's native
+session files for the project directory without starting Pi, and loading one
+replays its current branch: user text, assistant text and thinking, tool calls with
+their final status, and todo checklists where they occurred. Images, compaction
+summaries and abandoned branches are not imported. The imported session keeps the
+native file path as its identity, so continuing it resumes that file.
+
+Continuing any Pi chat uses session resume, never load, so an ordinary resume
+does not replay history. Import requires a published runtime containing the
+adapter revision that advertises session list and load.
+
 ## Evidence
 
 - `packages/shared/src/pi-provider-migration.ts`

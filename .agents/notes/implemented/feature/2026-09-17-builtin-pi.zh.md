@@ -37,6 +37,16 @@ Node 上的 CLI 将配置迁移成无法启动的运行时。
 模块的产物；旧 manifest 故意不声明扩展能力。具体契约见更新后的草案 Spec。
 不引入新的执行器、配置目录副本或插件沙箱。
 
+## 历史导入后续工作（2026-09-25）
+
+历史同步报错 "does not advertise sessionCapabilities.list"：适配器只实现了 resume。
+[LodyAI/acp-extension-pi#4](https://github.com/LodyAI/acp-extension-pi/pull/4) 通过 Pi 自带的只读
+`SessionManager` 实现 `session/list`，`session/load` 则是 resume 之后按 `get_entries` 回放当前分支。
+选用标准 ACP load 而非 Codex 的 `_lody/session/history/read`，因为导入器无需按 Provider 分支即可消费它。
+声明 load 会让普通对话恢复回放整个会话，因此宿主对内置 Pi 与 Kimi 一样优先 resume。
+回放丢弃 resume 时的清单快照，改为在原位置发出每次待办快照；若在末尾追加当前清单，它会在
+轮次之间移动，破坏之后同步的前缀匹配。发布仍需新的运行时产物。
+
 ## 验证限制
 
 Landing 按各 Provider 所属机器的 `builtinPi` 能力筛选旧 Provider。
