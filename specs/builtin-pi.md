@@ -70,14 +70,22 @@ new artifact with Windows binaries built from the same source revision.
 Local project history sync can import Pi sessions created on the same machine,
 including those started in Pi's own terminal UI. The adapter lists Pi's native
 session files for the project directory without starting Pi, and loading one
-replays its current branch: user text, assistant text and thinking, tool calls with
-their final status, and todo checklists where they occurred. Images, compaction
-summaries and abandoned branches are not imported. The imported session keeps the
-native file path as its identity, so continuing it resumes that file.
+replays its current branch: user text and images, assistant text and thinking,
+tool calls with their final status, and todo checklists where they occurred. The
+importer keeps text only and counts other content as dropped. Compaction summaries
+and abandoned branches are not replayed. The imported session keeps the native
+file path as its identity, so continuing it resumes that file; a missing file
+fails the resume rather than starting an empty session.
 
-Continuing any Pi chat uses session resume, never load, so an ordinary resume
-does not replay history. Import requires a published runtime containing the
-adapter revision that advertises session list and load.
+Continuing a builtin Pi chat uses session resume, never load, so an ordinary
+resume does not replay history. Import requires a published runtime containing
+the adapter revision that advertises session list and load.
+
+Known limit: syncing again after continuing an imported session in Lody, or
+while Pi is mid-turn, can report a sync conflict. Refresh requires the replay to
+reproduce Lody's stored turns, but Lody-side attachments, subagent task cards,
+retry and compaction activity, and locally handled commands are not in Pi's file.
+This follows the shared importer design and also applies to other providers.
 
 ## Evidence
 

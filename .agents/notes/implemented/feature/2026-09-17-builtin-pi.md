@@ -60,6 +60,14 @@ already does for Kimi. Replay drops the resume-time checklist and emits todo
 snapshots in place; appending the current checklist would move it between turns
 and break prefix matching on later syncs. Release still needs a new runtime artifact.
 
+Adversarial review added three adapter rules: a missing session file fails
+resume/load, because Pi silently opens it as a new empty session; listing does not
+create Pi's default per-cwd directory; user images are replayed so the importer
+counts them as dropped, which blocks a lossy conflict replacement. Re-syncing a
+continued or mid-turn session can still conflict: Lody-only items (attachments,
+task cards, retry/compaction activity) are absent from Pi's file. That is the shared
+importer's prefix model, not a Pi adapter gap, and is left for a separate change.
+
 ## Verification limits
 
 The landing filters legacy providers by their own machine's `builtinPi` capability.
